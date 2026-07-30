@@ -1,0 +1,153 @@
+:root {
+  --tg-bg-color: #ffffff;
+  --tg-text-color: #111111;
+  --tg-hint-color: #8e8e93;
+  --tg-link-color: #2481cc;
+  --tg-button-color: #2481cc;
+  --tg-button-text-color: #ffffff;
+  --tg-secondary-bg-color: #f2f2f7;
+
+  --danger: #e03131;
+  --warning: #f08c00;
+  --success: #2f9e44;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--tg-bg-color);
+  color: var(--tg-text-color);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#app { min-height: 100%; padding-bottom: 80px; }
+
+.screen { display: none; padding: 16px; }
+.screen--active { display: block; }
+
+h1 { font-size: 20px; margin: 4px 0 16px; }
+h2 { font-size: 17px; margin: 0 0 12px; }
+p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; color: var(--tg-hint-color); margin-bottom: 4px; }
+.field input, .field select, .field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--tg-secondary-bg-color);
+  background: var(--tg-secondary-bg-color);
+  color: var(--tg-text-color);
+  font-size: 16px;
+}
+.field textarea { resize: vertical; min-height: 60px; }
+
+.btn {
+  display: inline-block;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: none;
+  background: var(--tg-button-color);
+  color: var(--tg-button-text-color);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.btn:disabled { opacity: 0.5; }
+.btn--secondary { background: var(--tg-secondary-bg-color); color: var(--tg-text-color); }
+.btn--danger { background: var(--danger); color: #fff; }
+
+.card {
+  background: var(--tg-secondary-bg-color);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.card:active { opacity: 0.85; }
+.card-title { font-weight: 600; margin-bottom: 2px; }
+.card-sub { font-size: 13px; color: var(--tg-hint-color); }
+
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+}
+.badge--available { background: var(--success); }
+.badge--rented { background: var(--warning); }
+.badge--repair { background: var(--danger); }
+.badge--retired { background: var(--tg-hint-color); }
+.badge--open { background: var(--danger); }
+.badge--in-repair { background: var(--warning); }
+.badge--resolved { background: var(--success); }
+.badge--closed { background: var(--tg-hint-color); }
+
+.error-box {
+  background: #ffe3e3;
+  color: var(--danger);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.empty {
+  color: var(--tg-hint-color);
+  text-align: center;
+  padding: 24px 0;
+  font-size: 14px;
+}
+
+.filters { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; }
+.filters select { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--tg-secondary-bg-color); background: var(--tg-secondary-bg-color); }
+
+.menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.menu-grid .card { text-align: center; padding: 22px 10px; }
+.menu-grid .card-title { font-size: 15px; }
+
+.qr-wrap { display: flex; flex-direction: column; align-items: center; padding: 20px 0; }
+.qr-wrap canvas { background: #fff; padding: 12px; border-radius: var(--radius); }
+.qr-id { font-family: monospace; font-size: 15px; margin-top: 10px; letter-spacing: 0.5px; }
+
+.section { margin-top: 20px; }
+.section-title { font-size: 13px; text-transform: uppercase; color: var(--tg-hint-color); margin-bottom: 8px; }
+
+.top-user { font-size: 13px; color: var(--tg-hint-color); margin-bottom: 10px; }
+
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+
+/* Кнопка-замена Telegram MainButton вне Telegram (обычный браузер) */
+.fallback-main-button {
+  display: none;
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+}
+
+/* Кнопка-замена Telegram BackButton вне Telegram */
+.fallback-back-button {
+  display: none;
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  z-index: 100;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: var(--tg-secondary-bg-color);
+  color: var(--tg-text-color);
+  font-size: 14px;
+  cursor: pointer;
+}

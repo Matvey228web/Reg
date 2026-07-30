@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Mifs Rent — учёт оборудования</title>
+<link rel="stylesheet" href="css/style.css" />
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="js/vendor/qrcode-generator.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- Экран: вход по PIN -->
+  <div class="screen" id="screen-login">
+    <h1>Mifs Rent</h1>
+    <p class="hint" id="login-greeting">Учёт оборудования на складе</p>
+    <div id="login-error"></div>
+    <form id="login-form">
+      <div class="field">
+        <label for="login-input">Логин</label>
+        <input id="login-input" type="text" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="pin-input">PIN-код</label>
+        <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn" id="login-submit">Войти</button>
+    </form>
+  </div>
+
+  <!-- Экран: главное меню -->
+  <div class="screen" id="screen-home">
+    <h1>Mifs Rent</h1>
+    <div class="top-user" id="home-user"></div>
+    <div class="menu-grid">
+      <div class="card" data-nav="catalog">
+        <div class="card-title">📦 Каталог</div>
+      </div>
+      <div class="card" data-nav="scan">
+        <div class="card-title">📷 Сканировать</div>
+      </div>
+      <div class="card" data-nav="repair">
+        <div class="card-title">🛠 Ремонт</div>
+      </div>
+      <div class="card" data-nav="clients">
+        <div class="card-title">👥 Клиенты</div>
+      </div>
+    </div>
+    <button class="btn btn--secondary" id="logout-btn" style="margin-top:20px;">Выйти</button>
+  </div>
+
+  <!-- Экран: каталог оборудования -->
+  <div class="screen" id="screen-catalog">
+    <h1>Каталог</h1>
+    <div class="filters">
+      <select id="catalog-filter-category"></select>
+      <select id="catalog-filter-status"></select>
+    </div>
+    <div id="catalog-list"></div>
+    <button class="btn btn--secondary" id="catalog-add-toggle" style="margin-top:6px;">+ Добавить оборудование</button>
+
+    <div id="catalog-add-form" style="display:none;" class="section">
+      <h2>Новое оборудование</h2>
+      <div id="catalog-add-error"></div>
+      <div class="field">
+        <label for="new-item-name">Название</label>
+        <input id="new-item-name" type="text" required />
+      </div>
+      <div class="field">
+        <label for="new-item-category">Категория</label>
+        <select id="new-item-category"></select>
+      </div>
+      <div class="field">
+        <label for="new-item-serial">Серийный номер</label>
+        <input id="new-item-serial" type="text" />
+      </div>
+      <div class="field">
+        <label for="new-item-notes">Заметки о состоянии</label>
+        <textarea id="new-item-notes"></textarea>
+      </div>
+      <button class="btn" id="new-item-submit">Создать и получить QR</button>
+    </div>
+
+    <div id="catalog-qr-result" class="section" style="display:none;"></div>
+  </div>
+
+  <!-- Экран: сканирование -->
+  <div class="screen" id="screen-scan">
+    <h1>Сканировать</h1>
+    <button class="btn" id="scan-start-btn">📷 Открыть сканер QR</button>
+    <div id="scan-error"></div>
+    <div class="field" id="scan-manual-wrap">
+      <label for="scan-manual-input">Или введите ID вручную</label>
+      <input type="text" id="scan-manual-input" placeholder="MIFS-CAM-001" />
+      <button class="btn btn--secondary" id="scan-manual-submit" style="margin-top:8px;">Найти</button>
+    </div>
+    <div id="scan-result"></div>
+  </div>
+
+  <!-- Экран: карточка предмета -->
+  <div class="screen" id="screen-item">
+    <h1 id="item-title">Оборудование</h1>
+    <div id="item-content"></div>
+  </div>
+
+  <!-- Экран: ремонт/дефекты -->
+  <div class="screen" id="screen-repair">
+    <h1>Ремонт</h1>
+    <div class="filters">
+      <select id="repair-filter-status">
+        <option value="all">Все</option>
+        <option value="Open">Открытые</option>
+        <option value="In Repair">В ремонте</option>
+        <option value="Resolved">Решённые</option>
+      </select>
+    </div>
+    <div id="repair-list"></div>
+  </div>
+
+  <!-- Экран: клиенты/проекты -->
+  <div class="screen" id="screen-clients">
+    <h1>Клиенты</h1>
+    <div id="clients-list"></div>
+    <button class="btn btn--secondary" id="clients-add-toggle" style="margin-top:6px;">+ Добавить клиента</button>
+
+    <div id="clients-add-form" style="display:none;" class="section">
+      <h2>Новый клиент</h2>
+      <div id="clients-add-error"></div>
+      <div class="field">
+        <label for="new-client-name">Имя / компания</label>
+        <input id="new-client-name" type="text" required />
+      </div>
+      <div class="field">
+        <label for="new-client-project">Проект</label>
+        <input id="new-client-project" type="text" />
+      </div>
+      <div class="field">
+        <label for="new-client-phone">Телефон</label>
+        <input id="new-client-phone" type="text" />
+      </div>
+      <button class="btn" id="new-client-submit">Добавить</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/util.js"></script>
+<script src="js/mock-data.js"></script>
+<script src="js/api.js"></script>
+<script src="js/telegram.js"></script>
+<script src="js/router.js"></script>
+<script src="js/qr.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/catalog.js"></script>
+<script src="js/scan.js"></script>
+<script src="js/item.js"></script>
+<script src="js/repair.js"></script>
+<script src="js/clients.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
