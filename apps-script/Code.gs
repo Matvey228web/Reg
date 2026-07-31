@@ -3,12 +3,10 @@
  *
  * Как использовать: этот файл целиком вставляется в редактор Apps Script,
  * привязанный к таблице Google Sheets (Extensions → Apps Script из самой
- * таблицы), после чего деплоится как Web App. Подробности — в SETUP.md
- * в корне репозитория. Сам файл ничего не хостит и никуда не публикуется
- * автоматически — это просто исходник, который пользователь копирует руками.
- *
- * Таблица должна содержать вкладки: Equipment, Staff, Clients, Transactions,
- * Defects, Meta — с заголовками колонок, перечисленными в SETUP.md §1.
+ * таблицы). Дальше один раз запускается функция setupSheets() (кнопка «Run»
+ * вверху редактора) — она сама создаст все нужные вкладки с заголовками,
+ * вручную ничего заполнять не нужно. После этого скрипт деплоится как
+ * Web App. Подробности — в SETUP.md в корне репозитория.
  */
 
 var SHEETS = {
@@ -20,8 +18,74 @@ var SHEETS = {
   META: "Meta",
 };
 
+// Единственное описание структуры таблицы: используется и при создании
+// вкладок в setupSheets(), и как источник порядка колонок при записи строк.
+var SCHEMA = {
+  Equipment: ["item_id", "name", "category", "serial_number", "status", "condition_notes", "created_at", "current_transaction_id"],
+  Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at"],
+  Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
+  Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_in", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
+  Defects: ["defect_id", "item_id", "reported_by", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
+  Meta: ["key", "value"],
+};
+
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов, как в js/config.js
 var LOCK_TIMEOUT_MS = 10000;
+
+// ---------------------------------------------------------------------
+// Первоначальная настройка таблицы — запустить один раз кнопкой «Run»
+// ---------------------------------------------------------------------
+
+/**
+ * Создаёт недостающие вкладки и проставляет заголовки колонок.
+ * Запускать можно сколько угодно раз: существующие данные не трогаются,
+ * заголовки переписываются только если первая строка листа пустая.
+ */
+function setupSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var created = [];
+  var filled = [];
+
+  for (var name in SCHEMA) {
+    var headers = SCHEMA[name];
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      sheet = ss.insertSheet(name);
+      created.push(name);
+    }
+    // Заголовки пишем только в пустой лист, чтобы не затереть данные,
+    // если функцию запустили повторно на уже работающей таблице.
+    var firstCell = sheet.getRange(1, 1).getValue();
+    if (firstCell === "" || firstCell === null) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+      filled.push(name);
+    }
+  }
+
+  // Убираем пустой лист по умолчанию ("Sheet1" / "Лист1"), который Google
+  // создаёт в новой таблице — иначе он останется висеть рядом со схемой.
+  // Листы с любыми данными не трогаем, даже если они не из схемы.
+  var all = ss.getSheets();
+  for (var i = 0; i < all.length; i++) {
+    var s = all[i];
+    var isSchemaSheet = Object.prototype.hasOwnProperty.call(SCHEMA, s.getName());
+    if (!isSchemaSheet && s.getLastRow() === 0 && ss.getSheets().length > 1) {
+      ss.deleteSheet(s);
+    }
+  }
+
+  var message = "Готово. Создано вкладок: " + created.length +
+    (created.length ? " (" + created.join(", ") + ")" : "") +
+    "; заголовки проставлены: " + filled.length + ".";
+  Logger.log(message);
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 10);
+  } catch (ignored) {
+    // toast доступен не во всех контекстах запуска — не критично
+  }
+  return message;
+}
 
 // ---------------------------------------------------------------------
 // Точка входа
@@ -383,6 +447,11 @@ function handleStaffCreate(payload, token) {
     var rows = readRows(sheet);
     var isBootstrap = rows.length === 0;
     if (!isBootstrap) {
+      // Сюда попадают в двух случаях: админ добавляет сотрудника (нормально)
+      // и кто-то повторно жмёт «создать первого администратора» на экране
+      // входа, когда сотрудники уже заведены — во втором случае токена нет,
+      // и общее «сессия недействительна» только запутает.
+      if (!token) throw apiError(403, "Сотрудники уже есть, обратитесь к администратору");
       requireAdmin(token);
     }
 
@@ -449,7 +518,10 @@ function isTruthyCell(v) {
 
 function getSheet(name) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
-  if (!sheet) throw new Error("Не найден лист '" + name + "' — проверьте название вкладки в таблице");
+  if (!sheet) {
+    throw new Error("Не найдена вкладка '" + name + "'. Запустите функцию setupSheets() " +
+      "в редакторе Apps Script — она создаст все нужные вкладки автоматически.");
+  }
   return sheet;
 }
 

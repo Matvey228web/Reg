@@ -40,6 +40,7 @@ js/
   app.js         — точка входа
 apps-script/
   Code.gs        — весь бэкенд одним файлом, вставляется в Google Apps Script
+  test-local.js  — прогон логики бэкенда без Google-аккаунта (node apps-script/test-local.js)
 SETUP.md         — как настроить Google Sheets, Apps Script, бота и задеплоить фронтенд
 ```
 
@@ -63,4 +64,4 @@ python3 -m http.server 8000
 
 ## Настройка реального бэкенда и деплой
 
-Полная инструкция — в [`SETUP.md`](./SETUP.md): схема вкладок Google Sheets, деплой `apps-script/Code.gs` как Web App, настройка бота через BotFather, деплой без GitHub (Netlify/Cloudflare Pages), регистрация сотрудников прямо в приложении и переключение `MOCK_MODE` на реальный бэкенд.
+Полная инструкция — в [`SETUP.md`](./SETUP.md): создание таблицы Google Sheets (структуру скрипт создаёт сам), деплой `apps-script/Code.gs` как Web App, настройка бота через BotFather, деплой без GitHub (Netlify/Cloudflare Pages), регистрация сотрудников прямо в приложении и переключение `MOCK_MODE` на реальный бэкенд.

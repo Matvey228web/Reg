@@ -305,6 +305,14 @@ const MockAPI = {
         if (isBootstrap) {
           // Первая запись в системе — разрешаем без токена, всегда как Admin.
         } else {
+          // Без токена сюда попадают, повторно нажав «создать первого
+          // администратора» на экране входа — общее «сессия недействительна»
+          // там только запутает, поэтому объясняем причину прямо.
+          if (!token) {
+            const e = new Error("Сотрудники уже есть, обратитесь к администратору");
+            e.status = 403;
+            throw e;
+          }
           MockStore.requireAdmin(token);
         }
         const loginTaken = MockStore.staff.some((s) => s.login.toLowerCase() === login.toLowerCase());
