@@ -1,110 +1,57 @@
 # SETUP: настройка бэкенда и деплой Mifs Rent
 
-Этот репозиторий содержит только фронтенд — Telegram Mini App (статические HTML/CSS/JS файлы, без сборки). Хранение данных и бизнес-логика находятся вне репозитория, в no-code сервисах: **Airtable** (база данных) и **Latenode** (вебхуки/API, связывающие приложение с Airtable). Ничего из перечисленного ниже не настраивается кодом — это делается вручную в веб-интерфейсах сервисов по этой инструкции.
+Этот репозиторий содержит только фронтенд — Telegram Mini App (статические HTML/CSS/JS файлы, без сборки). Хранение данных и бизнес-логика находятся вне репозитория, в **Google Sheets** (таблица с данными) + **Google Apps Script** (один файл кода, который выполняет всю логику и отдаёт её как веб-приложение). Всё это — один Google-аккаунт, никаких дополнительных сервисов.
 
-Пока Airtable/Latenode не настроены, приложение можно полноценно использовать в демо-режиме — см. раздел «Mock-режим» в README.md.
-
----
-
-## 1. База данных в Airtable
-
-Создайте базу **"Mifs Rent Warehouse"** с пятью таблицами.
-
-### Equipment (оборудование)
-| Поле | Тип | Комментарий |
-|---|---|---|
-| `item_id` | Single line text (первичное поле) | напр. `MIFS-CAM-014`, уникально, содержимое QR-кода |
-| `name` | Single line text | |
-| `category` | Single select | `CAM`, `LEN`, `LGT`, `AUD`, `GRP`, `OTH` |
-| `serial_number` | Single line text | |
-| `status` | Single select | `Available`, `Rented`, `In Repair`, `Retired` |
-| `condition_notes` | Long text | |
-| `photo` | Attachment | опционально |
-| `created_at` | Created time | авто |
-| `current_transaction` | Link to Transactions | одна связь, заполняется при выдаче |
-
-### Staff (сотрудники)
-| Поле | Тип | Комментарий |
-|---|---|---|
-| `staff_id` | Autonumber (первичное) | |
-| `full_name` | Single line text | |
-| `login` | Single line text | уникальный логин |
-| `pin_hash` | Single line text | **хэш** PIN-кода, не хранить в открытом виде (см. §4) |
-| `telegram_id` | Number | опционально, для сверки с Telegram initData |
-| `role` | Single select | `Warehouse Staff`, `Admin` |
-| `active` | Checkbox | чтобы отключать сотрудника, не удаляя |
-| `session_token` | Single line text | текущий активный токен |
-| `token_issued_at` | Date/time | для проверки истечения сессии |
-
-### Clients (клиенты/проекты)
-| Поле | Тип |
-|---|---|
-| `client_id` | Autonumber (первичное) |
-| `client_name` | Single line text |
-| `project_name` | Single line text |
-| `phone` | Single line text |
-| `notes` | Long text |
-| `created_at` | Created time |
-
-### Transactions (выдачи/приёмы)
-| Поле | Тип | Комментарий |
-|---|---|---|
-| `transaction_id` | Autonumber (первичное) | |
-| `item` | Link to Equipment | |
-| `client` | Link to Clients | |
-| `staff_out` | Link to Staff | кто выдал |
-| `staff_in` | Link to Staff | кто принял, пусто до возврата |
-| `checked_out_at` | Date/time | |
-| `expected_return_at` | Date/time | опционально |
-| `checked_in_at` | Date/time | пусто до возврата |
-| `status` | Single select | `Open`, `Closed` |
-| `notes` | Long text | |
-
-### Defects (дефекты)
-| Поле | Тип | Комментарий |
-|---|---|---|
-| `defect_id` | Autonumber (первичное) | |
-| `item` | Link to Equipment | |
-| `reported_by` | Link to Staff | |
-| `related_transaction` | Link to Transactions | опционально |
-| `description` | Long text | |
-| `severity` | Single select | `Minor`, `Major`, `Out of Service` |
-| `status` | Single select | `Open`, `In Repair`, `Resolved` |
-| `reported_at` | Created time | |
-| `resolved_at` | Date/time | пусто до решения |
-| `resolution_notes` | Long text | |
-
-**Автоматизация в Latenode**: при создании дефекта с `severity = Out of Service` или переводе дефекта в `status = In Repair` — сценарий должен также выставить `Equipment.status = In Repair` у соответствующего предмета. При решении последнего открытого дефекта предмета — вернуть `Equipment.status = Available` (если только предмет не выдан в аренду в этот момент).
+Пока бэкенд не настроен, приложение можно полноценно использовать в демо-режиме — см. раздел «Mock-режим» в README.md.
 
 ---
 
-## 2. Сценарии (вебхуки) в Latenode
+## 1. Таблица в Google Sheets
 
-Почему Latenode, а не Albato: Latenode позволяет писать кастомный JS-шаг и возвращать произвольный синхронный JSON-ответ с нужным статус-кодом — это нужно для логина (возврат токена) и структурированных ошибок (например, «предмет уже выдан», HTTP 409). Albato слабее в синхронных ответах на вебхук-триггер.
+1. Откройте **sheets.google.com** → «Создать таблицу» → назовите её, например, «Mifs Rent Warehouse».
+2. Создайте 6 вкладок (внизу, кнопка «+»). Название вкладки должно совпадать **точно**, с большой буквы, как ниже. В первой строке каждой вкладки — заголовки колонок (просто впишите их текстом в ячейки A1, B1, C1...).
 
-Создайте по одному HTTP-вебхук-сценарию на каждый пункт ниже. Базовый URL всех сценариев (или общий домен Latenode-аккаунта) впишите в `js/config.js` → `WEBHOOK_BASE_URL`.
+**Equipment**
+`item_id | name | category | serial_number | status | condition_notes | created_at | current_transaction_id`
 
-**Формат ответа для всех эндпоинтов**: `{ "ok": true|false, "data": {...}|null, "error": "текст"|null }`, с соответствующим HTTP-статусом (200 при успехе, 401/404/409 при ошибках).
+**Staff**
+`staff_id | full_name | login | pin_hash | telegram_id | role | active | session_token | token_issued_at`
 
-**Авторизация**: все запросы, кроме `/auth/login`, приходят с заголовком `Authorization: Bearer <token>`. Сценарий должен найти в Staff запись с таким `session_token`, проверить `token_issued_at` (не старше 12 часов) — иначе вернуть 401.
+**Clients**
+`client_id | client_name | project_name | phone | notes | created_at`
 
-| Эндпоинт | Тело запроса | Логика | Ответ (data) |
-|---|---|---|---|
-| `POST /auth/login` | `{ login, pin, telegram_id, telegram_init_data }` | Найти Staff по `login`+`active=true`, сравнить хэш `pin` с `pin_hash` (см. §4). По желанию — проверить подпись `telegram_init_data` бот-токеном. Сгенерировать токен (UUID), записать в `session_token`/`token_issued_at` | `{ token, staff_id, full_name, role }` |
-| `POST /item/lookup` | `{ item_id }` | Найти Equipment по `item_id` | карточка предмета + `current_transaction` + `open_defects[]` |
-| `POST /item/create` | `{ name, category, serial_number, condition_notes }` | Найти максимальный номер по категории, сформировать `item_id` (см. §5), создать запись | `{ item_id }` |
-| `POST /transaction/checkout` | `{ item_id, client_id, expected_return_at, notes }` | Проверить `status=Available` (иначе 409), создать Transaction, `Equipment.status=Rented` | `{ transaction_id }` |
-| `POST /transaction/checkin` | `{ item_id, has_defect, defect_description, defect_severity, notes }` | Найти открытую Transaction по предмету, закрыть, `Equipment.status = Available` или `In Repair`, при `has_defect` создать Defect | `{ transaction_id, defect_id }` |
-| `POST /defect/report` | `{ item_id, description, severity }` | Создать Defect напрямую (не привязан к приёму) | `{ defect_id }` |
-| `POST /defect/resolve` | `{ defect_id, status, resolution_notes }` | Обновить Defect, при необходимости вернуть `Equipment.status=Available` | `{}` |
-| `POST /equipment/list` | `{ category?, status? }` | Список Equipment с опциональной фильтрацией | `[{ item_id, name, category, status, serial_number }]` |
-| `POST /clients/list` | `{}` | Список всех клиентов | `[{ client_id, client_name, project_name, phone, notes }]` |
-| `POST /client/create` | `{ client_name, project_name, phone, notes }` | Создать клиента | `{ client_id }` |
-| `POST /client/history` | `{ client_id }` | Транзакции по клиенту | `{ transactions: [...] }` |
-| `POST /item/history` | `{ item_id }` | Транзакции и дефекты по предмету | `{ transactions: [...], defects: [...] }` |
-| `POST /defects/list` | `{ status? }` | Список дефектов с фильтром по статусу (`Open`/`In Repair`/`Resolved`/`all`) | `[{ defect_id, item_id, ... }]` |
+**Transactions**
+`transaction_id | item_id | client_id | staff_out | staff_in | checked_out_at | expected_return_at | checked_in_at | status | notes`
 
-Фронтенд обращается ровно к этим 13 эндпоинтам — их точное поведение в mock-режиме см. `js/mock-data.js`, оно уже соответствует этому контракту и может использоваться как эталон при написании сценариев.
+**Defects**
+`defect_id | item_id | reported_by | related_transaction_id | description | severity | status | reported_at | resolved_at | resolution_notes`
+
+**Meta** (служебная — не показывается в приложении, нужна для внутренних счётчиков ID)
+`key | value`
+
+Больше ничего заполнять не нужно — все строки данных (оборудование, сотрудники, клиенты и т.д.) добавляются потом прямо из приложения. Таблицы **Staff** и **Meta** остаются полностью пустыми — это нормально и ожидаемо: первый администратор создаётся прямо из приложения (см. §4).
+
+---
+
+## 2. Бэкенд (Google Apps Script)
+
+1. В открытой таблице: меню **Extensions → Apps Script** (Расширения → Apps Script).
+2. Откроется редактор кода с файлом `Code.gs` — сотрите в нём всё содержимое.
+3. Откройте в репозитории файл `apps-script/Code.gs`, скопируйте его **целиком** и вставьте в редактор Apps Script.
+4. Сохраните (иконка дискеты или Ctrl+S).
+5. Нажмите **Deploy → New deployment** (Развернуть → Новое развёртывание).
+6. Рядом с «Select type» нажмите на шестерёнку → выберите **Web app**.
+7. Настройки развёртывания:
+   - **Execute as**: Me (ваш аккаунт)
+   - **Who has access**: Anyone (Все)
+8. Нажмите **Deploy**. Google попросит авторизовать скрипт (это ваш собственный код, обращающийся к вашей же таблице) — разрешите доступ.
+9. Скопируйте появившийся **URL веб-приложения** — он заканчивается на `/exec`. Это и есть адрес вашего бэкенда.
+
+При каждом изменении `Code.gs` (если будете что-то править) нужно заново нажать **Deploy → Manage deployments → Edit (карандаш) → Deploy**, чтобы изменения применились — простое сохранение файла в редакторе на уже опубликованную версию не влияет.
+
+### Как это устроено (для справки, менять не нужно)
+
+Apps Script даёт только один URL без отдельных путей вида `/auth/login` — поэтому приложение отправляет одним запросом JSON вида `{ "endpoint": "/auth/login", "token": "...", "payload": {...} }`, а `Code.gs` сам разбирает, какой это эндпоинт, и возвращает `{ "ok": true/false, "data": ..., "error": ..., "status": ... }`.
 
 ---
 
@@ -119,25 +66,29 @@
 
 ---
 
-## 4. Как выдать сотруднику логин и PIN
+## 4. Регистрация сотрудников — прямо в приложении, без ручных действий
 
-PIN нигде не хранится в открытом виде — только его хэш. Чтобы завести сотрудника:
+Ничего вручную считать или вписывать в таблицу не нужно — PIN хэшируется на сервере автоматически.
 
-1. Придумайте PIN (например, 4–6 цифр).
-2. Посчитайте его SHA-256 хэш — например, в консоли браузера или Node.js:
-   ```js
-   crypto.subtle.digest("SHA-256", new TextEncoder().encode("1234"))
-     .then(buf => console.log([...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")));
-   ```
-3. Создайте запись в Staff с `login`, посчитанным `pin_hash`, `role`, `active=true`.
-4. Сценарий `/auth/login` в Latenode должен точно так же хэшировать пришедший `pin` (SHA-256) и сравнивать с `pin_hash`.
-5. Сообщите сотруднику логин и PIN — больше ничего устанавливать не нужно, достаточно открыть бота в Telegram.
+**Первый администратор** (когда таблица Staff ещё пустая):
+1. Откройте приложение (через бота или напрямую по ссылке).
+2. На экране входа нажмите «Нет сотрудников в системе? Создать первого администратора».
+3. Введите своё имя, придумайте логин и PIN, нажмите «Создать администратора и войти» — вы сразу окажетесь внутри приложения под ролью «Администратор».
+
+Это работает только один раз — как только в Staff появляется хотя бы одна запись, повторная попытка создать администратора без входа будет отклонена («Сотрудники уже есть, обратитесь к администратору»).
+
+**Остальные сотрудники** — уже под администратором:
+1. На главном экране откройте «Сотрудники» (карточка видна только администратору).
+2. «+ Добавить сотрудника» → имя, логин, PIN, роль (Сотрудник склада / Администратор) → «Добавить».
+3. Сообщите новому сотруднику логин и PIN — больше ничего устанавливать не нужно, достаточно открыть бота в Telegram.
+
+На этом же экране можно отключить сотрудника (кнопка «Отключить») — доступ отзывается, история его выдач/действий сохраняется.
 
 ---
 
 ## 5. Схема ID / QR-кодов
 
-Формат: `MIFS-<КОД_КАТЕГОРИИ>-<порядковый номер, 3 цифры>`, например `MIFS-CAM-014`. Коды категорий: `CAM` (камера), `LEN` (объектив), `LGT` (свет), `AUD` (звук), `GRP` (грип), `OTH` (другое). ID генерируется на стороне Latenode при `/item/create`, чтобы исключить коллизии при одновременном добавлении с разных телефонов. QR-код кодирует только сырую строку `item_id`, без URL.
+Формат: `MIFS-<КОД_КАТЕГОРИИ>-<порядковый номер, 3 цифры>`, например `MIFS-CAM-014`. Коды категорий: `CAM` (камера), `LEN` (объектив), `LGT` (свет), `AUD` (звук), `GRP` (грип), `OTH` (другое). ID генерируется внутри `Code.gs` при создании оборудования (счётчики хранятся на вкладке `Meta`, под блокировкой — чтобы два одновременных добавления с разных телефонов не создали одинаковый ID). QR-код кодирует только сырую строку `item_id`, без URL.
 
 ---
 
@@ -165,8 +116,15 @@ Telegram требует HTTPS-адрес для Mini App. Ничего не до
 
 В `js/config.js`:
 ```js
-WEBHOOK_BASE_URL: "https://<ваш-домен-latenode>",
+WEBHOOK_BASE_URL: "https://script.google.com/macros/s/ВАШ_ID/exec",
 MOCK_MODE: false,
 ```
 
-После этого повторно задеплойте статику (см. §6) и проверьте по цепочке: вход → каталог (создание предмета + QR) → скан (выдача/приём) → дефекты → история.
+После этого повторно задеплойте статику (см. §6) и проверьте по цепочке: создание первого администратора (§4) → вход → добавление сотрудника → каталог (создание предмета + QR) → скан (выдача/приём) → дефекты → история.
+
+### Если после этого запросы не проходят (белый экран/ошибка сети)
+
+Это единственное место, которое не проверено на реальном деплое (проверялось только логикой, без живого Google-аккаунта) — если что-то не работает, попробуйте по порядку:
+1. Убедитесь, что в настройках развёртывания стоит «Who has access: Anyone», а не «Anyone with Google account».
+2. Откройте URL `/exec` напрямую в браузере — должно показать текст «Mifs Rent backend работает…». Если ошибка — проблема в самом деплое Apps Script, а не во фронтенде.
+3. Проверьте в `js/config.js`, что `WEBHOOK_BASE_URL` скопирован полностью, включая `/exec` на конце, без лишних пробелов.

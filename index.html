@@ -19,7 +19,7 @@
     <form id="login-form">
       <div class="field">
         <label for="login-input">Логин</label>
-        <input id="login-input" type="text" autocomplete="username" required />
+        <input id="login-input" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required />
       </div>
       <div class="field">
         <label for="pin-input">PIN-код</label>
@@ -27,6 +27,26 @@
       </div>
       <button type="submit" class="btn" id="login-submit">Войти</button>
     </form>
+
+    <div class="section">
+      <button class="btn btn--secondary" id="bootstrap-toggle" style="font-size:13px;">Нет сотрудников в системе? Создать первого администратора</button>
+      <div id="bootstrap-form" style="display:none;">
+        <div id="bootstrap-error"></div>
+        <div class="field">
+          <label for="bootstrap-name">Ваше имя</label>
+          <input id="bootstrap-name" type="text" required />
+        </div>
+        <div class="field">
+          <label for="bootstrap-login">Логин</label>
+          <input id="bootstrap-login" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+        </div>
+        <div class="field">
+          <label for="bootstrap-pin">Придумайте PIN-код</label>
+          <input id="bootstrap-pin" type="password" inputmode="numeric" pattern="[0-9]*" required />
+        </div>
+        <button class="btn" id="bootstrap-submit">Создать администратора и войти</button>
+      </div>
+    </div>
   </div>
 
   <!-- Экран: главное меню -->
@@ -45,6 +65,9 @@
       </div>
       <div class="card" data-nav="clients">
         <div class="card-title">👥 Клиенты</div>
+      </div>
+      <div class="card" data-nav="staff" id="home-staff-card" style="display:none;">
+        <div class="card-title">🗝 Сотрудники</div>
       </div>
     </div>
     <button class="btn btn--secondary" id="logout-btn" style="margin-top:20px;">Выйти</button>
@@ -143,6 +166,38 @@
     </div>
   </div>
 
+  <!-- Экран: сотрудники (только для Admin) -->
+  <div class="screen" id="screen-staff">
+    <h1>Сотрудники</h1>
+    <div id="staff-list"></div>
+    <button class="btn btn--secondary" id="staff-add-toggle" style="margin-top:6px;">+ Добавить сотрудника</button>
+
+    <div id="staff-add-form" style="display:none;" class="section">
+      <h2>Новый сотрудник</h2>
+      <div id="staff-add-error"></div>
+      <div class="field">
+        <label for="new-staff-name">Имя</label>
+        <input id="new-staff-name" type="text" required />
+      </div>
+      <div class="field">
+        <label for="new-staff-login">Логин</label>
+        <input id="new-staff-login" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+      </div>
+      <div class="field">
+        <label for="new-staff-pin">PIN-код</label>
+        <input id="new-staff-pin" type="password" inputmode="numeric" pattern="[0-9]*" required />
+      </div>
+      <div class="field">
+        <label for="new-staff-role">Роль</label>
+        <select id="new-staff-role">
+          <option value="Warehouse Staff">Сотрудник склада</option>
+          <option value="Admin">Администратор</option>
+        </select>
+      </div>
+      <button class="btn" id="new-staff-submit">Добавить</button>
+    </div>
+  </div>
+
 </div>
 
 <script src="js/config.js"></script>
@@ -158,6 +213,7 @@
 <script src="js/item.js"></script>
 <script src="js/repair.js"></script>
 <script src="js/clients.js"></script>
+<script src="js/staff.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -1,12 +1,16 @@
-// Локальная имитация бэкенда (Airtable + Latenode) для разработки и демонстрации
+// Локальная имитация бэкенда (Google Sheets + Apps Script) для разработки и демонстрации
 // приложения без реального аккаунта. Используется, когда CONFIG.MOCK_MODE === true.
 // Структура и содержимое ответов соответствуют контракту вебхуков из SETUP.md.
+// Ниже уже есть 2 демо-сотрудника, поэтому bootstrap-ветка /staff/create (регистрация
+// первого администратора без токена) в моке недостижима без ручной правки — она нужна
+// для симметрии с реальным Apps Script бэкендом, где Staff изначально пуста.
 
 const MockStore = (() => {
   let nextItemSeq = { CAM: 2, LEN: 1, LGT: 1, AUD: 0, GRP: 0, OTH: 0 };
   let nextClientId = 3;
   let nextTransactionId = 3;
   let nextDefectId = 2;
+  let nextStaffId = 3;
 
   const staff = [
     { staff_id: 1, full_name: "Иван Петров", login: "ivan", pin: "1234", role: "Warehouse Staff", active: true },
@@ -72,7 +76,8 @@ const MockStore = (() => {
   const tokens = new Map(); // token -> staff_id
 
   function findStaffByLogin(login) {
-    return staff.find((s) => s.login === login && s.active);
+    const needle = String(login || "").trim().toLowerCase();
+    return staff.find((s) => s.login.toLowerCase() === needle && s.active);
   }
 
   function findItem(item_id) {
@@ -93,9 +98,24 @@ const MockStore = (() => {
     return staff_id;
   }
 
+  function findStaffById(staff_id) {
+    return staff.find((s) => s.staff_id === staff_id);
+  }
+
+  function requireAdmin(token) {
+    const staff_id = requireToken(token);
+    const s = findStaffById(staff_id);
+    if (!s || s.role !== "Admin") {
+      const err = new Error("Только администратор может добавлять сотрудников");
+      err.status = 403;
+      throw err;
+    }
+    return s;
+  }
+
   return {
     staff, equipment, clients, transactions, defects, tokens,
-    findStaffByLogin, findItem, staffPublic, requireToken,
+    findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin,
     nextItemId(category) {
       nextItemSeq[category] = (nextItemSeq[category] || 0) + 1;
       const num = String(nextItemSeq[category]).padStart(3, "0");
@@ -104,6 +124,7 @@ const MockStore = (() => {
     nextClientId: () => nextClientId++,
     nextTransactionId: () => nextTransactionId++,
     nextDefectId: () => nextDefectId++,
+    nextStaffId: () => nextStaffId++,
   };
 })();
 
@@ -273,6 +294,44 @@ const MockAPI = {
         let list = MockStore.defects;
         if (body && body.status && body.status !== "all") list = list.filter((d) => d.status === body.status);
         return list;
+      }
+
+      case "/staff/create": {
+        const login = String(body.login || "").trim();
+        if (!login || !body.pin) {
+          const e = new Error("Укажите логин и PIN"); e.status = 400; throw e;
+        }
+        const isBootstrap = MockStore.staff.length === 0;
+        if (isBootstrap) {
+          // Первая запись в системе — разрешаем без токена, всегда как Admin.
+        } else {
+          MockStore.requireAdmin(token);
+        }
+        const loginTaken = MockStore.staff.some((s) => s.login.toLowerCase() === login.toLowerCase());
+        if (loginTaken) {
+          const e = new Error("Такой логин уже используется"); e.status = 409; throw e;
+        }
+        const staff_id = MockStore.nextStaffId();
+        MockStore.staff.push({
+          staff_id, full_name: body.full_name || login, login,
+          pin: String(body.pin), // в реальном бэкенде — pin_hash, здесь мок хранит как есть
+          role: isBootstrap ? "Admin" : (body.role || "Warehouse Staff"),
+          active: true,
+        });
+        return { staff_id };
+      }
+
+      case "/staff/list": {
+        MockStore.requireAdmin(token);
+        return MockStore.staff.map(({ staff_id, full_name, login, role, active }) => ({ staff_id, full_name, login, role, active }));
+      }
+
+      case "/staff/set-active": {
+        MockStore.requireAdmin(token);
+        const s = MockStore.findStaffById(body.staff_id);
+        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        s.active = !!body.active;
+        return {};
       }
 
       default: {

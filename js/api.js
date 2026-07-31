@@ -1,4 +1,4 @@
-// Единая точка обращения к бэкенду (Latenode) или к мокам (js/mock-data.js).
+// Единая точка обращения к бэкенду (Google Apps Script Web App) или к мокам (js/mock-data.js).
 // Все экраны вызывают только apiPost(endpoint, body) — детали транспорта скрыты здесь.
 
 class ApiError extends Error {
@@ -32,15 +32,17 @@ async function apiPost(endpoint, body = {}) {
     }
   }
 
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = "Bearer " + token;
-
+  // Apps Script Web App отдаёт один URL без роутинга по путям и не видит
+  // произвольные HTTP-заголовки в doPost(e) — поэтому endpoint и токен едут
+  // внутри JSON-тела, а не в URL/заголовке. Content-Type должен быть
+  // "простым" (text/plain), иначе браузер шлёт CORS-preflight (OPTIONS),
+  // который doPost не обрабатывает, и кросс-доменный запрос падает.
   let res;
   try {
-    res = await fetch(CONFIG.WEBHOOK_BASE_URL + endpoint, {
+    res = await fetch(CONFIG.WEBHOOK_BASE_URL, {
       method: "POST",
-      headers,
-      body: JSON.stringify(body),
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ endpoint, token, payload: body }),
     });
   } catch {
     throw new ApiError("Нет связи с сервером. Проверьте интернет-соединение.", 0);
@@ -53,12 +55,16 @@ async function apiPost(endpoint, body = {}) {
     throw new ApiError("Некорректный ответ сервера", res.status);
   }
 
-  if (res.status === 401) {
+  // Apps Script Web App всегда отвечает настоящим HTTP 200 — логический
+  // статус (401/403/404/409...) лежит внутри JSON-тела, не в res.status.
+  const logicalStatus = payload.status || (payload.ok ? 200 : 500);
+
+  if (logicalStatus === 401) {
     localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
   }
 
   if (!payload.ok) {
-    throw new ApiError(payload.error || "Ошибка запроса", res.status);
+    throw new ApiError(payload.error || "Ошибка запроса", logicalStatus);
   }
   return payload.data;
 }

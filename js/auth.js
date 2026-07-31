@@ -52,6 +52,8 @@ const Auth = (() => {
     } else {
       greeting.textContent = "Учёт оборудования на складе";
     }
+    document.getElementById("bootstrap-form").style.display = "none";
+    showBoxError("bootstrap-error", "");
   }
 
   async function handleSubmit(e) {
@@ -81,8 +83,45 @@ const Auth = (() => {
     }
   }
 
+  async function handleBootstrapSubmit() {
+    showBoxError("bootstrap-error", "");
+    const full_name = document.getElementById("bootstrap-name").value.trim();
+    const login = document.getElementById("bootstrap-login").value.trim();
+    const pin = document.getElementById("bootstrap-pin").value.trim();
+    if (!full_name || !login || !pin) {
+      showBoxError("bootstrap-error", "Заполните все поля");
+      return;
+    }
+    const btn = document.getElementById("bootstrap-submit");
+    btn.disabled = true;
+    btn.textContent = "Создаём…";
+    try {
+      await apiPost("/staff/create", { full_name, login, pin, role: "Admin" });
+      // сразу логинимся под только что созданным администратором
+      const data = await apiPost("/auth/login", {
+        login, pin,
+        telegram_id: TG.getUser() ? TG.getUser().id : null,
+        telegram_init_data: TG.getInitData(),
+      });
+      setSession(data);
+      TG.hapticSuccess();
+      Router.reset("home");
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("bootstrap-error", err.message || "Не удалось создать администратора");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Создать администратора и войти";
+    }
+  }
+
   function init() {
     document.getElementById("login-form").addEventListener("submit", handleSubmit);
+    document.getElementById("bootstrap-toggle").addEventListener("click", () => {
+      const form = document.getElementById("bootstrap-form");
+      form.style.display = form.style.display === "none" ? "block" : "none";
+    });
+    document.getElementById("bootstrap-submit").addEventListener("click", handleBootstrapSubmit);
     Router.register("login", { onShow });
   }
 
