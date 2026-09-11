@@ -12,11 +12,15 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 class FakeSheet {
-  constructor(name, data = [], merges = []) { this.name = name; this.data = data; this.merges = merges; this.frozen = 0; }
+  constructor(name, data = [], merges = []) {
+    this.name = name; this.data = data; this.merges = merges; this.frozen = 0;
+    this.formats = {};   // индекс колонки (0-based) -> числовой формат, '@' = текст
+  }
   getName() { return this.name; }
   setFrozenRows(n) { this.frozen = n; }
   getLastRow() { return this.data.length; }
   getLastColumn() { return this.data.length ? Math.max(...this.data.map(r => r.length)) : 0; }
+  getMaxRows() { return Math.max(this.data.length, 1000); }
   _ensure(row, col) {
     while (this.data.length < row) this.data.push([]);
     const r = this.data[row - 1];
@@ -43,8 +47,21 @@ class FakeSheet {
       setValues(values) {
         for (let i = 0; i < values.length; i++) {
           sheet._ensure(row + i, col + values[i].length - 1);
-          for (let j = 0; j < values[i].length; j++) sheet.data[row - 1 + i][col - 1 + j] = values[i][j];
+          for (let j = 0; j < values[i].length; j++) {
+            const colIdx = col - 1 + j;
+            let v = values[i][j];
+            // Настоящий Sheets приводит строку, похожую на число, к числу, если
+            // формат колонки не текстовый — из-за этого "010101" становится 10101.
+            if (sheet.formats[colIdx] !== '@' && typeof v === 'string' && /^\d+$/.test(v)) {
+              v = Number(v);
+            }
+            sheet.data[row - 1 + i][colIdx] = v;
+          }
         }
+      },
+      setNumberFormat(fmt) {
+        for (let j = 0; j < numCols; j++) sheet.formats[col - 1 + j] = fmt;
+        return this;
       },
       getMergedRanges() {
         return sheet.merges.map(m => ({ getRow: () => m.row, getNumColumns: () => m.cols }));
@@ -305,8 +322,9 @@ check('«Потерян» → Retired', st('Retired') === 1, st('Retired'));
 check('остальные → Available', st('Available') === 8, st('Available'));
 check('мусорный серийник "?" отброшен',
   byName('Red One')[0] && byName('Red One')[0].serial_number === '', byName('Red One')[0]);
-check('инвентарный номер сохранён',
-  byName('Canon C70').some(r => r.inventory_number === '1013400892'));
+check('инвентарный номер сохранён без потери цифр',
+  byName('Canon C70').some(r => String(r.inventory_number) === '1013400892'),
+  byName('Canon C70').map(r => r.inventory_number));
 check('исходная вкладка и строка записаны в заметки',
   /Импорт: ЗВУК#\d+/.test(byName('HOLLYLAND LARK MAX')[0].condition_notes));
 check('item_id уникальны', new Set(imported.map(r => r.item_id)).size === imported.length);
@@ -354,6 +372,35 @@ check('перезаливка не падает на отсутствующей 
 check('вкладка Models восстановлена', !!spreadsheet.getSheetByName('Models'));
 const healed = readRows(getSheet(SHEETS.EQUIPMENT));
 check('каталог не остался пустым', healed.length === 12, healed.length);
+
+console.log('\n== номер не теряет ведущий ноль ==');
+const eqAfter = readRows(getSheet(SHEETS.EQUIPMENT));
+const first = eqAfter[0];
+check('item_id остался строкой с ведущим нулём', first.item_id === '010101', first.item_id);
+const lookedUp = call('/item/lookup', { item_id: '010101' });
+check('предмет находится по своему номеру', lookedUp.ok === true, lookedUp);
+
+console.log('\n== порядок колонок в листе может не совпадать со схемой ==');
+// Воспроизводим то, что делает setupSheets на уже заполненном листе: новая колонка
+// дописывается в конец, а не встаёт на своё место в схеме. Пакетная запись обязана
+// ориентироваться на заголовки листа, иначе значения уезжают в соседние колонки.
+const eq = getSheet(SHEETS.EQUIPMENT);
+eq.deleteRows(2, eq.getLastRow() - 1);
+const reordered = SCHEMA.Equipment.filter(h => h !== 'model_code').concat(['model_code']);
+eq.data[0] = reordered.slice();
+getSheet(SHEETS.TRANSACTIONS).deleteRows(2, getSheet(SHEETS.TRANSACTIONS).getLastRow() - 1);
+getSheet(SHEETS.DEFECTS).deleteRows(2, getSheet(SHEETS.DEFECTS).getLastRow() - 1);
+importInventory();
+
+const shifted = readRows(getSheet(SHEETS.EQUIPMENT));
+const canon = shifted.filter(r => r.name === 'Canon C70')[0];
+check('serial_number содержит заводской номер, а не код модели',
+  String(canon.serial_number) === '273679500132', canon.serial_number);
+check('status содержит статус, а не инвентарный номер',
+  canon.status === 'Available' || canon.status === 'In Repair', canon.status);
+check('inventory_number содержит инвентарный номер',
+  String(canon.inventory_number) === '1013400892', canon.inventory_number);
+check('model_code заполнен', String(canon.model_code).length === 2, canon.model_code);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

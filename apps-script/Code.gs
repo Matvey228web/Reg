@@ -46,6 +46,17 @@ var SCHEMA = {
   Meta: ["key", "value"],
 };
 
+// Колонки-идентификаторы храним как текст. Без этого Google Sheets приводит
+// строку, похожую на число, к числу: "010101" становится 10101 и напечатанный
+// QR перестаёт находиться, а серийник "007" теряет нули. Ссылки на предмет в
+// выдачах и дефектах — по той же причине: иначе история не сходится с каталогом.
+var TEXT_COLUMNS = {
+  Equipment: ["item_id", "model_code", "serial_number", "inventory_number"],
+  Models: ["model_code"],
+  Transactions: ["item_id"],
+  Defects: ["item_id"],
+};
+
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов, как в js/config.js
 var LOCK_TIMEOUT_MS = 10000;
 
@@ -104,6 +115,20 @@ function setupSheets() {
         extended.push(name + " (+" + missing.join(", ") + ")");
       }
     }
+  }
+
+  // Текстовый формат для колонок с ведущими нулями — ставится по фактическому
+  // положению колонки в листе, которое может отличаться от порядка в схеме.
+  for (var sheetName in TEXT_COLUMNS) {
+    var target = ss.getSheetByName(sheetName);
+    if (!target) continue;
+    var head = target.getRange(1, 1, 1, target.getLastColumn()).getValues()[0]
+      .map(function (h) { return String(h).trim(); });
+    TEXT_COLUMNS[sheetName].forEach(function (colName) {
+      var idx = head.indexOf(colName);
+      if (idx === -1) return;
+      target.getRange(1, idx + 1, target.getMaxRows ? target.getMaxRows() : 1000, 1).setNumberFormat("@");
+    });
   }
 
   // Убираем пустой лист по умолчанию ("Sheet1" / "Лист1"), который Google
@@ -183,7 +208,9 @@ function importInventory() {
       metaRowIndex[r.key] = r.__row;
     });
 
-    var headers = SCHEMA.Equipment;
+    // Порядок колонок берём из самого листа: новые поля дописываются в конец,
+    // поэтому позиция в SCHEMA не совпадает с позицией в таблице.
+    var headers = sheetHeaders(eqSheet);
     var out = [];
     var stats = { merged: 0, alreadyImported: 0, byTab: {} };
     var now = new Date().toISOString();
@@ -284,7 +311,7 @@ function importInventory() {
 
     // Справочник моделей — тоже одной записью
     if (newModels.length) {
-      var mHeaders = SCHEMA.Models;
+      var mHeaders = sheetHeaders(modelSheet);
       var mRows = newModels.map(function (m) {
         return mHeaders.map(function (h) { return m[h] !== undefined ? m[h] : ""; });
       });
@@ -909,6 +936,12 @@ function getSheet(name) {
       "в редакторе Apps Script — она создаст все нужные вкладки автоматически.");
   }
   return sheet;
+}
+
+// Фактические заголовки листа — источник порядка колонок при любой записи.
+function sheetHeaders(sheet) {
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map(function (h) { return String(h).trim(); });
 }
 
 function readRows(sheet) {
