@@ -33,7 +33,7 @@ const CatalogScreen = (() => {
       list.innerHTML = items.map((item) => `
         <div class="card" data-item-id="${escapeHtml(item.item_id)}">
           <div class="card-title">${escapeHtml(item.name)} ${statusBadge(item.status)}</div>
-          <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}</div>
+          <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}${item.inventory_number ? " · инв. " + escapeHtml(item.inventory_number) : ""}</div>
         </div>
       `).join("");
       list.querySelectorAll("[data-item-id]").forEach((el) => {
@@ -50,6 +50,7 @@ const CatalogScreen = (() => {
     document.getElementById("catalog-qr-result").innerHTML = "";
     document.getElementById("new-item-name").value = "";
     document.getElementById("new-item-serial").value = "";
+    document.getElementById("new-item-inventory").value = "";
     document.getElementById("new-item-notes").value = "";
     showBoxError("catalog-add-error", "");
   }
@@ -58,6 +59,7 @@ const CatalogScreen = (() => {
     const name = document.getElementById("new-item-name").value.trim();
     const category = document.getElementById("new-item-category").value;
     const serial_number = document.getElementById("new-item-serial").value.trim();
+    const inventory_number = document.getElementById("new-item-inventory").value.trim();
     const condition_notes = document.getElementById("new-item-notes").value.trim();
     showBoxError("catalog-add-error", "");
     if (!name) {
@@ -68,7 +70,7 @@ const CatalogScreen = (() => {
     btn.disabled = true;
     btn.textContent = "Создаём…";
     try {
-      const { item_id } = await apiPost("/item/create", { name, category, serial_number, condition_notes });
+      const { item_id } = await apiPost("/item/create", { name, category, serial_number, inventory_number, condition_notes });
       TG.hapticSuccess();
       renderQrResult(item_id, name);
       document.getElementById("catalog-add-form").style.display = "none";

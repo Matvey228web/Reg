@@ -21,7 +21,7 @@ var SHEETS = {
 // Единственное описание структуры таблицы: используется и при создании
 // вкладок в setupSheets(), и как источник порядка колонок при записи строк.
 var SCHEMA = {
-  Equipment: ["item_id", "name", "category", "serial_number", "status", "condition_notes", "created_at", "current_transaction_id"],
+  Equipment: ["item_id", "name", "category", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id"],
   Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at"],
   Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
   Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_in", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
@@ -85,6 +85,219 @@ function setupSheets() {
     // toast доступен не во всех контекстах запуска — не критично
   }
   return message;
+}
+
+// ---------------------------------------------------------------------
+// Разовый импорт существующей инвентаризации — запустить один раз после setupSheets()
+// ---------------------------------------------------------------------
+
+// ID исходной таблицы с инвентаризацией (можно очистить после импорта).
+// Берётся из её адреса: docs.google.com/spreadsheets/d/<ЭТОТ_КУСОК>/edit
+var IMPORT_SOURCE_ID = "1Y9UR7whPZt8ONRId30TevI-Rid7VhiisWEogE30XbY4";
+
+// Ключевые слова, по которым состояние считается неисправным / утерянным.
+var IMPORT_BROKEN = ["не работает", "неработает", "ремонт", "разбит", "сломан",
+                     "нельзя", "горелый", "заела", "треснут", "не включ"];
+var IMPORT_LOST = ["потерян"];
+
+/**
+ * Переносит оборудование из старой таблицы-инвентаризации во вкладку Equipment.
+ * Запускать после setupSheets(). Повторный запуск безопасен: позиции, которые
+ * уже есть (по заводскому номеру, либо по названию+инвентарному номеру),
+ * пропускаются, дубликатов не возникает.
+ */
+function importInventory() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var source = SpreadsheetApp.openById(IMPORT_SOURCE_ID);
+    var eqSheet = getSheet(SHEETS.EQUIPMENT);
+
+    // Что уже импортировано. Метка источника («вкладка#строка») — единственный
+    // надёжный признак: по названию дедуплицировать нельзя, у склада десятки
+    // физически разных единиц с одинаковым названием и без серийника
+    // (60 чайнаболлов, 30 октобоксов, 8 радиосистем).
+    var seenSerial = {}, seenImport = {};
+    readRows(eqSheet).forEach(function (r) {
+      var s = importCleanSerial(r.serial_number);
+      if (s) seenSerial[s] = true;
+      var m = String(r.condition_notes || "").match(/Импорт:\s*([^/]+#\d+)/);
+      if (m) seenImport[m[1].trim()] = true;
+    });
+
+    // Счётчики item_id читаем один раз и держим в памяти: 600+ обращений
+    // к вкладке Meta по одному не уложились бы в лимит времени Apps Script.
+    var metaSheet = getSheet(SHEETS.META);
+    var metaRows = readRows(metaSheet);
+    var counters = {}, metaRowIndex = {};
+    metaRows.forEach(function (r) {
+      counters[r.key] = Number(r.value) || 0;
+      metaRowIndex[r.key] = r.__row;
+    });
+
+    var headers = SCHEMA.Equipment;
+    var out = [];
+    var stats = { merged: 0, alreadyImported: 0, byTab: {} };
+    var now = new Date().toISOString();
+
+    source.getSheets().forEach(function (sheet) {
+      var tab = sheet.getName();
+      var values = sheet.getDataRange().getValues();
+      if (values.length < 2) return;
+
+      var keys = importHeaderKeys(values[0]);
+      var sectionRows = importMergedHeaderRows(sheet);
+
+      for (var i = 1; i < values.length; i++) {
+        // Строки-разделители групп («Камеры», «Объективы», «Godox SL300 R»).
+        // Ловим двумя независимыми способами: как объединённые ячейки и как
+        // строку, где одно и то же значение продублировано по всем колонкам —
+        // в выгрузках такие строки выглядят по-разному.
+        if (sectionRows[i + 1]) continue;
+        if (importIsUniformRow(values[i])) continue;
+        var row = {};
+        for (var c = 0; c < keys.length; c++) row[keys[c]] = importTrim(values[i][c]);
+
+        var name = row["Наименование"] || row["col0"] || row["Тип"] || "";
+        var serial = importCleanSerial(row["Заводской номер"]);
+        var inventory = row["Инвентарный номер"] || "";
+        if (!name && !serial && !inventory) continue;
+        if (!name) name = "[без названия] " + (serial || inventory);
+
+        var importKey = tab + "#" + (i + 1);
+        if (seenImport[importKey]) { stats.alreadyImported++; continue; }
+        if (serial && seenSerial[serial]) { stats.merged++; continue; }
+        if (serial) seenSerial[serial] = true;
+        seenImport[importKey] = true;
+
+        var statusCell = row["Состояние"] || (tab === "ЗВУК" ? row["col2"] : "");
+        var st = importStatus(statusCell);
+        var category = importCategory(row["Тип"] || "", tab, name);
+
+        counters["item_" + category] = (counters["item_" + category] || 0) + 1;
+        var itemId = "MIFS-" + category + "-" + importPad(counters["item_" + category]);
+
+        var notes = [
+          row["Комплектация"] || row["Комплектация 13.04 наличие"] || "",
+          row["Примечания"] || "",
+          st.note,
+          row["Хранение"] ? "Хранение: " + row["Хранение"] : "",
+          "Импорт: " + importKey,
+        ].filter(function (x) { return x; }).join(" / ");
+
+        var record = {
+          item_id: itemId, name: name, category: category, serial_number: serial,
+          inventory_number: inventory, status: st.status, condition_notes: notes,
+          created_at: now, current_transaction_id: "",
+        };
+        out.push(headers.map(function (h) { return record[h] !== undefined ? record[h] : ""; }));
+        stats.byTab[tab] = (stats.byTab[tab] || 0) + 1;
+      }
+    });
+
+    // Запись одним махом — построчный appendRow на 600+ позиций слишком медленный
+    if (out.length) {
+      eqSheet.getRange(eqSheet.getLastRow() + 1, 1, out.length, headers.length).setValues(out);
+    }
+
+    // Сохраняем счётчики обратно в Meta
+    for (var k in counters) {
+      if (metaRowIndex[k]) updateRow(metaSheet, metaRowIndex[k], { value: counters[k] });
+      else appendRow(metaSheet, { key: k, value: counters[k] });
+    }
+
+    var parts = [];
+    for (var t in stats.byTab) parts.push(t + ": " + stats.byTab[t]);
+    var message = "Импортировано позиций: " + out.length +
+      " (" + parts.join(", ") + "). Склеено дублей по заводскому номеру: " + stats.merged +
+      ". Пропущено (импортировано ранее): " + stats.alreadyImported + ".";
+    Logger.log(message);
+    try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+    return message;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function importTrim(v) {
+  return v === null || v === undefined ? "" : String(v).trim();
+}
+
+function importPad(n) {
+  var s = String(n);
+  while (s.length < 3) s = "0" + s;
+  return s;
+}
+
+// Заголовки исходной таблицы неровные: часть пустая, часть повторяется.
+// Делаем ключи уникальными, иначе колонки затирают друг друга (так терялась вкладка ЗВУК).
+function importHeaderKeys(headerRow) {
+  var keys = [], used = {};
+  for (var i = 0; i < headerRow.length; i++) {
+    var h = importTrim(headerRow[i]);
+    var key = (h && !used[h]) ? h : "col" + i;
+    used[key] = true;
+    keys.push(key);
+  }
+  return keys;
+}
+
+// Строки-разделители («Камеры», «Объективы») сделаны объединением ячеек на всю ширину.
+function importMergedHeaderRows(sheet) {
+  var rows = {};
+  try {
+    sheet.getDataRange().getMergedRanges().forEach(function (r) {
+      if (r.getNumColumns() >= 3) rows[r.getRow()] = true;
+    });
+  } catch (ignored) {}
+  return rows;
+}
+
+// Строка-заголовок группы: одно значение повторено в трёх и более колонках.
+// У настоящей позиции колонки различаются (серийник, статус, заметки),
+// поэтому порог в 3 совпадения её не заденет.
+function importIsUniformRow(rowValues) {
+  var filled = [];
+  for (var i = 0; i < rowValues.length; i++) {
+    var v = importTrim(rowValues[i]);
+    if (v) filled.push(v);
+  }
+  if (filled.length < 3) return false;
+  for (var j = 1; j < filled.length; j++) if (filled[j] !== filled[0]) return false;
+  return true;
+}
+
+// "?", "2", "1" — это не серийники; по ним нельзя склеивать разные позиции.
+function importCleanSerial(v) {
+  var s = importTrim(v);
+  return (s.length >= 5 && /\d/.test(s)) ? s : "";
+}
+
+function importStatus(cell) {
+  var raw = importTrim(cell);
+  var s = raw.toLowerCase();
+  if (!s) return { status: "Available", note: "" };
+  for (var i = 0; i < IMPORT_LOST.length; i++) {
+    if (s.indexOf(IMPORT_LOST[i]) !== -1) return { status: "Retired", note: raw };
+  }
+  for (var j = 0; j < IMPORT_BROKEN.length; j++) {
+    if (s.indexOf(IMPORT_BROKEN[j]) !== -1) return { status: "In Repair", note: raw };
+  }
+  if (s === "работает" || s === "найден" || s === "заменён") return { status: "Available", note: "" };
+  return { status: "Available", note: raw };   // свободный текст сохраняем в заметках
+}
+
+function importCategory(tip, tab, name) {
+  var t = (tip + " " + name).toLowerCase();
+  if (tab === "ЗВУК") return "AUD";
+  if (t.indexOf("объектив") !== -1 || t.indexOf("обьектив") !== -1 || t.indexOf("светофильтр") !== -1) return "LEN";
+  if (t.indexOf("камера") !== -1 || t.indexOf("фотоаппарат") !== -1 || t.indexOf("фотоапарат") !== -1) return "CAM";
+  if (t.indexOf("штатив") !== -1 || t.indexOf("клэмп") !== -1 || t.indexOf("обвес") !== -1 || t.indexOf("органайзер") !== -1) return "GRP";
+  if (t.indexOf("монитор") !== -1 || t.indexOf("сендер") !== -1 || t.indexOf("радиофокус") !== -1) return "OTH";
+  if (tab === "СВЕТ") return "LGT";
+  var light = ["осветитель", "godox", "октобокс", "чайнабол", "nanlite", "модификатор", "софтбокс"];
+  for (var i = 0; i < light.length; i++) if (t.indexOf(light[i]) !== -1) return "LGT";
+  return "OTH";
 }
 
 // ---------------------------------------------------------------------
@@ -208,6 +421,7 @@ function handleItemCreate(payload, token) {
       name: payload.name || "",
       category: category,
       serial_number: payload.serial_number || "",
+      inventory_number: payload.inventory_number || "",
       status: "Available",
       condition_notes: payload.condition_notes || "",
       created_at: new Date().toISOString(),
@@ -375,7 +589,10 @@ function handleEquipmentList(payload, token) {
     rows = rows.filter(function (r) { return r.status === payload.status; });
   }
   return rows.map(function (r) {
-    return { item_id: r.item_id, name: r.name, category: r.category, status: r.status, serial_number: r.serial_number };
+    return {
+      item_id: r.item_id, name: r.name, category: r.category, status: r.status,
+      serial_number: r.serial_number, inventory_number: r.inventory_number,
+    };
   });
 }
 

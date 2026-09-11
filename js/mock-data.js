@@ -23,6 +23,7 @@ const MockStore = (() => {
       name: "Sony FX6",
       category: "CAM",
       serial_number: "SN-FX6-118",
+      inventory_number: "1013400892",
       status: "Available",
       condition_notes: "Полный комплект, всё в порядке",
       current_transaction_id: null,
@@ -32,6 +33,7 @@ const MockStore = (() => {
       name: "Sigma 24-70mm f/2.8",
       category: "LEN",
       serial_number: "SN-SIG-042",
+      inventory_number: "",
       status: "Rented",
       condition_notes: "",
       current_transaction_id: 1,
@@ -168,6 +170,7 @@ const MockAPI = {
           name: body.name,
           category: body.category,
           serial_number: body.serial_number || "",
+          inventory_number: body.inventory_number || "",
           status: "Available",
           condition_notes: body.condition_notes || "",
           current_transaction_id: null,
@@ -261,7 +264,8 @@ const MockAPI = {
         let list = MockStore.equipment;
         if (body && body.status && body.status !== "all") list = list.filter((i) => i.status === body.status);
         if (body && body.category && body.category !== "all") list = list.filter((i) => i.category === body.category);
-        return list.map(({ item_id, name, category, status, serial_number }) => ({ item_id, name, category, status, serial_number }));
+        return list.map(({ item_id, name, category, status, serial_number, inventory_number }) =>
+          ({ item_id, name, category, status, serial_number, inventory_number }));
       }
 
       case "/clients/list": {

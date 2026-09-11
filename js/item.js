@@ -62,7 +62,8 @@ const ItemScreen = (() => {
       <div class="card">
         <div class="card-title">${statusBadge(item.status)}</div>
         <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}</div>
-        ${item.serial_number ? `<div class="card-sub">S/N: ${escapeHtml(item.serial_number)}</div>` : ""}
+        ${item.serial_number ? `<div class="card-sub">Заводской №: ${escapeHtml(item.serial_number)}</div>` : ""}
+        ${item.inventory_number ? `<div class="card-sub">Инвентарный №: ${escapeHtml(item.inventory_number)}</div>` : ""}
         ${item.condition_notes ? `<div class="card-sub">${escapeHtml(item.condition_notes)}</div>` : ""}
       </div>
 

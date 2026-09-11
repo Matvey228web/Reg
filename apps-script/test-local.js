@@ -12,7 +12,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 class FakeSheet {
-  constructor(name) { this.name = name; this.data = []; this.frozen = 0; }
+  constructor(name, data = [], merges = []) { this.name = name; this.data = data; this.merges = merges; this.frozen = 0; }
   getName() { return this.name; }
   setFrozenRows(n) { this.frozen = n; }
   getLastRow() { return this.data.length; }
@@ -46,6 +46,9 @@ class FakeSheet {
           for (let j = 0; j < values[i].length; j++) sheet.data[row - 1 + i][col - 1 + j] = values[i][j];
         }
       },
+      getMergedRanges() {
+        return sheet.merges.map(m => ({ getRow: () => m.row, getNumColumns: () => m.cols }));
+      },
     };
   }
   getDataRange() {
@@ -56,7 +59,7 @@ class FakeSheet {
 }
 
 class FakeSpreadsheet {
-  constructor() { this.sheets = [new FakeSheet('Sheet1')]; }
+  constructor(sheets) { this.sheets = sheets || [new FakeSheet('Sheet1')]; }
   getSheetByName(n) { return this.sheets.find(s => s.name === n) || null; }
   insertSheet(n) { const s = new FakeSheet(n); this.sheets.push(s); return s; }
   getSheets() { return this.sheets.slice(); }
@@ -66,7 +69,44 @@ class FakeSpreadsheet {
 
 const spreadsheet = new FakeSpreadsheet();
 
-global.SpreadsheetApp = { getActiveSpreadsheet: () => spreadsheet };
+// Синтетическая «старая таблица инвентаризации» для проверки importInventory().
+// Специально воспроизводит все особенности реальных складских файлов:
+// объединённые строки-заголовки групп, вкладку без заголовков колонок,
+// мусорные «серийники», одинаковые названия у разных единиц, дубли между вкладками.
+const sourceSpreadsheet = new FakeSpreadsheet([
+  new FakeSheet('КИНО', [
+    ['№', 'Тип', 'Наименование', 'Заводской номер', 'Инвентарный номер', 'Состояние', 'Хранение', 'Примечания'],
+    ['Камеры', '', '', '', '', '', '', ''],                                    // объединённый заголовок группы
+    ['1', 'Видеокамера', 'Canon C70', '273679500132', '1013400892', 'Работает', '105', ''],
+    ['2', 'Видеокамера', 'Canon C70', '273679500130', '1013400891', 'Не работает', '105', 'Ремонт экрана'],
+    ['3', 'Кинообъектив', 'ЛОМО 35mm', '210231', '', '', '', 'Нужна крышка'],
+    ['4', 'Видеокамера', 'Red One', '?', '', 'Потерян', '', ''],               // мусорный «серийник»
+    ['Объективы', 'Объективы', 'Объективы', 'Объективы', 'Объективы', 'Объективы', 'Объективы', 'Объективы'],
+  ], [{ row: 2, cols: 8 }]),
+  new FakeSheet('КИНО (копия)', [
+    ['№', 'Тип', 'Наименование', 'Заводской номер', 'Инвентарный номер', 'Состояние', 'Хранение', 'Примечания'],
+    ['1', 'Видеокамера', 'Canon C70', '273679500132', '', '', '', ''],          // дубль по заводскому номеру
+    ['2', 'Видеоштатив', 'GreenBean HDV', '', '', 'Работает', '', ''],
+  ]),
+  new FakeSheet('ЗВУК', [
+    ['', 'Заводской номер', ''],                                                // у колонки с названием нет заголовка
+    ['HOLLYLAND LARK MAX', '1', 'Запакован'],
+    ['HOLLYLAND LARK MAX', '2', ''],
+    ['HOLLYLAND LARK MAX', '3', 'Сломан, нет петлички'],
+  ]),
+  new FakeSheet('СВЕТ', [
+    ['№', 'Тип', 'Наименование', 'Заводской номер', 'Инвентарный номер', 'Состояние', 'Хранение', 'Примечания'],
+    ['1', 'Осветитель светодиодный', 'Godox SL300', '', '1013500001', 'Работает', '', ''],
+    ['2', 'Чайнаболл', 'Чайнаболл', '', '', '', '', ''],                        // одинаковые названия —
+    ['3', 'Чайнаболл', 'Чайнаболл', '', '', '', '', ''],                        // это разные физические единицы
+    ['4', 'Чайнаболл', 'Чайнаболл', '', '', 'Разбит', '', ''],
+  ]),
+]);
+
+global.SpreadsheetApp = {
+  getActiveSpreadsheet: () => spreadsheet,
+  openById: () => sourceSpreadsheet,
+};
 global.Logger = { log: () => {} };
 global.LockService = {
   getScriptLock: () => ({ waitLock() {}, releaseLock() {} }),
@@ -227,6 +267,44 @@ r = call('/clients/list', {}, token);
 check('конверт {ok,data,error,status}',
   'ok' in r && 'data' in r && 'error' in r && 'status' in r, Object.keys(r));
 check('doGet отвечает текстом', doGet({}).getContent().indexOf('Mifs Rent') === 0);
+
+console.log('\n== импорт старой инвентаризации ==');
+const importMsg = importInventory();
+console.log('  ' + importMsg);
+const eqRows = readRows(getSheet(SHEETS.EQUIPMENT));
+const imported = eqRows.filter(r => String(r.condition_notes || '').indexOf('Импорт:') !== -1);
+const byName = n => imported.filter(r => r.name === n);
+
+check('импортировано 12 позиций', imported.length === 12, imported.map(r => r.name));
+check('дубль по заводскому номеру склеен (Canon C70 из двух вкладок)', byName('Canon C70').length === 2);
+check('одинаковые названия без серийника НЕ склеиваются', byName('Чайнаболл').length === 3, byName('Чайнаболл').length);
+check('вкладка без заголовков колонок разобрана (ЗВУК)', byName('HOLLYLAND LARK MAX').length === 3);
+check('объединённая строка-заголовок пропущена', byName('Камеры').length === 0);
+check('строка-заголовок из одинаковых ячеек пропущена', byName('Объективы').length === 0);
+
+const cat = n => (byName(n)[0] || {}).category;
+check('категория камеры → CAM', cat('Canon C70') === 'CAM', cat('Canon C70'));
+check('категория объектива → LEN', cat('ЛОМО 35mm') === 'LEN', cat('ЛОМО 35mm'));
+check('категория штатива → GRP', cat('GreenBean HDV') === 'GRP', cat('GreenBean HDV'));
+check('категория звука → AUD', cat('HOLLYLAND LARK MAX') === 'AUD', cat('HOLLYLAND LARK MAX'));
+check('категория света → LGT', cat('Чайнаболл') === 'LGT', cat('Чайнаболл'));
+
+const st = s => imported.filter(r => r.status === s).length;
+check('«Не работает» / «Сломан» / «Разбит» → In Repair', st('In Repair') === 3, st('In Repair'));
+check('«Потерян» → Retired', st('Retired') === 1, st('Retired'));
+check('остальные → Available', st('Available') === 8, st('Available'));
+check('мусорный серийник "?" отброшен',
+  byName('Red One')[0] && byName('Red One')[0].serial_number === '', byName('Red One')[0]);
+check('инвентарный номер сохранён',
+  byName('Canon C70').some(r => r.inventory_number === '1013400892'));
+check('исходная вкладка и строка записаны в заметки',
+  /Импорт: ЗВУК#\d+/.test(byName('HOLLYLAND LARK MAX')[0].condition_notes));
+check('item_id уникальны', new Set(imported.map(r => r.item_id)).size === imported.length);
+
+console.log('\n== повторный импорт не создаёт дублей ==');
+importInventory();
+const after = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.condition_notes || '').indexOf('Импорт:') !== -1);
+check('после повторного запуска позиций столько же', after.length === 12, after.length);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
