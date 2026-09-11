@@ -6,7 +6,7 @@
 // для симметрии с реальным Apps Script бэкендом, где Staff изначально пуста.
 
 const MockStore = (() => {
-  let nextItemSeq = { CAM: 2, LEN: 1, LGT: 1, AUD: 0, GRP: 0, OTH: 0 };
+  let nextItemSeq = 100002;   // сквозная нумерация, следующий ID = 100003
   let nextClientId = 3;
   let nextTransactionId = 3;
   let nextDefectId = 2;
@@ -19,7 +19,7 @@ const MockStore = (() => {
 
   const equipment = [
     {
-      item_id: "MIFS-CAM-001",
+      item_id: "100001",
       name: "Sony FX6",
       category: "CAM",
       serial_number: "SN-FX6-118",
@@ -29,7 +29,7 @@ const MockStore = (() => {
       current_transaction_id: null,
     },
     {
-      item_id: "MIFS-LEN-001",
+      item_id: "100002",
       name: "Sigma 24-70mm f/2.8",
       category: "LEN",
       serial_number: "SN-SIG-042",
@@ -48,7 +48,7 @@ const MockStore = (() => {
   const transactions = [
     {
       transaction_id: 1,
-      item_id: "MIFS-LEN-001",
+      item_id: "100002",
       client_id: 1,
       staff_out: 1,
       staff_in: null,
@@ -63,7 +63,7 @@ const MockStore = (() => {
   const defects = [
     {
       defect_id: 1,
-      item_id: "MIFS-CAM-001",
+      item_id: "100001",
       reported_by: 2,
       related_transaction_id: null,
       description: "Небольшая царапина на корпусе, не влияет на работу",
@@ -118,10 +118,9 @@ const MockStore = (() => {
   return {
     staff, equipment, clients, transactions, defects, tokens,
     findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin,
-    nextItemId(category) {
-      nextItemSeq[category] = (nextItemSeq[category] || 0) + 1;
-      const num = String(nextItemSeq[category]).padStart(3, "0");
-      return `MIFS-${category}-${num}`;
+    nextItemId() {
+      nextItemSeq += 1;
+      return String(nextItemSeq);
     },
     nextClientId: () => nextClientId++,
     nextTransactionId: () => nextTransactionId++,
@@ -164,7 +163,7 @@ const MockAPI = {
 
       case "/item/create": {
         MockStore.requireToken(token);
-        const item_id = MockStore.nextItemId(body.category);
+        const item_id = MockStore.nextItemId();
         MockStore.equipment.push({
           item_id,
           name: body.name,

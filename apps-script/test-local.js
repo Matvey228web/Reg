@@ -56,6 +56,7 @@ class FakeSheet {
     return this.getRange(1, 1, Math.max(this.data.length, 1), Math.max(width, 1));
   }
   appendRow(row) { this.data.push(row.slice()); }
+  deleteRows(start, howMany) { this.data.splice(start - 1, howMany); }
 }
 
 class FakeSpreadsheet {
@@ -202,13 +203,13 @@ check('сотруднику склада отказано (403)', r.ok === false
 r = call('/item/create', { name: 'Sony FX6', category: 'CAM' }, ivanToken);
 check('но обычные операции ему доступны', r.ok === true, r);
 const itemId = r.ok ? r.data.item_id : null;
-check('ID по схеме MIFS-CAM-001', itemId === 'MIFS-CAM-001', itemId);
+check('ID шестизначный, начиная со 100001', itemId === '100001', itemId);
 
-console.log('\n== генерация ID по категориям ==');
+console.log('\n== генерация ID ==');
 const id2 = call('/item/create', { name: 'Sigma 24-70', category: 'LEN' }, token).data.item_id;
 const id3 = call('/item/create', { name: 'Canon C70', category: 'CAM' }, token).data.item_id;
-check('счётчик LEN независим', id2 === 'MIFS-LEN-001', id2);
-check('счётчик CAM продолжается', id3 === 'MIFS-CAM-002', id3);
+check('нумерация сквозная, не зависит от категории', id2 === '100002' && id3 === '100003', [id2, id3]);
+check('ID всегда ровно 6 цифр', /^\d{6}$/.test(id2) && /^\d{6}$/.test(id3), [id2, id3]);
 
 console.log('\n== выдача / приём ==');
 const clientId = call('/client/create', { client_name: 'ООО Реклама', project_name: 'Ролик' }, token).data.client_id;
@@ -305,6 +306,22 @@ console.log('\n== повторный импорт не создаёт дубле
 importInventory();
 const after = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.condition_notes || '').indexOf('Импорт:') !== -1);
 check('после повторного запуска позиций столько же', after.length === 12, after.length);
+
+console.log('\n== перезаливка каталога ==');
+const beforeReimport = readRows(getSheet(SHEETS.EQUIPMENT)).length;
+const refused = reimportInventory();
+check('отказывается работать, когда есть выдачи/дефекты', /отменена/.test(refused), refused);
+check('каталог при отказе не тронут',
+  readRows(getSheet(SHEETS.EQUIPMENT)).length === beforeReimport);
+
+// чистим историю — имитируем склад, где выдавать ещё не начинали
+getSheet(SHEETS.TRANSACTIONS).deleteRows(2, getSheet(SHEETS.TRANSACTIONS).getLastRow() - 1);
+getSheet(SHEETS.DEFECTS).deleteRows(2, getSheet(SHEETS.DEFECTS).getLastRow() - 1);
+const redone = reimportInventory();
+const afterRows = readRows(getSheet(SHEETS.EQUIPMENT));
+check('на чистой истории перезаливка проходит', /Каталог очищен/.test(redone), redone);
+check('позиции не задвоились', afterRows.length === 12, afterRows.length);
+check('нумерация начата заново со 100001', afterRows[0].item_id === '100001', afterRows[0].item_id);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

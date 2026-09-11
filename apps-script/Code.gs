@@ -188,8 +188,11 @@ function importInventory() {
         var st = importStatus(statusCell);
         var category = importCategory(row["Тип"] || "", tab, name);
 
-        counters["item_" + category] = (counters["item_" + category] || 0) + 1;
-        var itemId = "MIFS-" + category + "-" + importPad(counters["item_" + category]);
+        // Счётчик держим в памяти: 600+ обращений к вкладке Meta по одному
+        // не уложились бы в лимит времени Apps Script.
+        if (!counters["item_seq"] || counters["item_seq"] < ITEM_ID_START) counters["item_seq"] = ITEM_ID_START;
+        counters["item_seq"] += 1;
+        var itemId = String(counters["item_seq"]);
 
         var notes = [
           row["Комплектация"] || row["Комплектация 13.04 наличие"] || "",
@@ -233,14 +236,50 @@ function importInventory() {
   }
 }
 
-function importTrim(v) {
-  return v === null || v === undefined ? "" : String(v).trim();
+/**
+ * Очищает каталог и переносит инвентаризацию заново — нужно, если поменялась
+ * схема ID или исправились правила разбора, а выдавать оборудование ещё не начали.
+ *
+ * Намеренно отказывается работать, когда в системе уже есть выдачи или дефекты:
+ * их записи ссылаются на item_id, и перегенерация ID оставила бы историю
+ * висеть на несуществующих позициях.
+ */
+function reimportInventory() {
+  // Блокировку берём только на очистку и отпускаем до вызова importInventory:
+  // тот берёт её сам, а вложенный захват той же блокировки повис бы до таймаута.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var tx = readRows(getSheet(SHEETS.TRANSACTIONS));
+    var defects = readRows(getSheet(SHEETS.DEFECTS));
+    if (tx.length || defects.length) {
+      var refuse = "Перезаливка отменена: в системе уже есть выдачи (" + tx.length +
+        ") или дефекты (" + defects.length + "). Они ссылаются на ID предметов, " +
+        "поэтому перегенерация ID сломала бы историю.";
+      Logger.log(refuse);
+      try { SpreadsheetApp.getActiveSpreadsheet().toast(refuse, "Mifs Rent", 15); } catch (ignored) {}
+      return refuse;
+    }
+
+    var eqSheet = getSheet(SHEETS.EQUIPMENT);
+    var lastRow = eqSheet.getLastRow();
+    if (lastRow > 1) eqSheet.deleteRows(2, lastRow - 1);   // заголовок оставляем
+
+    var metaSheet = getSheet(SHEETS.META);
+    var metaLast = metaSheet.getLastRow();
+    if (metaLast > 1) metaSheet.deleteRows(2, metaLast - 1);
+  } finally {
+    lock.releaseLock();
+  }
+
+  var message = "Каталог очищен. " + importInventory();
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+  return message;
 }
 
-function importPad(n) {
-  var s = String(n);
-  while (s.length < 3) s = "0" + s;
-  return s;
+function importTrim(v) {
+  return v === null || v === undefined ? "" : String(v).trim();
 }
 
 // Заголовки исходной таблицы неровные: часть пустая, часть повторяется.
@@ -429,7 +468,7 @@ function handleItemCreate(payload, token) {
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var itemId = nextItemId(category);
+    var itemId = nextItemId();
     appendRow(getSheet(SHEETS.EQUIPMENT), {
       item_id: itemId,
       name: payload.name || "",
@@ -807,11 +846,20 @@ function nextId(key) {
   return value;
 }
 
-function nextItemId(category) {
-  var seq = nextId("item_" + category);
-  var num = String(seq);
-  while (num.length < 3) num = "0" + num;
-  return "MIFS-" + category + "-" + num;
+// ID предмета — шестизначное число со сквозной нумерацией: 100001, 100002, ...
+// Старт со 100000 гарантирует, что номер всегда ровно шесть цифр (запас до 999999).
+// Категория в ID не кодируется — она лежит в отдельной колонке.
+var ITEM_ID_START = 100000;
+
+function nextItemId() {
+  var sheet = getSheet(SHEETS.META);
+  var row = findRowByValue(sheet, "key", "item_seq");
+  var value = row ? Number(row.value) : ITEM_ID_START;
+  if (!value || value < ITEM_ID_START) value = ITEM_ID_START;
+  value += 1;
+  if (row) updateRow(sheet, row.__row, { value: value });
+  else appendRow(sheet, { key: "item_seq", value: value });
+  return String(value);
 }
 
 function hashPin(pin) {
