@@ -342,5 +342,18 @@ check('нумерация начата заново', afterRows[0].item_id === '
 check('справочник моделей тоже пересобран',
   readRows(getSheet(SHEETS.MODELS)).length === 7, readRows(getSheet(SHEETS.MODELS)).length);
 
+console.log('\n== устаревшая структура таблицы не оставляет каталог пустым ==');
+// Воспроизводим аварию: в таблице нет вкладки, появившейся в новой версии схемы.
+// Раньше reimportInventory успевал стереть Equipment и падал на getSheet('Models'),
+// оставляя склад без каталога.
+spreadsheet.deleteSheet(spreadsheet.getSheetByName('Models'));
+check('вкладка Models удалена для теста', !spreadsheet.getSheetByName('Models'));
+let crashed = null;
+try { reimportInventory(); } catch (e) { crashed = e.message; }
+check('перезаливка не падает на отсутствующей вкладке', crashed === null, crashed);
+check('вкладка Models восстановлена', !!spreadsheet.getSheetByName('Models'));
+const healed = readRows(getSheet(SHEETS.EQUIPMENT));
+check('каталог не остался пустым', healed.length === 12, healed.length);
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
