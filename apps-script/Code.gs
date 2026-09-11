@@ -117,18 +117,12 @@ function setupSheets() {
     }
   }
 
-  // Текстовый формат для колонок с ведущими нулями — ставится по фактическому
-  // положению колонки в листе, которое может отличаться от порядка в схеме.
+  // Текстовый формат для колонок с ведущими нулями — на всю существующую сетку,
+  // чтобы ручной ввод прямо в таблице тоже не терял нули.
   for (var sheetName in TEXT_COLUMNS) {
     var target = ss.getSheetByName(sheetName);
     if (!target) continue;
-    var head = target.getRange(1, 1, 1, target.getLastColumn()).getValues()[0]
-      .map(function (h) { return String(h).trim(); });
-    TEXT_COLUMNS[sheetName].forEach(function (colName) {
-      var idx = head.indexOf(colName);
-      if (idx === -1) return;
-      target.getRange(1, idx + 1, target.getMaxRows ? target.getMaxRows() : 1000, 1).setNumberFormat("@");
-    });
+    prepareRows(target, 1, target.getMaxRows ? target.getMaxRows() : 1000);
   }
 
   // Убираем пустой лист по умолчанию ("Sheet1" / "Лист1"), который Google
@@ -306,7 +300,9 @@ function importInventory() {
 
     // Запись одним махом — построчный appendRow на 600+ позиций слишком медленный
     if (out.length) {
-      eqSheet.getRange(eqSheet.getLastRow() + 1, 1, out.length, headers.length).setValues(out);
+      var eqStart = eqSheet.getLastRow() + 1;
+      prepareRows(eqSheet, eqStart, out.length);
+      eqSheet.getRange(eqStart, 1, out.length, headers.length).setValues(out);
     }
 
     // Справочник моделей — тоже одной записью
@@ -315,7 +311,9 @@ function importInventory() {
       var mRows = newModels.map(function (m) {
         return mHeaders.map(function (h) { return m[h] !== undefined ? m[h] : ""; });
       });
-      modelSheet.getRange(modelSheet.getLastRow() + 1, 1, mRows.length, mHeaders.length).setValues(mRows);
+      var mStart = modelSheet.getLastRow() + 1;
+      prepareRows(modelSheet, mStart, mRows.length);
+      modelSheet.getRange(mStart, 1, mRows.length, mHeaders.length).setValues(mRows);
     }
 
     // Сохраняем счётчики обратно в Meta
@@ -368,17 +366,15 @@ function reimportInventory() {
       return refuse;
     }
 
-    var eqSheet = getSheet(SHEETS.EQUIPMENT);
-    var lastRow = eqSheet.getLastRow();
-    if (lastRow > 1) eqSheet.deleteRows(2, lastRow - 1);   // заголовок оставляем
-
-    var modelsSheet = getSheet(SHEETS.MODELS);
-    var modelsLast = modelsSheet.getLastRow();
-    if (modelsLast > 1) modelsSheet.deleteRows(2, modelsLast - 1);
-
-    var metaSheet = getSheet(SHEETS.META);
-    var metaLast = metaSheet.getLastRow();
-    if (metaLast > 1) metaSheet.deleteRows(2, metaLast - 1);
+    // Чистим содержимое, а не удаляем строки: сетка после импорта имеет размер
+    // ровно по данным, а Google Sheets не даёт удалить все незакреплённые
+    // строки. Заодно сохраняются форматы колонок и это быстрее удаления сотен
+    // строк. Заголовок (строка 1) остаётся на месте.
+    [SHEETS.EQUIPMENT, SHEETS.MODELS, SHEETS.META].forEach(function (name) {
+      var sheet = getSheet(name);
+      var last = sheet.getLastRow();
+      if (last > 1) sheet.getRange(2, 1, last - 1, sheet.getLastColumn()).clearContent();
+    });
   } finally {
     lock.releaseLock();
   }
@@ -969,7 +965,35 @@ function findRowByValue(sheet, colName, value) {
 function appendRow(sheet, rowObject) {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var row = headers.map(function (h) { return rowObject[h] !== undefined ? rowObject[h] : ""; });
-  sheet.appendRow(row);
+  // Пишем через диапазон, а не appendRow: строке нужно сначала выставить
+  // текстовый формат, иначе новая строка за пределами сетки формат колонки не
+  // наследует и "010208" уедет в число 10208.
+  var target = sheet.getLastRow() + 1;
+  prepareRows(sheet, target, 1);
+  sheet.getRange(target, 1, 1, headers.length).setValues([row]);
+}
+
+// Подготовка строк под запись: доращивает сетку до нужного размера и ставит
+// текстовый формат колонкам-идентификаторам. Оба шага обязательны именно перед
+// записью: сетка после импорта имеет размер ровно по данным, а строка,
+// появившаяся за её пределами, формат колонки не наследует — и "010104"
+// превращается в число 10104. Позиции колонок берём из фактического заголовка:
+// он может отличаться от порядка в схеме, если колонки досыпались к уже
+// заполненному листу.
+function prepareRows(sheet, startRow, numRows) {
+  if (numRows < 1) return;
+  var needed = startRow + numRows - 1;
+  var max = sheet.getMaxRows();
+  if (max < needed) sheet.insertRowsAfter(max, needed - max);
+
+  var cols = TEXT_COLUMNS[sheet.getName()];
+  if (!cols || !cols.length) return;
+  var head = sheetHeaders(sheet);
+  cols.forEach(function (colName) {
+    var idx = head.indexOf(colName);
+    if (idx === -1) return;
+    sheet.getRange(startRow, idx + 1, numRows, 1).setNumberFormat("@");
+  });
 }
 
 function updateRow(sheet, rowIndex, patchObject) {

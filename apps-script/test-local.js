@@ -14,13 +14,23 @@ const crypto = require('crypto');
 class FakeSheet {
   constructor(name, data = [], merges = []) {
     this.name = name; this.data = data; this.merges = merges; this.frozen = 0;
-    this.formats = {};   // индекс колонки (0-based) -> числовой формат, '@' = текст
+    // Формат хранится по конкретной ячейке ("строка:колонка"), а не по колонке:
+    // в настоящем Sheets строка, появившаяся за пределами сетки, формат колонки
+    // не наследует — именно из-за этого номера теряли ведущий ноль.
+    this.cellFormats = {};
+    this.maxRows = Math.max(data.length, 1000);   // размер сетки
+  }
+  _fmt(row, col) { return this.cellFormats[row + ':' + col]; }
+  _dropFormats(row) {
+    Object.keys(this.cellFormats).forEach((k) => {
+      if (Number(k.split(':')[0]) === row) delete this.cellFormats[k];
+    });
   }
   getName() { return this.name; }
   setFrozenRows(n) { this.frozen = n; }
   getLastRow() { return this.data.length; }
   getLastColumn() { return this.data.length ? Math.max(...this.data.map(r => r.length)) : 0; }
-  getMaxRows() { return Math.max(this.data.length, 1000); }
+  getMaxRows() { return this.maxRows; }
   _ensure(row, col) {
     while (this.data.length < row) this.data.push([]);
     const r = this.data[row - 1];
@@ -45,22 +55,41 @@ class FakeSheet {
         return out;
       },
       setValues(values) {
+        // Запись за пределами сетки расширяет её, как в настоящем Sheets,
+        // и новые строки приходят с форматом по умолчанию — формат колонки
+        // они не наследуют.
+        for (let i = 0; i < values.length; i++) {
+          if (row + i > sheet.maxRows) sheet._dropFormats(row + i);
+        }
+        sheet.maxRows = Math.max(sheet.maxRows, row + values.length - 1);
         for (let i = 0; i < values.length; i++) {
           sheet._ensure(row + i, col + values[i].length - 1);
           for (let j = 0; j < values[i].length; j++) {
             const colIdx = col - 1 + j;
             let v = values[i][j];
-            // Настоящий Sheets приводит строку, похожую на число, к числу, если
-            // формат колонки не текстовый — из-за этого "010101" становится 10101.
-            if (sheet.formats[colIdx] !== '@' && typeof v === 'string' && /^\d+$/.test(v)) {
+            // Строка, похожая на число, приводится к числу, если у ЭТОЙ ячейки
+            // формат не текстовый: "010101" превращается в 10101.
+            if (sheet._fmt(row + i, colIdx) !== '@' && typeof v === 'string' && /^\d+$/.test(v)) {
               v = Number(v);
             }
             sheet.data[row - 1 + i][colIdx] = v;
           }
         }
       },
+      clearContent() {
+        for (let i = 0; i < numRows; i++) {
+          const r = sheet.data[row - 1 + i];
+          if (!r) continue;
+          for (let j = 0; j < numCols; j++) r[col - 1 + j] = '';
+        }
+        // как в Sheets: строки остаются, но getLastRow считается по данным
+        while (sheet.data.length && sheet.data[sheet.data.length - 1].every(c => c === '')) sheet.data.pop();
+        return this;
+      },
       setNumberFormat(fmt) {
-        for (let j = 0; j < numCols; j++) sheet.formats[col - 1 + j] = fmt;
+        for (let i = 0; i < numRows; i++) {
+          for (let j = 0; j < numCols; j++) sheet.cellFormats[(row + i) + ':' + (col - 1 + j)] = fmt;
+        }
         return this;
       },
       getMergedRanges() {
@@ -72,8 +101,27 @@ class FakeSheet {
     const width = this.getLastColumn();
     return this.getRange(1, 1, Math.max(this.data.length, 1), Math.max(width, 1));
   }
-  appendRow(row) { this.data.push(row.slice()); }
-  deleteRows(start, howMany) { this.data.splice(start - 1, howMany); }
+  appendRow(row) {
+    // Как в Sheets: запись идёт в строку без текстового формата, поэтому
+    // "010104" приводится к числу — прогоняем через тот же setValues.
+    const target = this.getLastRow() + 1;
+    this.getRange(target, 1, 1, row.length).setValues([row.slice()]);
+  }
+  insertRowsAfter(afterRow, howMany) {
+    // новые строки формата не несут — как при доращивании сетки в Sheets
+    this.maxRows = Math.max(this.maxRows, afterRow + howMany);
+    for (let r = afterRow + 1; r <= afterRow + howMany; r++) this._dropFormats(r);
+  }
+  deleteRows(start, howMany) {
+    // Настоящий Sheets отказывается оставить лист без незакреплённых строк
+    if (this.maxRows - howMany < this.frozen + 1) {
+      throw new Error('Sorry, it is not possible to delete all non-frozen rows.');
+    }
+    this.data.splice(start - 1, howMany);
+    this.maxRows -= howMany;
+    // удалённых строк больше нет — их формат тоже исчезает
+    for (let r = this.maxRows + 1; r <= this.maxRows + howMany; r++) this._dropFormats(r);
+  }
 }
 
 class FakeSpreadsheet {
@@ -159,6 +207,11 @@ function check(label, cond, extra) {
 function call(endpoint, payload, token) {
   const res = doPost({ postData: { contents: JSON.stringify({ endpoint, token, payload: payload || {} }) } });
   return JSON.parse(res.getContent());
+}
+// Обрезает пустой хвост сетки — так лист и оказывается размером ровно по данным
+function trimGrid(sheet) {
+  const spare = sheet.getMaxRows() - sheet.getLastRow();
+  if (spare > 0) sheet.deleteRows(sheet.getLastRow() + 1, spare);
 }
 function dumpSheet(name) {
   const s = spreadsheet.getSheetByName(name);
@@ -401,6 +454,36 @@ check('status содержит статус, а не инвентарный но
 check('inventory_number содержит инвентарный номер',
   String(canon.inventory_number) === '1013400892', canon.inventory_number);
 check('model_code заполнен', String(canon.model_code).length === 2, canon.model_code);
+
+console.log('\n== перезаливка на сетке, обрезанной ровно по данным ==');
+// Настоящий Sheets не даёт оставить лист без незакреплённых строк. После
+// импорта сетка Equipment оказалась размером ровно по данным, и очистка через
+// deleteRows падала с «Sorry, it is not possible to delete all non-frozen rows».
+[SHEETS.EQUIPMENT, SHEETS.MODELS, SHEETS.META].forEach((n) => trimGrid(getSheet(n)));
+getSheet(SHEETS.TRANSACTIONS).getRange(2, 1, Math.max(getSheet(SHEETS.TRANSACTIONS).getLastRow() - 1, 1), 10).clearContent();
+getSheet(SHEETS.DEFECTS).getRange(2, 1, Math.max(getSheet(SHEETS.DEFECTS).getLastRow() - 1, 1), 10).clearContent();
+let tightError = null;
+let tightMsg = null;
+try { tightMsg = reimportInventory(); } catch (e) { tightError = e.message; }
+check('перезаливка не падает на сетке размером по данным', tightError === null, tightError);
+check('каталог пересобран', readRows(getSheet(SHEETS.EQUIPMENT)).length === 12,
+  readRows(getSheet(SHEETS.EQUIPMENT)).length);
+check('заголовок Equipment на месте', dumpSheet('Equipment')[0][0] === 'item_id', dumpSheet('Equipment')[0]);
+
+console.log('\n== предмет, добавленный после импорта, сохраняет ведущий ноль ==');
+// Строка, появившаяся за пределами сетки, формат колонки не наследует: без
+// выставления формата перед записью "010104" уехало бы в число 10104 и
+// напечатанный QR перестал бы находиться.
+const eqTail = getSheet(SHEETS.EQUIPMENT);
+trimGrid(eqTail);
+const addedId = call('/item/create', { name: 'Sony Burano 8k', category: 'CAM' }, token).data.item_id;
+const addedRow = readRows(eqTail).filter(r => r.name === 'Sony Burano 8k')[0];
+check('item_id записан строкой с ведущим нулём', addedRow.item_id === addedId && /^0\d{5}$/.test(String(addedRow.item_id)),
+  addedRow.item_id);
+const addedLookup = call('/item/lookup', { item_id: addedId });
+check('добавленный предмет находится по номеру', addedLookup.ok === true, addedLookup);
+check('model_code добавленного предмета остался двузначным',
+  String(addedRow.model_code).length === 2, addedRow.model_code);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
