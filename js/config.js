@@ -3,14 +3,15 @@
 // впишите сюда URL веб-приложения Apps Script и переключите MOCK_MODE в false.
 
 const CONFIG = {
-  // URL веб-приложения Google Apps Script (заканчивается на /exec), например:
-  // "https://script.google.com/macros/s/AKfycb.../exec"
-  WEBHOOK_BASE_URL: "",
+  // URL веб-приложения Google Apps Script (заканчивается на /exec).
+  // Это не секрет: он всё равно уходит в браузер каждого сотрудника вместе
+  // с этим файлом. Защита — на стороне Apps Script (логин, PIN, токен).
+  WEBHOOK_BASE_URL: "https://script.google.com/macros/s/AKfycbwseLqYuSorX55ICsCCTMB2L8r79HbYYRx4VVdOH0G6jjyzOUCQYmDoVNbY9GSDgGsX/exec",
 
   // true = все запросы API обслуживаются локальными фейковыми данными (js/mock-data.js),
   // без обращения к Google Sheets/Apps Script. Удобно для разработки и демонстрации
   // приложения до того, как настроен реальный бэкенд.
-  MOCK_MODE: true,
+  MOCK_MODE: false,
 
   // Через сколько миллисекунд считать сессию сотрудника истёкшей (12 часов)
   SESSION_TTL_MS: 12 * 60 * 60 * 1000,
