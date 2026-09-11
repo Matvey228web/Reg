@@ -87,12 +87,16 @@
       <h2>Новое оборудование</h2>
       <div id="catalog-add-error"></div>
       <div class="field">
-        <label for="new-item-name">Название</label>
-        <input id="new-item-name" type="text" required />
-      </div>
-      <div class="field">
         <label for="new-item-category">Категория</label>
         <select id="new-item-category"></select>
+      </div>
+      <div class="field">
+        <label for="new-item-model">Модель</label>
+        <select id="new-item-model"></select>
+      </div>
+      <div class="field" id="new-model-wrap" style="display:none;">
+        <label for="new-item-name">Название новой модели</label>
+        <input id="new-item-name" type="text" />
       </div>
       <div class="field">
         <label for="new-item-serial">Серийный номер</label>

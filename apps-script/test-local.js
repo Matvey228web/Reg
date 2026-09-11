@@ -151,7 +151,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 6 вкладок', spreadsheet.getSheets().length === 6, spreadsheet.getSheets().map(s => s.name));
+check('создано 7 вкладок', spreadsheet.getSheets().length === 7, spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -161,7 +161,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 6', spreadsheet.getSheets().length === 6);
+check('вкладок по-прежнему 7', spreadsheet.getSheets().length === 7);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -203,13 +203,22 @@ check('сотруднику склада отказано (403)', r.ok === false
 r = call('/item/create', { name: 'Sony FX6', category: 'CAM' }, ivanToken);
 check('но обычные операции ему доступны', r.ok === true, r);
 const itemId = r.ok ? r.data.item_id : null;
-check('ID шестизначный, начиная со 100001', itemId === '100001', itemId);
+check('ID вида XXYYZZ: камера, модель 01, экземпляр 01', itemId === '010101', itemId);
 
-console.log('\n== генерация ID ==');
+console.log('\n== генерация ID и справочник моделей ==');
 const id2 = call('/item/create', { name: 'Sigma 24-70', category: 'LEN' }, token).data.item_id;
 const id3 = call('/item/create', { name: 'Canon C70', category: 'CAM' }, token).data.item_id;
-check('нумерация сквозная, не зависит от категории', id2 === '100002' && id3 === '100003', [id2, id3]);
+check('другая категория — свой блок номеров', id2 === '020101', id2);
+check('вторая модель в категории получает код 02', id3 === '010201', id3);
 check('ID всегда ровно 6 цифр', /^\d{6}$/.test(id2) && /^\d{6}$/.test(id3), [id2, id3]);
+
+const dupModel = call('/item/create', { name: 'Sony FX6', category: 'CAM' }, token).data.item_id;
+check('второй экземпляр той же модели — тот же YY, следующий ZZ', dupModel === '010102', dupModel);
+const caseVariant = call('/item/create', { name: 'sony  fx-6', category: 'CAM' }, token).data.item_id;
+check('разнописание названия не плодит новую модель', caseVariant === '010103', caseVariant);
+
+const models = call('/models/list', { category: 'CAM' }, token);
+check('справочник моделей отдаётся', models.ok && models.data.length === 2, models.data);
 
 console.log('\n== выдача / приём ==');
 const clientId = call('/client/create', { client_name: 'ООО Реклама', project_name: 'Ролик' }, token).data.client_id;
@@ -243,7 +252,7 @@ check('история клиента непуста', r.ok && r.data.transaction
 
 console.log('\n== списки и фильтры ==');
 r = call('/equipment/list', { category: 'CAM' }, token);
-check('фильтр по категории работает', r.ok && r.data.length === 2, r.data);
+check('фильтр по категории работает', r.ok && r.data.length === 4, r.data.length);
 r = call('/equipment/list', { status: 'Available' }, token);
 check('фильтр по статусу работает', r.ok && r.data.every(i => i.status === 'Available'), r.data);
 r = call('/defects/list', { status: 'Resolved' }, token);
@@ -301,6 +310,14 @@ check('инвентарный номер сохранён',
 check('исходная вкладка и строка записаны в заметки',
   /Импорт: ЗВУК#\d+/.test(byName('HOLLYLAND LARK MAX')[0].condition_notes));
 check('item_id уникальны', new Set(imported.map(r => r.item_id)).size === imported.length);
+check('все ID шестизначные', imported.every(r => /^\d{6}$/.test(String(r.item_id))),
+  imported.map(r => r.item_id).slice(0, 5));
+check('одинаковые единицы делят код модели, различаясь хвостом',
+  byName('Чайнаболл').map(r => r.item_id).sort().join(',') === '030201,030202,030203',
+  byName('Чайнаболл').map(r => r.item_id));
+// 3 модели завели тесты выше + 6 новых принёс импорт (Canon C70 переиспользован)
+check('импорт пополнил справочник моделей, не задвоив Canon C70',
+  readRows(getSheet(SHEETS.MODELS)).length === 9, readRows(getSheet(SHEETS.MODELS)).map(m => m.model_name));
 
 console.log('\n== повторный импорт не создаёт дублей ==');
 importInventory();
@@ -321,7 +338,9 @@ const redone = reimportInventory();
 const afterRows = readRows(getSheet(SHEETS.EQUIPMENT));
 check('на чистой истории перезаливка проходит', /Каталог очищен/.test(redone), redone);
 check('позиции не задвоились', afterRows.length === 12, afterRows.length);
-check('нумерация начата заново со 100001', afterRows[0].item_id === '100001', afterRows[0].item_id);
+check('нумерация начата заново', afterRows[0].item_id === '010101', afterRows[0].item_id);
+check('справочник моделей тоже пересобран',
+  readRows(getSheet(SHEETS.MODELS)).length === 7, readRows(getSheet(SHEETS.MODELS)).length);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

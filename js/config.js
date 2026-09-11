@@ -18,12 +18,16 @@ const CONFIG = {
 
   SESSION_STORAGE_KEY: "mifs_session",
 
+  // num — первые две цифры номера предмета (XXYYZZ). Менять нельзя:
+  // коды попадают на печатные этикетки.
   CATEGORIES: [
-    { code: "CAM", label: "Камера" },
-    { code: "LEN", label: "Объектив" },
-    { code: "LGT", label: "Свет" },
-    { code: "AUD", label: "Звук" },
-    { code: "GRP", label: "Грип" },
-    { code: "OTH", label: "Другое" },
+    { code: "CAM", num: "01", label: "Камера" },
+    { code: "LEN", num: "02", label: "Объектив" },
+    { code: "LGT", num: "03", label: "Свет" },
+    { code: "AUD", num: "04", label: "Звук" },
+    { code: "GRP", num: "05", label: "Грип" },
+    { code: "OTH", num: "06", label: "Другое" },
+    // Учитываются количеством, а не поштучно. Правила количества — отдельно.
+    { code: "CNS", num: "07", label: "Расходники (штучно/навес)" },
   ],
 };

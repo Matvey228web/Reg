@@ -11,6 +11,7 @@
 
 var SHEETS = {
   EQUIPMENT: "Equipment",
+  MODELS: "Models",
   STAFF: "Staff",
   CLIENTS: "Clients",
   TRANSACTIONS: "Transactions",
@@ -18,10 +19,26 @@ var SHEETS = {
   META: "Meta",
 };
 
+// Числовые коды категорий — первые две цифры номера предмета.
+// Порядок менять нельзя: коды уже напечатаны на этикетках.
+var CATEGORY_CODES = {
+  CAM: "01",   // камеры
+  LEN: "02",   // объективы
+  LGT: "03",   // свет
+  AUD: "04",   // звук
+  GRP: "05",   // грип и штативы
+  OTH: "06",   // прочее
+  // Расходники и навес (мешки, скотч, гели) — учитываются количеством,
+  // а не поштучно. Код занят заранее, чтобы он не сдвинулся, когда
+  // этикетки уже напечатаны; правила учёта количества дорабатываются отдельно.
+  CNS: "07",
+};
+
 // Единственное описание структуры таблицы: используется и при создании
 // вкладок в setupSheets(), и как источник порядка колонок при записи строк.
 var SCHEMA = {
-  Equipment: ["item_id", "name", "category", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id"],
+  Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id"],
+  Models: ["category", "model_code", "model_name", "created_at"],
   Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at"],
   Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
   Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_in", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
@@ -59,6 +76,7 @@ function setupSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var created = [];
   var filled = [];
+  var extended = [];
 
   for (var name in SCHEMA) {
     var headers = SCHEMA[name];
@@ -74,6 +92,17 @@ function setupSheets() {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       sheet.setFrozenRows(1);
       filled.push(name);
+    } else {
+      // Лист уже с данными: дописываем только появившиеся в схеме колонки.
+      // Без этого новое поле молча терялось бы при записи — строки
+      // раскладываются по заголовкам, которых в листе ещё нет.
+      var existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+        .map(function (h) { return String(h).trim(); });
+      var missing = headers.filter(function (h) { return existing.indexOf(h) === -1; });
+      if (missing.length) {
+        sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
+        extended.push(name + " (+" + missing.join(", ") + ")");
+      }
     }
   }
 
@@ -91,7 +120,8 @@ function setupSheets() {
 
   var message = "Готово. Создано вкладок: " + created.length +
     (created.length ? " (" + created.join(", ") + ")" : "") +
-    "; заголовки проставлены: " + filled.length + ".";
+    "; заголовки проставлены: " + filled.length +
+    (extended.length ? "; дописаны колонки: " + extended.join(", ") : "") + ".";
   Logger.log(message);
   try {
     SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 10);
@@ -154,6 +184,18 @@ function importInventory() {
     var stats = { merged: 0, alreadyImported: 0, byTab: {} };
     var now = new Date().toISOString();
 
+    // Справочник моделей строим в памяти: на 600+ позиций обращаться к вкладке
+    // Models на каждую строку слишком дорого по времени Apps Script.
+    var modelSheet = getSheet(SHEETS.MODELS);
+    var modelIndex = {};        // категория|нормализованное имя -> код модели
+    var modelMax = {};          // категория -> максимальный занятый код
+    var newModels = [];
+    readRows(modelSheet).forEach(function (r) {
+      modelIndex[r.category + "|" + normalizeModelName(r.model_name)] = Number(r.model_code);
+      modelMax[r.category] = Math.max(modelMax[r.category] || 0, Number(r.model_code));
+    });
+    var overflow = [];
+
     source.getSheets().forEach(function (sheet) {
       var tab = sheet.getName();
       var values = sheet.getDataRange().getValues();
@@ -188,11 +230,30 @@ function importInventory() {
         var st = importStatus(statusCell);
         var category = importCategory(row["Тип"] || "", tab, name);
 
-        // Счётчик держим в памяти: 600+ обращений к вкладке Meta по одному
-        // не уложились бы в лимит времени Apps Script.
-        if (!counters["item_seq"] || counters["item_seq"] < ITEM_ID_START) counters["item_seq"] = ITEM_ID_START;
-        counters["item_seq"] += 1;
-        var itemId = String(counters["item_seq"]);
+        // Модель: ищем среди уже известных по нормализованному названию,
+        // иначе заводим новую и запоминаем, чтобы дописать во вкладку Models.
+        var modelKey = category + "|" + normalizeModelName(name);
+        var modelCode = modelIndex[modelKey];
+        if (!modelCode) {
+          modelCode = (modelMax[category] || 0) + 1;
+          if (modelCode > 99) {
+            overflow.push("моделей в категории " + category);
+            continue;
+          }
+          modelMax[category] = modelCode;
+          modelIndex[modelKey] = modelCode;
+          newModels.push({ category: category, model_code: modelCode, model_name: name, created_at: now });
+        }
+
+        // Номер экземпляра внутри модели. Счётчики держим в памяти: 600+
+        // обращений к вкладке Meta по одному не уложились бы в лимит времени.
+        var unitKey = "unit_" + CATEGORY_CODES[category] + pad2(modelCode);
+        counters[unitKey] = (counters[unitKey] || 0) + 1;
+        if (counters[unitKey] > 99) {
+          overflow.push(name + " (больше 99 экземпляров)");
+          continue;
+        }
+        var itemId = buildItemId(category, modelCode, counters[unitKey]);
 
         var notes = [
           row["Комплектация"] || row["Комплектация 13.04 наличие"] || "",
@@ -203,9 +264,9 @@ function importInventory() {
         ].filter(function (x) { return x; }).join(" / ");
 
         var record = {
-          item_id: itemId, name: name, category: category, serial_number: serial,
-          inventory_number: inventory, status: st.status, condition_notes: notes,
-          created_at: now, current_transaction_id: "",
+          item_id: itemId, name: name, category: category, model_code: pad2(modelCode),
+          serial_number: serial, inventory_number: inventory, status: st.status,
+          condition_notes: notes, created_at: now, current_transaction_id: "",
         };
         out.push(headers.map(function (h) { return record[h] !== undefined ? record[h] : ""; }));
         stats.byTab[tab] = (stats.byTab[tab] || 0) + 1;
@@ -217,6 +278,15 @@ function importInventory() {
       eqSheet.getRange(eqSheet.getLastRow() + 1, 1, out.length, headers.length).setValues(out);
     }
 
+    // Справочник моделей — тоже одной записью
+    if (newModels.length) {
+      var mHeaders = SCHEMA.Models;
+      var mRows = newModels.map(function (m) {
+        return mHeaders.map(function (h) { return m[h] !== undefined ? m[h] : ""; });
+      });
+      modelSheet.getRange(modelSheet.getLastRow() + 1, 1, mRows.length, mHeaders.length).setValues(mRows);
+    }
+
     // Сохраняем счётчики обратно в Meta
     for (var k in counters) {
       if (metaRowIndex[k]) updateRow(metaSheet, metaRowIndex[k], { value: counters[k] });
@@ -226,8 +296,10 @@ function importInventory() {
     var parts = [];
     for (var t in stats.byTab) parts.push(t + ": " + stats.byTab[t]);
     var message = "Импортировано позиций: " + out.length +
-      " (" + parts.join(", ") + "). Склеено дублей по заводскому номеру: " + stats.merged +
-      ". Пропущено (импортировано ранее): " + stats.alreadyImported + ".";
+      " (" + parts.join(", ") + "). Моделей в справочнике: " + newModels.length +
+      ". Склеено дублей по заводскому номеру: " + stats.merged +
+      ". Пропущено (импортировано ранее): " + stats.alreadyImported + "." +
+      (overflow.length ? " НЕ ПОМЕСТИЛОСЬ (кончились номера): " + overflow.join("; ") : "");
     Logger.log(message);
     try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
     return message;
@@ -264,6 +336,10 @@ function reimportInventory() {
     var eqSheet = getSheet(SHEETS.EQUIPMENT);
     var lastRow = eqSheet.getLastRow();
     if (lastRow > 1) eqSheet.deleteRows(2, lastRow - 1);   // заголовок оставляем
+
+    var modelsSheet = getSheet(SHEETS.MODELS);
+    var modelsLast = modelsSheet.getLastRow();
+    if (modelsLast > 1) modelsSheet.deleteRows(2, modelsLast - 1);
 
     var metaSheet = getSheet(SHEETS.META);
     var metaLast = metaSheet.getLastRow();
@@ -386,6 +462,8 @@ function doPost(e) {
       case "/defect/report": data = handleDefectReport(payload, token); break;
       case "/defect/resolve": data = handleDefectResolve(payload, token); break;
       case "/equipment/list": data = handleEquipmentList(payload, token); break;
+      case "/models/list": data = handleModelsList(payload, token); break;
+      case "/model/create": data = handleModelCreate(payload, token); break;
       case "/clients/list": data = handleClientsList(payload, token); break;
       case "/client/create": data = handleClientCreate(payload, token); break;
       case "/client/history": data = handleClientHistory(payload, token); break;
@@ -462,17 +540,46 @@ function handleItemLookup(payload) {
   return result;
 }
 
+function handleModelsList(payload, token) {
+  checkAuth(token);
+  var rows = readRows(getSheet(SHEETS.MODELS));
+  if (payload.category && payload.category !== "all") {
+    rows = rows.filter(function (r) { return r.category === payload.category; });
+  }
+  return rows.map(function (r) {
+    return { category: r.category, model_code: Number(r.model_code), model_name: r.model_name };
+  }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
+}
+
+function handleModelCreate(payload, token) {
+  checkAuth(token);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var category = String(payload.category || "OTH");
+    return findOrCreateModel(category, payload.model_name);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function handleItemCreate(payload, token) {
   checkAuth(token);
   var category = String(payload.category || "OTH");
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var itemId = nextItemId();
+    // Модель можно передать кодом (выбор из списка) или названием (новая модель).
+    var model = payload.model_code
+      ? modelByCode(category, payload.model_code)
+      : findOrCreateModel(category, payload.model_name || payload.name);
+    var unit = nextUnitNumber(category, model.model_code);
+    var itemId = buildItemId(category, model.model_code, unit);
     appendRow(getSheet(SHEETS.EQUIPMENT), {
       item_id: itemId,
-      name: payload.name || "",
+      name: model.model_name,
       category: category,
+      model_code: pad2(model.model_code),
       serial_number: payload.serial_number || "",
       inventory_number: payload.inventory_number || "",
       status: "Available",
@@ -645,6 +752,7 @@ function handleEquipmentList(payload, token) {
     return {
       item_id: r.item_id, name: r.name, category: r.category, status: r.status,
       serial_number: r.serial_number, inventory_number: r.inventory_number,
+      model_code: r.model_code,
     };
   });
 }
@@ -846,20 +954,91 @@ function nextId(key) {
   return value;
 }
 
-// ID предмета — шестизначное число со сквозной нумерацией: 100001, 100002, ...
-// Старт со 100000 гарантирует, что номер всегда ровно шесть цифр (запас до 999999).
-// Категория в ID не кодируется — она лежит в отдельной колонке.
-var ITEM_ID_START = 100000;
+// ID предмета — шесть цифр вида XXYYZZ:
+//   XX — категория (см. CATEGORY_CODES), YY — модель внутри категории,
+//   ZZ — порядковый номер экземпляра этой модели.
+// Например 010201 = камера (01), модель Canon C70 (02), экземпляр первый (01).
+function buildItemId(category, modelCode, unitNumber) {
+  var cat = CATEGORY_CODES[category] || CATEGORY_CODES.OTH;
+  return cat + pad2(modelCode) + pad2(unitNumber);
+}
 
-function nextItemId() {
-  var sheet = getSheet(SHEETS.META);
-  var row = findRowByValue(sheet, "key", "item_seq");
-  var value = row ? Number(row.value) : ITEM_ID_START;
-  if (!value || value < ITEM_ID_START) value = ITEM_ID_START;
-  value += 1;
-  if (row) updateRow(sheet, row.__row, { value: value });
-  else appendRow(sheet, { key: "item_seq", value: value });
-  return String(value);
+function pad2(n) {
+  var s = String(n);
+  while (s.length < 2) s = "0" + s;
+  return s;
+}
+
+// Нормализуем название модели, чтобы «GODOX SL 300 R» и «Godox SL300 R»
+// считались одной моделью: в реальных складских таблицах одна и та же вещь
+// записана по-разному, и без этого модель разъехалась бы на два кода.
+function normalizeModelName(name) {
+  var s = String(name || "").toLowerCase();
+  s = s.replace(/[\s\-_.]+/g, "");
+  // кириллические двойники латиницы — частая причина «двух» одинаковых моделей
+  s = s.replace(/с/g, "c").replace(/о/g, "o").replace(/р/g, "p")
+       .replace(/е/g, "e").replace(/а/g, "a").replace(/х/g, "x")
+       .replace(/в/g, "b").replace(/к/g, "k").replace(/м/g, "m")
+       .replace(/т/g, "t").replace(/у/g, "y");
+  return s;
+}
+
+// Следующий свободный код модели в категории (YY). 99 моделей на категорию.
+function nextModelCode(category) {
+  var rows = readRows(getSheet(SHEETS.MODELS));
+  var used = {};
+  var max = 0;
+  rows.forEach(function (r) {
+    if (r.category !== category) return;
+    var code = Number(r.model_code);
+    used[code] = true;
+    if (code > max) max = code;
+  });
+  if (max >= 99) {
+    throw apiError(409, "В категории закончились коды моделей (99). Нужна отдельная категория.");
+  }
+  return max + 1;
+}
+
+// Следующий номер экземпляра модели (ZZ). Счётчик не переиспользует номера:
+// списанная единица не отдаёт свой номер следующей, иначе старая этикетка
+// однажды указала бы на другую вещь.
+function nextUnitNumber(category, modelCode) {
+  var key = "unit_" + CATEGORY_CODES[category] + pad2(modelCode);
+  var value = nextId(key);
+  if (value > 99) {
+    throw apiError(409, "У этой модели исчерпаны номера экземпляров (99). Заведите её как отдельную модель.");
+  }
+  return value;
+}
+
+function modelByCode(category, modelCode) {
+  var rows = readRows(getSheet(SHEETS.MODELS));
+  var code = Number(modelCode);
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].category === category && Number(rows[i].model_code) === code) {
+      return { model_code: code, model_name: rows[i].model_name };
+    }
+  }
+  throw apiError(404, "Модель не найдена в справочнике");
+}
+
+// Находит модель по названию или заводит новую. Возвращает {model_code, model_name}.
+function findOrCreateModel(category, modelName) {
+  var name = String(modelName || "").trim();
+  if (!name) throw apiError(400, "Укажите название модели");
+  var needle = normalizeModelName(name);
+  var rows = readRows(getSheet(SHEETS.MODELS));
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].category === category && normalizeModelName(rows[i].model_name) === needle) {
+      return { model_code: Number(rows[i].model_code), model_name: rows[i].model_name };
+    }
+  }
+  var code = nextModelCode(category);
+  appendRow(getSheet(SHEETS.MODELS), {
+    category: category, model_code: code, model_name: name, created_at: new Date().toISOString(),
+  });
+  return { model_code: code, model_name: name };
 }
 
 function hashPin(pin) {

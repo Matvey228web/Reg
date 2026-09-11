@@ -21,6 +21,30 @@ const CatalogScreen = (() => {
     newItemCat.innerHTML = CONFIG.CATEGORIES.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join("");
   }
 
+  // Справочник моделей выбранной категории: из него собирается номер XXYYZZ.
+  async function loadModels() {
+    const sel = document.getElementById("new-item-model");
+    const category = document.getElementById("new-item-category").value;
+    sel.innerHTML = `<option value="">Загрузка…</option>`;
+    try {
+      const models = await apiPost("/models/list", { category });
+      sel.innerHTML = models.map((m) =>
+        `<option value="${m.model_code}">${escapeHtml(m.model_name)}</option>`).join("") +
+        `<option value="__new">+ Новая модель</option>`;
+      if (!models.length) sel.value = "__new";
+      toggleNewModel();
+    } catch (err) {
+      sel.innerHTML = `<option value="__new">+ Новая модель</option>`;
+      toggleNewModel();
+      showBoxError("catalog-add-error", err.message);
+    }
+  }
+
+  function toggleNewModel() {
+    const isNew = document.getElementById("new-item-model").value === "__new";
+    document.getElementById("new-model-wrap").style.display = isNew ? "block" : "none";
+  }
+
   async function loadList() {
     const list = document.getElementById("catalog-list");
     list.innerHTML = `<p class="empty">Загрузка…</p>`;
@@ -49,6 +73,7 @@ const CatalogScreen = (() => {
     document.getElementById("catalog-qr-result").style.display = "none";
     document.getElementById("catalog-qr-result").innerHTML = "";
     document.getElementById("new-item-name").value = "";
+    document.getElementById("new-model-wrap").style.display = "none";
     document.getElementById("new-item-serial").value = "";
     document.getElementById("new-item-inventory").value = "";
     document.getElementById("new-item-notes").value = "";
@@ -56,24 +81,33 @@ const CatalogScreen = (() => {
   }
 
   async function submitNewItem() {
-    const name = document.getElementById("new-item-name").value.trim();
     const category = document.getElementById("new-item-category").value;
+    const modelChoice = document.getElementById("new-item-model").value;
+    const name = document.getElementById("new-item-name").value.trim();
     const serial_number = document.getElementById("new-item-serial").value.trim();
     const inventory_number = document.getElementById("new-item-inventory").value.trim();
     const condition_notes = document.getElementById("new-item-notes").value.trim();
     showBoxError("catalog-add-error", "");
-    if (!name) {
-      showBoxError("catalog-add-error", "Укажите название оборудования");
+    if (!modelChoice) {
+      showBoxError("catalog-add-error", "Выберите модель");
+      return;
+    }
+    if (modelChoice === "__new" && !name) {
+      showBoxError("catalog-add-error", "Укажите название новой модели");
       return;
     }
     const btn = document.getElementById("new-item-submit");
     btn.disabled = true;
     btn.textContent = "Создаём…";
     try {
-      const { item_id } = await apiPost("/item/create", { name, category, serial_number, inventory_number, condition_notes });
+      const payload = { category, serial_number, inventory_number, condition_notes };
+      if (modelChoice === "__new") payload.model_name = name;
+      else payload.model_code = Number(modelChoice);
+      const { item_id } = await apiPost("/item/create", payload);
       TG.hapticSuccess();
       renderQrResult(item_id, name);
       document.getElementById("catalog-add-form").style.display = "none";
+      loadModels();
       loadList();
     } catch (err) {
       TG.hapticError();
@@ -120,8 +154,12 @@ const CatalogScreen = (() => {
     });
     document.getElementById("catalog-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("catalog-add-form");
-      form.style.display = form.style.display === "none" ? "block" : "none";
+      const opening = form.style.display === "none";
+      form.style.display = opening ? "block" : "none";
+      if (opening) loadModels();
     });
+    document.getElementById("new-item-category").addEventListener("change", loadModels);
+    document.getElementById("new-item-model").addEventListener("change", toggleNewModel);
     document.getElementById("new-item-submit").addEventListener("click", submitNewItem);
     Router.register("catalog", { onShow });
   }

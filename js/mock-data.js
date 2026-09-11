@@ -6,7 +6,7 @@
 // для симметрии с реальным Apps Script бэкендом, где Staff изначально пуста.
 
 const MockStore = (() => {
-  let nextItemSeq = 100002;   // сквозная нумерация, следующий ID = 100003
+  const unitCounters = {};   // "01"+"02" -> сколько экземпляров модели уже заведено
   let nextClientId = 3;
   let nextTransactionId = 3;
   let nextDefectId = 2;
@@ -19,7 +19,7 @@ const MockStore = (() => {
 
   const equipment = [
     {
-      item_id: "100001",
+      item_id: "010101",
       name: "Sony FX6",
       category: "CAM",
       serial_number: "SN-FX6-118",
@@ -29,7 +29,7 @@ const MockStore = (() => {
       current_transaction_id: null,
     },
     {
-      item_id: "100002",
+      item_id: "020101",
       name: "Sigma 24-70mm f/2.8",
       category: "LEN",
       serial_number: "SN-SIG-042",
@@ -40,6 +40,20 @@ const MockStore = (() => {
     },
   ];
 
+  // Справочник моделей: категория + двузначный код + название.
+  const models = [
+    { category: "CAM", model_code: 1, model_name: "Sony FX6" },
+    { category: "LEN", model_code: 1, model_name: "Sigma 24-70mm f/2.8" },
+  ];
+
+  // Счётчики экземпляров восстанавливаем из уже заведённых демо-позиций,
+  // иначе следующая такая же модель получила бы номер, который уже занят.
+  equipment.forEach((i) => {
+    const prefix = String(i.item_id).slice(0, 4);   // XX + YY
+    const unit = Number(String(i.item_id).slice(4));
+    unitCounters[prefix] = Math.max(unitCounters[prefix] || 0, unit);
+  });
+
   const clients = [
     { client_id: 1, client_name: "ООО Реклама Плюс", project_name: "Съёмка ролика", phone: "+7 900 000-00-01", notes: "" },
     { client_id: 2, client_name: "Пётр Иванов", project_name: "Свадебная съёмка", phone: "+7 900 000-00-02", notes: "" },
@@ -48,7 +62,7 @@ const MockStore = (() => {
   const transactions = [
     {
       transaction_id: 1,
-      item_id: "100002",
+      item_id: "020101",
       client_id: 1,
       staff_out: 1,
       staff_in: null,
@@ -63,7 +77,7 @@ const MockStore = (() => {
   const defects = [
     {
       defect_id: 1,
-      item_id: "100001",
+      item_id: "010101",
       reported_by: 2,
       related_transaction_id: null,
       description: "Небольшая царапина на корпусе, не влияет на работу",
@@ -118,9 +132,29 @@ const MockStore = (() => {
   return {
     staff, equipment, clients, transactions, defects, tokens,
     findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin,
-    nextItemId() {
-      nextItemSeq += 1;
-      return String(nextItemSeq);
+    models,
+    // Номер вида XXYYZZ: категория, модель, порядковый номер экземпляра.
+    nextItemId(category, modelCode) {
+      const cat = (CONFIG.CATEGORIES.find((c) => c.code === category) || { num: "06" }).num;
+      const yy = String(modelCode).padStart(2, "0");
+      unitCounters[cat + yy] = (unitCounters[cat + yy] || 0) + 1;
+      return cat + yy + String(unitCounters[cat + yy]).padStart(2, "0");
+    },
+    normalizeModelName(name) {
+      return String(name || "").toLowerCase().replace(/[\s\-_.]+/g, "")
+        .replace(/с/g, "c").replace(/о/g, "o").replace(/р/g, "p").replace(/е/g, "e")
+        .replace(/а/g, "a").replace(/х/g, "x").replace(/в/g, "b").replace(/к/g, "k")
+        .replace(/м/g, "m").replace(/т/g, "t").replace(/у/g, "y");
+    },
+    findOrCreateModel(category, modelName) {
+      const needle = MockStore.normalizeModelName(modelName);
+      const found = models.find((m) => m.category === category && MockStore.normalizeModelName(m.model_name) === needle);
+      if (found) return found;
+      const max = models.filter((m) => m.category === category)
+        .reduce((a, m) => Math.max(a, m.model_code), 0);
+      const created = { category, model_code: max + 1, model_name: String(modelName).trim() };
+      models.push(created);
+      return created;
     },
     nextClientId: () => nextClientId++,
     nextTransactionId: () => nextTransactionId++,
@@ -163,11 +197,16 @@ const MockAPI = {
 
       case "/item/create": {
         MockStore.requireToken(token);
-        const item_id = MockStore.nextItemId();
+        const model = body.model_code
+          ? MockStore.models.find((m) => m.category === body.category && m.model_code === Number(body.model_code))
+          : MockStore.findOrCreateModel(body.category, body.model_name || body.name);
+        if (!model) { const e = new Error("Модель не найдена в справочнике"); e.status = 404; throw e; }
+        const item_id = MockStore.nextItemId(body.category, model.model_code);
         MockStore.equipment.push({
           item_id,
-          name: body.name,
+          name: model.model_name,
           category: body.category,
+          model_code: String(model.model_code).padStart(2, "0"),
           serial_number: body.serial_number || "",
           inventory_number: body.inventory_number || "",
           status: "Available",
@@ -265,6 +304,18 @@ const MockAPI = {
         if (body && body.category && body.category !== "all") list = list.filter((i) => i.category === body.category);
         return list.map(({ item_id, name, category, status, serial_number, inventory_number }) =>
           ({ item_id, name, category, status, serial_number, inventory_number }));
+      }
+
+      case "/models/list": {
+        MockStore.requireToken(token);
+        let list = MockStore.models;
+        if (body && body.category && body.category !== "all") list = list.filter((m) => m.category === body.category);
+        return list.map((m) => ({ ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
+      }
+
+      case "/model/create": {
+        MockStore.requireToken(token);
+        return { ...MockStore.findOrCreateModel(body.category, body.model_name) };
       }
 
       case "/clients/list": {
