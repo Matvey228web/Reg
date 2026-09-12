@@ -13,7 +13,10 @@ var SHEETS = {
   EQUIPMENT: "Equipment",
   MODELS: "Models",
   STAFF: "Staff",
-  CLIENTS: "Clients",
+  CLIENTS: "Clients",          // legacy, см. комментарий к SCHEMA.Clients
+  STUDENTS: "Students",
+  ORDERS: "Orders",
+  ORDER_ITEMS: "OrderItems",
   TRANSACTIONS: "Transactions",
   DEFECTS: "Defects",
   CATEGORIES: "Categories",
@@ -57,8 +60,33 @@ var SCHEMA = {
   Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id"],
   Models: ["category", "model_code", "model_name", "created_at"],
   Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at", "failed_attempts", "locked_until"],
+  // Clients — предыдущая модель: справочник «клиент/проект», из которого
+  // выбирали при выдаче. Заменён на Students + Orders (заказ приходит с сайта,
+  // проект каждый раз новый). Лист и его эндпоинты оставлены, потому что на
+  // client_id ссылаются старые строки журнала, а журнал мы не переписываем.
   Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
-  Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
+
+  // Арендатор. Повторяется от заказа к заказу, поэтому вынесен отдельно:
+  // по нему видно историю. Опознаётся по телефону (см. normalizePhone).
+  Students: ["student_id", "full_name", "phone", "tg_username", "created_at", "notes"],
+
+  // Заказ с сайта. Персональных данных — минимум: даты рождения и адрес съёмок
+  // отдельными колонками не раскладываются, они остаются внутри raw_text, где
+  // их берёт печать акта и больше ничего.
+  Orders: ["order_id", "order_no", "request_code", "student_id", "student_name",
+           "student_phone", "student_tg", "is_adult", "guardian_name", "guardian_phone",
+           "project", "issue_date", "return_date", "extra_input", "amount", "currency",
+           "source_url", "status", "raw_text", "created_at", "created_by",
+           "created_by_name", "closed_at"],
+
+  // Строки состава заказа. Позиции на сайте названы моделями и идут с
+  // количеством («4 x OSTERRIG SIRIUS 100CM»), а не нашими номерами, поэтому
+  // строка и экземпляр — разные вещи: model_code сопоставляется с каталогом,
+  // issued_qty считает, сколько из строки уже на руках.
+  OrderItems: ["order_id", "line_no", "raw_name", "model_code", "category",
+               "qty", "price", "total", "issued_qty", "note"],
+
+  Transactions: ["transaction_id", "item_id", "client_id", "order_id", "order_line", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
   Defects: ["defect_id", "item_id", "reported_by", "reported_by_name", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
   Categories: ["code", "num", "label", "created_at"],
   Meta: ["key", "value"],
@@ -68,10 +96,19 @@ var SCHEMA = {
 // строку, похожую на число, к числу: "010101" становится 10101 и напечатанный
 // QR перестаёт находиться, а серийник "007" теряет нули. Ссылки на предмет в
 // выдачах и дефектах — по той же причине: иначе история не сходится с каталогом.
+// Номер заказа с сайта — десять цифр, а код заявки выглядит как
+// "3288736:8358371482": длинное число уехало бы в экспоненту, а второе не число
+// вовсе. Телефоны и ник — по той же причине (плюс «+» в начале). Даты держим
+// строками "ГГГГ-ММ-ДД", чтобы Sheets не превращал их в дату со своим часовым
+// поясом и день не сползал на соседний.
 var TEXT_COLUMNS = {
   Equipment: ["item_id", "model_code", "serial_number", "inventory_number"],
   Categories: ["num"],
   Models: ["model_code"],
+  Students: ["phone", "tg_username"],
+  Orders: ["order_no", "request_code", "student_phone", "student_tg", "guardian_phone",
+           "issue_date", "return_date"],
+  OrderItems: ["model_code"],
   Transactions: ["item_id"],
   Defects: ["item_id"],
 };
@@ -675,6 +712,16 @@ function doPost(e) {
       case "/equipment/list": data = handleEquipmentList(payload, token); break;
       case "/models/list": data = handleModelsList(payload, token); break;
       case "/model/create": data = handleModelCreate(payload, token); break;
+      case "/order/parse": data = handleOrderParse(payload, token); break;
+      case "/order/create": data = handleOrderCreate(payload, token); break;
+      case "/orders/list": data = handleOrdersList(payload, token); break;
+      case "/order/card": data = handleOrderCard(payload, token); break;
+      case "/order/update": data = handleOrderUpdate(payload, token); break;
+      case "/order/line-update": data = handleOrderLineUpdate(payload, token); break;
+      case "/students/list": data = handleStudentsList(payload, token); break;
+      case "/student/history": data = handleStudentHistory(payload, token); break;
+      // Ниже — предыдущая модель «клиент/проект». Осталась ради старых строк
+      // журнала, новый интерфейс ей не пользуется.
       case "/clients/list": data = handleClientsList(payload, token); break;
       case "/client/create": data = handleClientCreate(payload, token); break;
       case "/client/history": data = handleClientHistory(payload, token); break;
@@ -861,25 +908,76 @@ function handleTransactionCheckout(payload, token) {
     if (!item) throw apiError(404, "Предмет не найден");
     if (item.status !== "Available") throw apiError(409, "Предмет уже выдан или недоступен");
 
+    // Выдача в счёт заказа: срок возврата берём из заказа, а сама выдача
+    // списывается с подходящей строки состава.
+    var orderId = "", orderLine = "", expectedReturn = payload.expected_return_at || "";
+    if (payload.order_id) {
+      var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", String(payload.order_id));
+      if (!order) throw apiError(404, "Заказ не найден");
+      if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
+      orderId = Number(order.order_id);
+      if (!expectedReturn) expectedReturn = String(order.return_date || "");
+      orderLine = claimOrderLine(orderId, item);
+      updateRow(getSheet(SHEETS.ORDERS), order.__row, { status: "Issued" });
+    }
+
     var txId = nextId("transaction_id", maxIdIn(getSheet(SHEETS.TRANSACTIONS), "transaction_id"));
     appendRow(getSheet(SHEETS.TRANSACTIONS), {
       transaction_id: txId,
       item_id: itemId,
       client_id: payload.client_id,
+      order_id: orderId,
+      order_line: orderLine,
       staff_out: staffRow.staff_id,
       staff_out_name: staffRow.full_name,
       staff_in: "",
       staff_in_name: "",
       checked_out_at: new Date().toISOString(),
-      expected_return_at: payload.expected_return_at || "",
+      expected_return_at: expectedReturn,
       checked_in_at: "",
       status: "Open",
       notes: payload.notes || "",
     });
     updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
-    return { transaction_id: txId };
+    return { transaction_id: txId, order_line: orderLine };
   } finally {
     lock.releaseLock();
+  }
+}
+
+// Списывает экземпляр с подходящей строки состава заказа и возвращает её номер.
+// Если строки нет или она уже закрыта — «off-order», и выдача всё равно
+// проходит: в заказе есть свободное поле, которым технику дописывают руками
+// («+ 4 ковра гойда»), так что запретить выдачу вне состава значило бы
+// запретить реальную работу склада.
+function claimOrderLine(orderId, item) {
+  var sheet = getSheet(SHEETS.ORDER_ITEMS);
+  var rows = readRows(sheet);
+  var itemModel = item.model_code === "" ? "" : pad2(Number(item.model_code));
+  if (!itemModel) return "off-order";
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r.order_id) !== String(orderId)) continue;
+    if (!r.model_code || String(r.category) !== String(item.category)) continue;
+    if (pad2(Number(r.model_code)) !== itemModel) continue;
+    var issued = Number(r.issued_qty || 0);
+    if (issued >= Number(r.qty || 0)) continue;
+    updateRow(sheet, r.__row, { issued_qty: issued + 1 });
+    return String(r.line_no);
+  }
+  return "off-order";
+}
+
+function releaseOrderLine(orderId, lineNo) {
+  if (!orderId || !lineNo || String(lineNo) === "off-order") return;
+  var sheet = getSheet(SHEETS.ORDER_ITEMS);
+  var rows = readRows(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].order_id) !== String(orderId)) continue;
+    if (String(rows[i].line_no) !== String(lineNo)) continue;
+    var issued = Number(rows[i].issued_qty || 0);
+    updateRow(sheet, rows[i].__row, { issued_qty: issued > 0 ? issued - 1 : 0 });
+    return;
   }
 }
 
@@ -907,6 +1005,23 @@ function handleTransactionCheckin(payload, token) {
       staff_in: staffRow.staff_id,
       staff_in_name: staffRow.full_name,
     });
+
+    // Возврат по заказу: строка состава снова свободна, а если на руках больше
+    // ничего нет — заказ закрыт.
+    if (openTx.order_id) {
+      releaseOrderLine(openTx.order_id, openTx.order_line);
+      var orderSheet = getSheet(SHEETS.ORDERS);
+      var order = findRowByValue(orderSheet, "order_id", String(openTx.order_id));
+      if (order && order.status !== "Cancelled") {
+        var stillOut = 0;
+        readRows(txSheet).forEach(function (t) {
+          if (String(t.order_id || "") === String(openTx.order_id) && t.status === "Open") stillOut += 1;
+        });
+        updateRow(orderSheet, order.__row, stillOut
+          ? { status: "Issued", closed_at: "" }
+          : { status: "Returned", closed_at: new Date().toISOString() });
+      }
+    }
 
     var defectId = null;
     var newStatus = "Available";
@@ -1067,6 +1182,548 @@ function handleClientHistory(payload, token) {
     .filter(function (t) { return String(t.client_id) === String(payload.client_id); })
     .map(function (t) { delete t.__row; return t; });
   return { transactions: rows };
+}
+
+// ---------------------------------------------------------------------
+// Заказы: разбор сообщения с сайта, студенты, состав заказа
+// ---------------------------------------------------------------------
+
+// Телефон — то, по чему мы узнаём, что это тот же арендатор. В заказах он
+// приходит как угодно: +79257868093, 8 925 786-80-93, 79257868093. Без
+// приведения к одному виду один и тот же человек завёлся бы трижды и история
+// аренд рассыпалась бы.
+function normalizePhone(raw) {
+  var digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 11 && digits.charAt(0) === "8") digits = "7" + digits.substring(1);
+  if (digits.length === 10) digits = "7" + digits;
+  return "+" + digits;
+}
+
+// Дата из формы приходит как 30.04.2026. Держим её строкой "2026-04-30":
+// так она не зависит от часового пояса таблицы и не сползает на сутки.
+function parseRuDate(raw) {
+  var s = String(raw || "").trim();
+  var m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
+  if (m) {
+    return m[3] + "-" + pad2(Number(m[2])) + "-" + pad2(Number(m[1]));
+  }
+  // уже ISO — пропускаем как есть
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10);
+  return "";
+}
+
+function parseMoney(raw) {
+  var s = String(raw || "").replace(/\s/g, "").replace(",", ".");
+  var n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+// Ключи полей формы приводим к одному виду: Phone_minors, phone_minor и
+// "Phone Minors" должны находиться одинаково. Форма на сайте ещё меняется, и
+// подбирать её точное написание мы не можем.
+function normalizeFieldKey(key) {
+  return String(key || "").toLowerCase().replace(/[^a-zа-яё0-9]/g, "");
+}
+
+function pickField(fields, names) {
+  for (var i = 0; i < names.length; i++) {
+    var key = normalizeFieldKey(names[i]);
+    if (fields[key] !== undefined && String(fields[key]).trim() !== "") {
+      return String(fields[key]).trim();
+    }
+  }
+  return "";
+}
+
+/**
+ * Разбирает сообщение о заказе, которое бот сайта присылает в общий чат.
+ * Возвращает {order_no, items, fields, amount, currency, source_url}, где
+ * fields — словарь «нормализованный ключ → значение» со ВСЕМИ строками вида
+ * «Ключ: значение». Разбираем именно словарём, а не списком известных полей:
+ * форма на сайте в работе, и поле, которого мы не знаем, должно доехать до
+ * человека, а не потеряться молча.
+ */
+function parseOrderMessage(text) {
+  var raw = String(text || "");
+  var out = {
+    order_no: "", request_code: "", items: [], fields: {}, raw_keys: {},
+    amount: 0, currency: "", source_url: "", raw_text: raw,
+  };
+  var lines = raw.split(/\r?\n/);
+
+  // «4. OSTERRIG SIRIUS 100CM: 154000 (4 x 38500)» — название берём лениво, до
+  // первого двоеточия; «x» бывает латинской, кириллической и знаком умножения.
+  var itemRe = /^\s*(\d+)\s*[.)]\s*(.+?)\s*:\s*([\d\s.,]*)\s*\(\s*(\d+)\s*[x×х]\s*([\d\s.,]+)\s*\)\s*$/;
+  var kvRe = /^\s*([A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё0-9_ ]*?)\s*:\s*(.*)$/;
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var trimmed = line.replace(/\t/g, " ").trim();
+    if (!trimmed) continue;
+
+    var orderM = trimmed.match(/^Заказ\s*№\s*(\S+)/i);
+    if (orderM) { out.order_no = orderM[1].trim(); continue; }
+
+    if (/^https?:\/\//i.test(trimmed)) { out.source_url = trimmed; continue; }
+
+    var itemM = trimmed.match(itemRe);
+    if (itemM) {
+      out.items.push({
+        line_no: Number(itemM[1]),
+        raw_name: itemM[2].trim(),
+        total: parseMoney(itemM[3]),
+        qty: Number(itemM[4]),
+        price: parseMoney(itemM[5]),
+      });
+      continue;
+    }
+
+    var kvM = trimmed.match(kvRe);
+    if (!kvM) continue;
+    var key = kvM[1].trim();
+    var value = kvM[2].trim();
+    // «Информация о покупателе:» и «Дополнительная информация:» — заголовки
+    // разделов, а не поля: у них пустое значение и пробел в названии.
+    if (!value && key.indexOf(" ") !== -1) continue;
+    out.fields[normalizeFieldKey(key)] = value;
+    out.raw_keys[normalizeFieldKey(key)] = key;
+  }
+
+  var amountLine = pickField(out.fields, ["Сумма платежа"]);
+  if (amountLine) {
+    var am = amountLine.match(/^([\d\s.,]+)\s*(\S*)$/);
+    if (am) {
+      out.amount = parseMoney(am[1]);
+      out.currency = (am[2] || "").trim();
+    }
+  }
+  out.request_code = pickField(out.fields, ["Код заявки"]);
+  return out;
+}
+
+/**
+ * Из словаря полей делает строку заказа. Одна функция на оба пути приёма:
+ * вставленное сообщение сначала превращается в словарь разбором, вебхук Tilda
+ * отдаёт такой словарь сразу. Иначе второй путь пришлось бы писать заново.
+ */
+function mapOrderFields(fields) {
+  var isAdultRaw = pickField(fields, ["Are_you_an_adult", "adult"]);
+  var guardianName = pickField(fields, ["Full_name_guardian", "guardian_name"]);
+  // Явный ответ формы важнее догадки; если поля нет — судим по наличию
+  // взрослого: он появляется в заказе только у несовершеннолетнего.
+  var isAdult = isAdultRaw
+    ? !/^(нет|no|false)$/i.test(isAdultRaw)
+    : !guardianName;
+
+  return {
+    // Имена полей для совершеннолетнего заказчика мы ещё не видели, поэтому
+    // берём первое найденное из вероятных написаний. Если не нашлось ничего,
+    // экран покажет разобранный словарь и попросит сопоставить руками.
+    student_name: pickField(fields, ["Full_name_minor", "Full_name", "Full_name_adult", "ФИО"]),
+    student_phone: normalizePhone(pickField(fields, ["Phone_minors", "Phone_minor", "Phone", "Phone_adult", "Телефон"])),
+    student_tg: pickField(fields, ["Telegram_Minors", "Telegram_minor", "Telegram", "Telegram_adult"]),
+    is_adult: isAdult ? "TRUE" : "FALSE",
+    guardian_name: isAdult ? "" : guardianName,
+    guardian_phone: isAdult ? "" : normalizePhone(pickField(fields, ["Phone_guardian", "guardian_phone"])),
+    project: pickField(fields, ["Type_and_name_of_the_project", "project", "Проект"]),
+    issue_date: parseRuDate(pickField(fields, ["Date_of_issue", "issue_date"])),
+    return_date: parseRuDate(pickField(fields, ["Date_completion", "Date_of_completion", "return_date"])),
+    extra_input: pickField(fields, ["Input", "Дополнительно"]),
+  };
+}
+
+// Сопоставление строки заказа с каталогом. Точное совпадение берём сразу,
+// иначе отдаём похожие и решает человек: ошибка здесь означает, что выдача
+// спишется не с той строки заказа.
+function matchOrderLine(rawName, modelRows) {
+  var needle = normalizeModelName(rawName);
+  if (!needle) return { model_code: "", category: "", suggestions: [] };
+  var suggestions = [];
+  for (var i = 0; i < modelRows.length; i++) {
+    var candidate = normalizeModelName(modelRows[i].model_name);
+    if (!candidate) continue;
+    if (candidate === needle) {
+      return {
+        model_code: pad2(Number(modelRows[i].model_code)),
+        category: modelRows[i].category,
+        suggestions: [],
+      };
+    }
+    if (suggestions.length < 5 &&
+        (candidate.indexOf(needle) !== -1 || needle.indexOf(candidate) !== -1)) {
+      suggestions.push({
+        model_code: pad2(Number(modelRows[i].model_code)),
+        category: modelRows[i].category,
+        model_name: modelRows[i].model_name,
+      });
+    }
+  }
+  return { model_code: "", category: "", suggestions: suggestions };
+}
+
+// Разбор без записи: сначала человек смотрит, что распознано, потом
+// подтверждает. За этим стоят чужие персональные данные и материальная
+// ответственность — вслепую такое сохранять нельзя.
+function handleOrderParse(payload, token) {
+  checkAuth(token);
+  var parsed = parseOrderMessage(payload.text);
+  if (!parsed.order_no && !parsed.items.length) {
+    throw apiError(400, "Не похоже на сообщение о заказе: ни номера, ни позиций не нашлось");
+  }
+  var mapped = mapOrderFields(parsed.fields);
+  var modelRows = readRows(getSheet(SHEETS.MODELS));
+  var items = parsed.items.map(function (line) {
+    var match = matchOrderLine(line.raw_name, modelRows);
+    return {
+      line_no: line.line_no, raw_name: line.raw_name, qty: line.qty,
+      price: line.price, total: line.total,
+      model_code: match.model_code, category: match.category,
+      suggestions: match.suggestions,
+    };
+  });
+
+  var warnings = [];
+  if (!mapped.student_name) warnings.push("Не распознано имя арендатора");
+  if (!mapped.student_phone) warnings.push("Не распознан телефон арендатора — историю по нему будет не собрать");
+  if (!parsed.order_no) warnings.push("Не распознан номер заказа");
+  var unmatched = items.filter(function (i) { return !i.model_code; }).length;
+  if (unmatched) {
+    warnings.push("Не сопоставлено с каталогом позиций: " + unmatched +
+      " — их можно выдавать количеством, без сканирования");
+  }
+
+  var order = mapped;
+  order.order_no = parsed.order_no;
+  order.request_code = parsed.request_code;
+  order.amount = parsed.amount;
+  order.currency = parsed.currency;
+  order.source_url = parsed.source_url;
+  order.raw_text = parsed.raw_text;
+
+  var existing = parsed.order_no
+    ? findRowByValue(getSheet(SHEETS.ORDERS), "order_no", parsed.order_no)
+    : null;
+
+  return {
+    order: order, items: items, fields: parsed.fields, raw_keys: parsed.raw_keys,
+    warnings: warnings,
+    already_exists: existing ? Number(existing.order_id) : null,
+  };
+}
+
+// Арендатор опознаётся по телефону. Без телефона заказ всё равно создаётся, но
+// без привязки к студенту: связывать людей по совпадению ФИО — верный способ
+// склеить двух разных однофамильцев.
+function findOrCreateStudent(order) {
+  var phone = normalizePhone(order.student_phone);
+  var sheet = getSheet(SHEETS.STUDENTS);
+  if (!phone) return { student_id: "", created: false };
+
+  var rows = readRows(sheet);
+  for (var i = 0; i < rows.length; i++) {
+    if (normalizePhone(rows[i].phone) === phone) {
+      // Ник в Telegram и написание имени со временем меняются — подтягиваем
+      // свежее из заказа, чтобы карточка не устаревала.
+      var patch = {};
+      if (order.student_name && String(rows[i].full_name).trim() !== order.student_name) {
+        patch.full_name = order.student_name;
+      }
+      if (order.student_tg && String(rows[i].tg_username).trim() !== order.student_tg) {
+        patch.tg_username = order.student_tg;
+      }
+      if (patch.full_name || patch.tg_username) updateRow(sheet, rows[i].__row, patch);
+      return { student_id: Number(rows[i].student_id), created: false };
+    }
+  }
+
+  var studentId = nextId("student_id", maxIdIn(sheet, "student_id"));
+  appendRow(sheet, {
+    student_id: studentId,
+    full_name: order.student_name || "",
+    phone: phone,
+    tg_username: order.student_tg || "",
+    created_at: new Date().toISOString(),
+    notes: "",
+  });
+  return { student_id: studentId, created: true };
+}
+
+function handleOrderCreate(payload, token) {
+  var staffRow = checkAuth(token);
+  var orderNo = String(payload.order_no || "").trim();
+  if (!orderNo) throw apiError(400, "Укажите номер заказа");
+  if (!String(payload.student_name || "").trim()) throw apiError(400, "Укажите имя арендатора");
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.ORDERS);
+    // Один номер — один заказ. Иначе журнал перестаёт сходиться с сайтом, а
+    // выдача списывается с чужой строки.
+    var dup = findRowByValue(sheet, "order_no", orderNo);
+    if (dup) throw apiError(409, "Заказ " + orderNo + " уже заведён (№" + dup.order_id + ")");
+
+    var student = findOrCreateStudent(payload);
+    var orderId = nextId("order_id", maxIdIn(sheet, "order_id"));
+    var now = new Date().toISOString();
+
+    appendRow(sheet, {
+      order_id: orderId,
+      order_no: orderNo,
+      request_code: String(payload.request_code || ""),
+      student_id: student.student_id,
+      student_name: String(payload.student_name || "").trim(),
+      student_phone: normalizePhone(payload.student_phone),
+      student_tg: String(payload.student_tg || ""),
+      is_adult: payload.is_adult === "FALSE" || payload.is_adult === false ? "FALSE" : "TRUE",
+      guardian_name: String(payload.guardian_name || ""),
+      guardian_phone: normalizePhone(payload.guardian_phone),
+      project: String(payload.project || ""),
+      issue_date: parseRuDate(payload.issue_date),
+      return_date: parseRuDate(payload.return_date),
+      extra_input: String(payload.extra_input || ""),
+      amount: Number(payload.amount || 0),
+      currency: String(payload.currency || ""),
+      source_url: String(payload.source_url || ""),
+      status: "New",
+      raw_text: String(payload.raw_text || ""),
+      created_at: now,
+      created_by: staffRow.staff_id,
+      created_by_name: staffRow.full_name,
+      closed_at: "",
+    });
+
+    var lines = Array.isArray(payload.items) ? payload.items : [];
+    if (lines.length) {
+      var itemSheet = getSheet(SHEETS.ORDER_ITEMS);
+      var headers = sheetHeaders(itemSheet);
+      var start = itemSheet.getLastRow() + 1;
+      prepareRows(itemSheet, start, lines.length);
+      itemSheet.getRange(start, 1, lines.length, headers.length).setValues(
+        lines.map(function (line, idx) {
+          var row = {
+            order_id: orderId,
+            line_no: Number(line.line_no || idx + 1),
+            raw_name: String(line.raw_name || ""),
+            model_code: line.model_code ? pad2(Number(line.model_code)) : "",
+            category: String(line.category || ""),
+            qty: Number(line.qty || 1),
+            price: Number(line.price || 0),
+            total: Number(line.total || 0),
+            issued_qty: 0,
+            note: String(line.note || ""),
+          };
+          return headers.map(function (h) { return row[h] !== undefined ? row[h] : ""; });
+        }));
+    }
+
+    return { order_id: orderId, student_id: student.student_id, student_created: student.created };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Считает по журналу, что из заказов на руках. Один проход по всем выдачам на
+// весь список: запрос на заказ превратил бы список в минуты ожидания.
+function orderCounts(txRows) {
+  var counts = {};
+  txRows.forEach(function (t) {
+    var id = String(t.order_id || "");
+    if (!id) return;
+    if (!counts[id]) counts[id] = { open: 0, total: 0 };
+    counts[id].total += 1;
+    if (t.status === "Open") counts[id].open += 1;
+  });
+  return counts;
+}
+
+// Статус заказа не вводится руками, а вытекает из выдач: рассинхронизация между
+// «статусом» и журналом — это техника, которую считают возвращённой, пока она на
+// руках. Отмена — единственное, что решает человек.
+function orderStatus(orderRow, count) {
+  if (orderRow.status === "Cancelled") return "Cancelled";
+  var c = count || { open: 0, total: 0 };
+  if (c.open > 0) return "Issued";
+  if (c.total > 0) return "Returned";
+  return "New";
+}
+
+function handleOrdersList(payload, token) {
+  checkAuth(token);
+  var counts = orderCounts(readRows(getSheet(SHEETS.TRANSACTIONS)));
+  var rows = readRows(getSheet(SHEETS.ORDERS)).map(function (r) {
+    var count = counts[String(r.order_id)] || { open: 0, total: 0 };
+    return {
+      order_id: r.order_id,
+      order_no: String(r.order_no),
+      request_code: String(r.request_code || ""),
+      student_id: r.student_id,
+      student_name: r.student_name,
+      student_phone: String(r.student_phone || ""),
+      student_tg: String(r.student_tg || ""),
+      is_adult: isTruthyCell(r.is_adult),
+      guardian_name: r.guardian_name || "",
+      guardian_phone: String(r.guardian_phone || ""),
+      project: r.project || "",
+      issue_date: String(r.issue_date || ""),
+      return_date: String(r.return_date || ""),
+      extra_input: r.extra_input || "",
+      amount: r.amount || 0,
+      currency: r.currency || "",
+      status: orderStatus(r, count),
+      issued_open: count.open,
+      issued_total: count.total,
+      created_at: r.created_at,
+      created_by_name: r.created_by_name || "",
+      // raw_text в список не отдаём: это всё сообщение целиком, включая даты
+      // рождения. Оно нужно только в карточке одного заказа.
+    };
+  });
+
+  if (payload.status && payload.status !== "all") {
+    rows = rows.filter(function (r) { return r.status === payload.status; });
+  }
+  return rows;
+}
+
+function handleOrderCard(payload, token) {
+  checkAuth(token);
+  var orderId = String(payload.order_id || "");
+  var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
+  if (!order) throw apiError(404, "Заказ не найден");
+
+  var txRows = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(function (t) {
+    return String(t.order_id || "") === orderId;
+  });
+  var items = readRows(getSheet(SHEETS.ORDER_ITEMS)).filter(function (r) {
+    return String(r.order_id) === orderId;
+  }).map(function (r) {
+    return {
+      line_no: Number(r.line_no), raw_name: r.raw_name,
+      model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
+      category: r.category || "", qty: Number(r.qty || 0), price: Number(r.price || 0),
+      total: Number(r.total || 0), issued_qty: Number(r.issued_qty || 0), note: r.note || "",
+    };
+  });
+
+  delete order.__row;
+  order.status = orderStatus(order, orderCounts(txRows)[orderId]);
+  order.is_adult = isTruthyCell(order.is_adult);
+  return {
+    order: order,
+    items: items,
+    transactions: txRows.map(function (t) { delete t.__row; return t; }),
+  };
+}
+
+// Правка заказа. Список полей закрытый: номер заказа, арендатор и состав
+// правятся не здесь — номер приходит с сайта, а состав отдельным эндпоинтом.
+var ORDER_EDITABLE = ["project", "issue_date", "return_date", "extra_input",
+                      "guardian_name", "guardian_phone", "student_tg", "status"];
+
+function handleOrderUpdate(payload, token) {
+  checkAuth(token);
+  var sheet = getSheet(SHEETS.ORDERS);
+  var order = findRowByValue(sheet, "order_id", String(payload.order_id || ""));
+  if (!order) throw apiError(404, "Заказ не найден");
+
+  var patch = {};
+  ORDER_EDITABLE.forEach(function (field) {
+    if (payload[field] === undefined) return;
+    if (field === "issue_date" || field === "return_date") {
+      patch[field] = parseRuDate(payload[field]);
+    } else if (field === "guardian_phone") {
+      patch[field] = normalizePhone(payload[field]);
+    } else if (field === "status") {
+      // Руками можно только отменить или снять отмену: остальные статусы
+      // считаются по журналу и вводу не подлежат.
+      if (payload.status !== "Cancelled" && payload.status !== "New") {
+        throw apiError(400, "Статус заказа считается по выдачам; руками можно только отменить");
+      }
+      patch.status = payload.status;
+    } else {
+      patch[field] = String(payload[field]);
+    }
+  });
+  if (!Object.keys(patch).length) throw apiError(400, "Нечего менять");
+
+  // Отменить заказ, по которому техника на руках, — значит потерять след этой
+  // техники: сначала приём, потом отмена.
+  if (patch.status === "Cancelled") {
+    var counts = orderCounts(readRows(getSheet(SHEETS.TRANSACTIONS)));
+    var count = counts[String(order.order_id)];
+    if (count && count.open > 0) {
+      throw apiError(409, "По заказу " + count.open + " позиций на руках — сначала примите их");
+    }
+  }
+
+  updateRow(sheet, order.__row, patch);
+  return { order_id: Number(order.order_id) };
+}
+
+// Правка строки состава: сопоставить с моделью каталога или отметить выданное
+// количеством. Второе нужно для позиций, которых в каталоге поштучно нет —
+// двадцать сэндбэгов никто не станет сканировать по одному.
+function handleOrderLineUpdate(payload, token) {
+  checkAuth(token);
+  var sheet = getSheet(SHEETS.ORDER_ITEMS);
+  var orderId = String(payload.order_id || "");
+  var lineNo = String(payload.line_no || "");
+  var rows = readRows(sheet);
+  var line = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].order_id) === orderId && String(rows[i].line_no) === lineNo) {
+      line = rows[i];
+      break;
+    }
+  }
+  if (!line) throw apiError(404, "Строка заказа не найдена");
+
+  var patch = {};
+  if (payload.model_code !== undefined) {
+    patch.model_code = payload.model_code ? pad2(Number(payload.model_code)) : "";
+    patch.category = String(payload.category || "");
+  }
+  if (payload.issued_qty !== undefined) {
+    var issued = Number(payload.issued_qty);
+    if (isNaN(issued) || issued < 0) throw apiError(400, "Выданное количество должно быть числом от нуля");
+    if (issued > Number(line.qty || 0)) {
+      throw apiError(400, "В заказе этой позиции " + line.qty + ", выдать больше нельзя");
+    }
+    patch.issued_qty = issued;
+  }
+  if (payload.note !== undefined) patch.note = String(payload.note);
+  if (!Object.keys(patch).length) throw apiError(400, "Нечего менять");
+
+  updateRow(sheet, line.__row, patch);
+  return { order_id: Number(orderId), line_no: Number(lineNo) };
+}
+
+function handleStudentHistory(payload, token) {
+  checkAuth(token);
+  var studentId = String(payload.student_id || "");
+  var counts = orderCounts(readRows(getSheet(SHEETS.TRANSACTIONS)));
+  var orders = readRows(getSheet(SHEETS.ORDERS))
+    .filter(function (r) { return String(r.student_id) === studentId; })
+    .map(function (r) {
+      return {
+        order_id: r.order_id, order_no: String(r.order_no), project: r.project || "",
+        issue_date: String(r.issue_date || ""), return_date: String(r.return_date || ""),
+        status: orderStatus(r, counts[String(r.order_id)]),
+      };
+    });
+  return { orders: orders };
+}
+
+function handleStudentsList(payload, token) {
+  checkAuth(token);
+  return readRows(getSheet(SHEETS.STUDENTS)).map(function (r) {
+    delete r.__row;
+    r.phone = String(r.phone || "");
+    r.tg_username = String(r.tg_username || "");
+    return r;
+  });
 }
 
 function handleItemHistory(payload, token) {

@@ -249,7 +249,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 8 вкладок', spreadsheet.getSheets().length === 8, spreadsheet.getSheets().map(s => s.name));
+check('создано 11 вкладок', spreadsheet.getSheets().length === 11, spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -259,7 +259,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 8', spreadsheet.getSheets().length === 8);
+check('вкладок по-прежнему 11', spreadsheet.getSheets().length === 11);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -777,6 +777,196 @@ check('подрезка через эндпоинт так же требует �
   r.ok === true && /отменена/.test(r.data.message), r);
 r = call('/maintenance', { action: 'archive' }, token);
 check('выгрузка через эндпоинт работает', r.ok === true && /выгружен|пуст/.test(r.data.message), r);
+
+
+console.log('\n== заказы: разбор живого сообщения бота ==');
+// Настоящее сообщение из общего чата. Держим его в тесте целиком: разбор должен
+// ломаться здесь, а не на складе.
+const BOT_MESSAGE = [
+  'Заказ №1525686941',
+  '\t1.\tGODOX OCTABOX 120: 0 (1 x 0.00)',
+  '\t2.\tGODOX KNOWLED M600BI: 0 (1 x 0.00)',
+  '\t3.\tGODOX KNOWLED MG1200BI: 0 (1 x 0.00)',
+  '\t4.\tOSTERRIG SIRIUS 100CM: 154000 (4 x 38500)',
+  '\t5.\tСОТЫ РАСТЕР OSTERRIG SIRIUS 100CM: 0 (1 x 0.00)',
+  '\t6.\tSANDBAG BIG: 50000 (20 x 2500)',
+  '\t7.\tФЛАГ БОЛЬШОЙ: 4800 (1 x 4800)',
+  '\t8.\tПЕНА БЕЛАЯ/SILVER: 3500 (1 x 3500)',
+  '\t9.\tSUPER CLAMP: 1750 (1 x 1750)',
+  'Сумма платежа: 214050 RUB',
+  'Платежная система: (none)',
+  '',
+  'Информация о покупателе:',
+  'Are_you_an_adult: Нет',
+  'Full_name_guardian: Ильина-Ноткина Елена Борисовна',
+  'Date_of_birth_guardian: 07.09.1980',
+  'Phone_guardian: +79257868093',
+  'Full_name_minor: Ильина-Ноктина Полина Ильинична',
+  'Date_of_birth_minor: 18.11.2008',
+  'Phone_minors: +79257868093',
+  'Telegram_Minors: @poliviks_notkina',
+  'Date_of_issue: 30.04.2026',
+  'Date_completion: 03.05.2026',
+  'Type_and_name_of_the_project: км',
+  'Equipment_use_addresses: шипила',
+  'Input: + 4 ковра гойда',
+  '',
+  'Дополнительная информация:',
+  'Код заявки: 3288736:8358371482',
+  'Код блока: rec1685127891',
+  'Форма: Cart',
+  'https://alexeyshishkin.ru/mifs_rent/220/reservation/cinema#!/tab/687538023-3',
+].join('\n');
+
+// Две позиции из заказа заводим в каталог, чтобы проверить сопоставление.
+const osterrig1 = call('/item/create', { name: 'OSTERRIG SIRIUS 100CM', category: 'LGT' }, token).data.item_id;
+const osterrig2 = call('/item/create', { name: 'OSTERRIG SIRIUS 100CM', category: 'LGT' }, token).data.item_id;
+call('/item/create', { name: 'GODOX OCTABOX 120', category: 'LGT' }, token);
+
+r = call('/order/parse', { text: BOT_MESSAGE }, token);
+check('сообщение разобрано', r.ok === true, r);
+const parsed = r.ok ? r.data : { order: {}, items: [], warnings: [] };
+check('номер заказа строкой', parsed.order.order_no === '1525686941', parsed.order.order_no);
+check('код заявки с двоеточием не потерян',
+  parsed.order.request_code === '3288736:8358371482', parsed.order.request_code);
+check('разобрано 9 строк состава', parsed.items.length === 9, parsed.items.length);
+check('количество из строки «4 x 38500» прочитано',
+  parsed.items[3].qty === 4 && parsed.items[3].price === 38500, parsed.items[3]);
+check('двадцать сэндбэгов — это количество, а не двадцать строк',
+  parsed.items[5].qty === 20 && parsed.items[5].raw_name === 'SANDBAG BIG', parsed.items[5]);
+check('заказчик несовершеннолетний', parsed.order.is_adult === 'FALSE', parsed.order.is_adult);
+check('арендатор — ребёнок, а не представитель',
+  parsed.order.student_name === 'Ильина-Ноктина Полина Ильинична', parsed.order.student_name);
+check('представитель распознан',
+  parsed.order.guardian_name === 'Ильина-Ноткина Елена Борисовна', parsed.order.guardian_name);
+check('телефоны приведены к одному виду',
+  parsed.order.student_phone === '+79257868093' && parsed.order.guardian_phone === '+79257868093',
+  [parsed.order.student_phone, parsed.order.guardian_phone]);
+check('ник Telegram взят как есть', parsed.order.student_tg === '@poliviks_notkina', parsed.order.student_tg);
+check('даты переведены в ISO',
+  parsed.order.issue_date === '2026-04-30' && parsed.order.return_date === '2026-05-03',
+  [parsed.order.issue_date, parsed.order.return_date]);
+check('дописанное руками поле Input сохранено',
+  parsed.order.extra_input === '+ 4 ковра гойда', parsed.order.extra_input);
+check('проект прочитан', parsed.order.project === 'км', parsed.order.project);
+check('сумма и валюта прочитаны',
+  parsed.order.amount === 214050 && parsed.order.currency === 'RUB',
+  [parsed.order.amount, parsed.order.currency]);
+check('ссылка на заказ сохранена как непрозрачная строка',
+  /^https:\/\/alexeyshishkin\.ru\//.test(parsed.order.source_url), parsed.order.source_url);
+// Персональных данных — минимум: даты рождения отдельными полями не раскладываем.
+check('даты рождения не попадают в поля заказа',
+  parsed.order.student_birth_date === undefined && parsed.order.guardian_birth_date === undefined,
+  Object.keys(parsed.order));
+check('но исходное сообщение сохранено целиком для акта',
+  /Date_of_birth_minor/.test(parsed.order.raw_text));
+check('неизвестные поля формы доехали до человека',
+  parsed.fields['equipmentuseaddresses'] === 'шипила', parsed.fields['equipmentuseaddresses']);
+check('позиция из каталога сопоставлена автоматически',
+  parsed.items[3].model_code !== '' && parsed.items[3].category === 'LGT', parsed.items[3]);
+check('несопоставленные позиции названы в предупреждениях',
+  parsed.warnings.some(w => /Не сопоставлено/.test(w)), parsed.warnings);
+r = call('/order/parse', { text: 'Привет, а склад открыт?' }, token);
+check('не-заказ отклонён с внятной ошибкой', r.ok === false && r.status === 400, r);
+
+console.log('\n== заказы: создание и один номер — один заказ ==');
+r = call('/order/create', Object.assign({}, parsed.order, { items: parsed.items }), token);
+check('заказ создан', r.ok === true, r);
+const orderId = r.ok ? r.data.order_id : null;
+check('студент заведён', r.ok && r.data.student_id === 1 && r.data.student_created === true, r.data);
+r = call('/order/create', Object.assign({}, parsed.order, { items: parsed.items }), token);
+check('повторный номер заказа отклонён (409)', r.ok === false && r.status === 409, r);
+
+// Тот же человек, телефон записан иначе — история должна остаться одной.
+r = call('/order/create', {
+  order_no: '1525686942', student_name: 'Ильина-Ноктина Полина Ильинична',
+  student_phone: '8 (925) 786-80-93', is_adult: 'FALSE',
+  guardian_name: 'Ильина-Ноткина Елена Борисовна', guardian_phone: '89257868093',
+  issue_date: '10.05.2026', return_date: '12.05.2026', items: [],
+}, token);
+check('телефон в другом формате нашёл того же студента',
+  r.ok === true && r.data.student_id === 1 && r.data.student_created === false, r.data);
+const secondOrderId = r.ok ? r.data.order_id : null;
+
+const ordersSheetRow = readRows(getSheet(SHEETS.ORDERS))[0];
+check('длинный номер заказа лежит в таблице строкой, без экспоненты',
+  typeof ordersSheetRow.order_no === 'string' && ordersSheetRow.order_no === '1525686941',
+  ordersSheetRow.order_no);
+
+console.log('\n== заказы: выдача в счёт заказа ==');
+r = call('/transaction/checkout', { item_id: osterrig1, order_id: orderId }, token);
+check('выдача по заказу прошла', r.ok === true, r);
+check('выдача списалась с четвёртой строки состава', r.ok && r.data.order_line === '4', r.data);
+let card = call('/order/card', { order_id: orderId }, token);
+check('в строке состава отмечено «выдано 1 из 4»',
+  card.ok && card.data.items[3].issued_qty === 1 && card.data.items[3].qty === 4, card.data && card.data.items[3]);
+const openTx = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(t => t.status === 'Open' && String(t.item_id) === String(osterrig1))[0];
+check('срок возврата подставлен из заказа',
+  openTx && String(openTx.expected_return_at) === '2026-05-03', openTx && openTx.expected_return_at);
+r = call('/orders/list', { status: 'all' }, token);
+const listed = r.ok ? r.data.filter(o => o.order_id === orderId)[0] : null;
+check('статус заказа стал «выдан»', listed && listed.status === 'Issued', listed && listed.status);
+check('в списке видно, сколько на руках', listed && listed.issued_open === 1, listed && listed.issued_open);
+check('raw_text в список не отдаётся', listed && listed.raw_text === undefined, listed && Object.keys(listed));
+
+// «+ 4 ковра гойда» в заказе доказывает, что технику дописывают руками:
+// выдать не входящее в состав можно, но это должно быть видно.
+const offOrderItem = call('/item/create', { name: 'Ковёр гойда', category: 'GRP' }, token).data.item_id;
+r = call('/transaction/checkout', { item_id: offOrderItem, order_id: orderId }, token);
+check('позицию вне состава выдать можно', r.ok === true, r);
+check('но она помечена как выданная вне заказа', r.ok && r.data.order_line === 'off-order', r.data);
+
+r = call('/order/update', { order_id: orderId, status: 'Cancelled' }, token);
+check('заказ с техникой на руках отменить нельзя (409)', r.ok === false && r.status === 409, r);
+
+console.log('\n== заказы: приём и закрытие ==');
+r = call('/transaction/checkin', { item_id: osterrig1 }, token);
+check('приём прошёл', r.ok === true, r);
+card = call('/order/card', { order_id: orderId }, token);
+check('строка состава снова свободна', card.ok && card.data.items[3].issued_qty === 0, card.data && card.data.items[3]);
+check('заказ ещё не закрыт — второй предмет на руках',
+  card.ok && card.data.order.status === 'Issued', card.ok && card.data.order.status);
+r = call('/transaction/checkin', { item_id: offOrderItem }, token);
+check('приём второго предмета прошёл', r.ok === true, r);
+card = call('/order/card', { order_id: orderId }, token);
+check('заказ закрылся сам, когда вернули всё',
+  card.ok && card.data.order.status === 'Returned', card.ok && card.data.order.status);
+check('отметка о закрытии поставлена', card.ok && String(card.data.order.closed_at) !== '', card.ok && card.data.order.closed_at);
+check('в карточке заказа сохранились все девять строк состава',
+  card.ok && card.data.items.length === 9, card.ok && card.data.items.length);
+r = call('/order/update', { order_id: orderId, status: 'Cancelled' }, token);
+check('после возврата заказ отменяется', r.ok === true, r);
+
+console.log('\n== заказы: количеством, без сканирования ==');
+// Сэндбэги и пена поштучно в каталоге не значатся — такие строки закрываются
+// количеством вручную.
+r = call('/order/line-update', { order_id: orderId, line_no: 6, issued_qty: 20 }, token);
+check('строку можно закрыть количеством', r.ok === true, r);
+r = call('/order/line-update', { order_id: orderId, line_no: 6, issued_qty: 21 }, token);
+check('больше, чем в заказе, выдать нельзя', r.ok === false && r.status === 400, r);
+r = call('/order/line-update', { order_id: orderId, line_no: 5, model_code: 1, category: 'LGT' }, token);
+check('строку можно сопоставить с моделью руками', r.ok === true, r);
+
+console.log('\n== заказы: история студента и старый журнал ==');
+r = call('/student/history', { student_id: 1 }, token);
+check('у студента два заказа', r.ok && r.data.orders.length === 2, r.ok && r.data.orders.length);
+r = call('/students/list', {}, token);
+check('телефон студента отдаётся строкой с плюсом',
+  r.ok && r.data[0].phone === '+79257868093', r.ok && r.data[0].phone);
+const legacyTx = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(t => t.client_id && !t.order_id)[0];
+check('старые строки журнала с client_id читаются после добавления колонок',
+  !!legacyTx && String(legacyTx.item_id) !== '', legacyTx && legacyTx.transaction_id);
+
+console.log('\n== заказы: перезалив каталога их не трогает ==');
+const ordersBefore = readRows(getSheet(SHEETS.ORDERS)).length;
+const studentsBefore = readRows(getSheet(SHEETS.STUDENTS)).length;
+const linesBefore = readRows(getSheet(SHEETS.ORDER_ITEMS)).length;
+metaSet('journal_archived_at', '');
+reimportInventory();
+check('заказы на месте после перезалива', readRows(getSheet(SHEETS.ORDERS)).length === ordersBefore,
+  [ordersBefore, readRows(getSheet(SHEETS.ORDERS)).length]);
+check('студенты на месте', readRows(getSheet(SHEETS.STUDENTS)).length === studentsBefore);
+check('состав заказов на месте', readRows(getSheet(SHEETS.ORDER_ITEMS)).length === linesBefore);
 
 console.log('\n== самозагрузка первого администратора закрыта навсегда ==');
 // Раньше защита держалась на «в Staff есть строки»: почистив лист, кто угодно
