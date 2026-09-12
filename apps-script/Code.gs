@@ -39,7 +39,7 @@ var CATEGORY_CODES = {
 var SCHEMA = {
   Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id"],
   Models: ["category", "model_code", "model_name", "created_at"],
-  Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at"],
+  Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at", "failed_attempts", "locked_until"],
   Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
   Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_in", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
   Defects: ["defect_id", "item_id", "reported_by", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
@@ -58,6 +58,11 @@ var TEXT_COLUMNS = {
 };
 
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов, как в js/config.js
+
+// PIN — всего 4 цифры, это 10 000 вариантов: без ограничения попыток его
+// подобрали бы скриптом за минуты, а адрес бэкенда открыт всем.
+var MAX_LOGIN_ATTEMPTS = 5;
+var LOGIN_LOCK_MS = 15 * 60 * 1000;
 var LOCK_TIMEOUT_MS = 10000;
 
 // ---------------------------------------------------------------------
@@ -123,6 +128,14 @@ function setupSheets() {
     var target = ss.getSheetByName(sheetName);
     if (!target) continue;
     prepareRows(target, 1, target.getMaxRows ? target.getMaxRows() : 1000);
+  }
+
+  // Таблицы, где администратор был создан до появления отметки, закрываем
+  // здесь: иначе достаточно очистить лист Staff, чтобы снова стать админом
+  // без пароля.
+  var staffSheet = ss.getSheetByName(SHEETS.STAFF);
+  if (staffSheet && readRows(staffSheet).length && !metaGet("bootstrap_done")) {
+    metaSet("bootstrap_done", "migrated:" + new Date().toISOString());
   }
 
   // Убираем пустой лист по умолчанию ("Sheet1" / "Лист1"), который Google
@@ -198,8 +211,14 @@ function importInventory() {
     var metaRows = readRows(metaSheet);
     var counters = {}, metaRowIndex = {};
     metaRows.forEach(function (r) {
-      counters[r.key] = Number(r.value) || 0;
-      metaRowIndex[r.key] = r.__row;
+      // Только счётчики экземпляров. Раньше сюда попадали все ключи Meta, и
+      // обратная запись превращала нечисловые значения в 0 — так затиралась
+      // отметка bootstrap_done, то есть снова открывалось создание
+      // администратора без пароля.
+      var key = String(r.key);
+      if (key.indexOf("unit_") !== 0) return;
+      counters[key] = Number(r.value) || 0;
+      metaRowIndex[key] = r.__row;
     });
 
     // Порядок колонок берём из самого листа: новые поля дописываются в конец,
@@ -372,11 +391,25 @@ function reimportInventory() {
     // ровно по данным, а Google Sheets не даёт удалить все незакреплённые
     // строки. Заодно сохраняются форматы колонок и это быстрее удаления сотен
     // строк. Заголовок (строка 1) остаётся на месте.
-    [SHEETS.EQUIPMENT, SHEETS.MODELS, SHEETS.META].forEach(function (name) {
+    [SHEETS.EQUIPMENT, SHEETS.MODELS].forEach(function (name) {
       var sheet = getSheet(name);
       var last = sheet.getLastRow();
       if (last > 1) sheet.getRange(2, 1, last - 1, sheet.getLastColumn()).clearContent();
     });
+
+    // В Meta стираем только счётчики экземпляров (unit_*), которые пересоберёт
+    // импорт. Остальное трогать нельзя: там счётчики staff_id, client_id,
+    // transaction_id и defect_id, а сотрудники и клиенты перезаливку
+    // переживают — сбросив счётчик, мы выдали бы новому сотруднику номер уже
+    // работающего. Там же отметка bootstrap_done: стерев её, мы бы заново
+    // открыли создание администратора без пароля.
+    var metaSheet = getSheet(SHEETS.META);
+    var keep = readRows(metaSheet).filter(function (row) {
+      return String(row.key) && String(row.key).indexOf("unit_") !== 0;
+    }).map(function (row) { return { key: row.key, value: row.value }; });
+    var metaLast = metaSheet.getLastRow();
+    if (metaLast > 1) metaSheet.getRange(2, 1, metaLast - 1, metaSheet.getLastColumn()).clearContent();
+    keep.forEach(function (row) { appendRow(metaSheet, row); });
   } finally {
     lock.releaseLock();
   }
@@ -505,6 +538,7 @@ function doPost(e) {
       case "/staff/create": data = handleStaffCreate(payload, token); break;
       case "/staff/list": data = handleStaffList(payload, token); break;
       case "/staff/set-active": data = handleStaffSetActive(payload, token); break;
+      case "/staff/set-pin": data = handleStaffSetPin(payload, token); break;
       default:
         throw apiError(404, "Неизвестный эндпоинт: " + endpoint);
     }
@@ -528,16 +562,40 @@ function handleAuthLogin(payload) {
 
   var sheet = getSheet(SHEETS.STAFF);
   var rows = readRows(sheet);
+  // Ищем по логину независимо от активности: счётчик попыток надо вести и для
+  // отключённого сотрудника, а наружу в обоих случаях отдаём одно и то же
+  // «неверный логин или PIN», чтобы не подсказывать, какие логины существуют.
   var staffRow = null;
   for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (String(r.login).trim().toLowerCase() === login && isTruthyCell(r.active)) {
-      staffRow = r;
+    if (String(rows[i].login).trim().toLowerCase() === login) {
+      staffRow = rows[i];
       break;
     }
   }
+
+  if (staffRow) {
+    var lockedUntil = staffRow.locked_until ? new Date(staffRow.locked_until).getTime() : 0;
+    if (lockedUntil && lockedUntil > Date.now()) {
+      var minutes = Math.ceil((lockedUntil - Date.now()) / 60000);
+      throw apiError(429, "Слишком много неверных попыток. Вход заблокирован ещё на " +
+        minutes + " мин.");
+    }
+  }
+
   var pinHash = hashPin(pin);
-  if (!staffRow || String(staffRow.pin_hash) !== pinHash) {
+  var pinOk = staffRow && String(staffRow.pin_hash) === pinHash && isTruthyCell(staffRow.active);
+  if (!pinOk) {
+    if (staffRow) {
+      var attempts = Number(staffRow.failed_attempts || 0) + 1;
+      if (attempts >= MAX_LOGIN_ATTEMPTS) {
+        updateRow(sheet, staffRow.__row, {
+          failed_attempts: 0,
+          locked_until: new Date(Date.now() + LOGIN_LOCK_MS).toISOString(),
+        });
+      } else {
+        updateRow(sheet, staffRow.__row, { failed_attempts: attempts });
+      }
+    }
     throw apiError(401, "Неверный логин или PIN");
   }
 
@@ -545,6 +603,8 @@ function handleAuthLogin(payload) {
   updateRow(sheet, staffRow.__row, {
     session_token: token,
     token_issued_at: new Date().toISOString(),
+    failed_attempts: 0,
+    locked_until: "",
   });
   return { token: token, staff_id: staffRow.staff_id, full_name: staffRow.full_name, role: staffRow.role };
 }
@@ -640,7 +700,7 @@ function handleTransactionCheckout(payload, token) {
     if (!item) throw apiError(404, "Предмет не найден");
     if (item.status !== "Available") throw apiError(409, "Предмет уже выдан или недоступен");
 
-    var txId = nextId("transaction_id");
+    var txId = nextId("transaction_id", maxIdIn(getSheet(SHEETS.TRANSACTIONS), "transaction_id"));
     appendRow(getSheet(SHEETS.TRANSACTIONS), {
       transaction_id: txId,
       item_id: itemId,
@@ -687,7 +747,7 @@ function handleTransactionCheckin(payload, token) {
     var defectId = null;
     var newStatus = "Available";
     if (payload.has_defect) {
-      defectId = nextId("defect_id");
+      defectId = nextId("defect_id", maxIdIn(getSheet(SHEETS.DEFECTS), "defect_id"));
       appendRow(getSheet(SHEETS.DEFECTS), {
         defect_id: defectId,
         item_id: itemId,
@@ -700,13 +760,22 @@ function handleTransactionCheckin(payload, token) {
         resolved_at: "",
         resolution_notes: "",
       });
-      newStatus = "In Repair";
+      if (defectBlocksRental(payload.defect_severity || "Minor")) newStatus = "In Repair";
     }
     updateRow(eqSheet, item.__row, { status: newStatus, current_transaction_id: "" });
     return { transaction_id: openTx.transaction_id, defect_id: defectId };
   } finally {
     lock.releaseLock();
   }
+}
+
+// Одно правило для всех путей заявки о дефекте. Раньше приём с дефектом всегда
+// уводил предмет в ремонт, а отдельная заявка — только при «не работает»: один и
+// тот же дефект давал разный результат, и серьёзная поломка оставляла технику
+// доступной к выдаче. Царапина снимать камеру с аренды не должна, а «серьёзный»
+// и «не работает» — должны.
+function defectBlocksRental(severity) {
+  return severity === "Major" || severity === "Out of Service";
 }
 
 function handleDefectReport(payload, token) {
@@ -719,23 +788,28 @@ function handleDefectReport(payload, token) {
     var item = findRowByValue(eqSheet, "item_id", itemId);
     if (!item) throw apiError(404, "Предмет не найден");
 
-    var defectId = nextId("defect_id");
+    var severity = payload.severity || "Minor";
+    var defectId = nextId("defect_id", maxIdIn(getSheet(SHEETS.DEFECTS), "defect_id"));
     appendRow(getSheet(SHEETS.DEFECTS), {
       defect_id: defectId,
       item_id: itemId,
       reported_by: staffRow.staff_id,
       related_transaction_id: "",
       description: payload.description || "",
-      severity: payload.severity || "Minor",
+      severity: severity,
       status: "Open",
       reported_at: new Date().toISOString(),
       resolved_at: "",
       resolution_notes: "",
     });
-    if (payload.severity === "Out of Service") {
-      updateRow(eqSheet, item.__row, { status: "In Repair" });
+    // Предмет на руках у клиента не трогаем — статус пересчитается при приёме;
+    // списанный не возвращаем в оборот.
+    var status = item.status;
+    if (defectBlocksRental(severity) && status === "Available") {
+      status = "In Repair";
+      updateRow(eqSheet, item.__row, { status: status });
     }
-    return { defect_id: defectId };
+    return { defect_id: defectId, status: status };
   } finally {
     lock.releaseLock();
   }
@@ -759,10 +833,13 @@ function handleDefectResolve(payload, token) {
       var eqSheet = getSheet(SHEETS.EQUIPMENT);
       var item = findRowByValue(eqSheet, "item_id", defect.item_id);
       if (item) {
+        // Считаем только дефекты, снимающие с выдачи: иначе одна непочиненная
+        // царапина держала бы предмет в ремонте навсегда.
         var stillOpen = readRows(defSheet).some(function (d) {
           return String(d.item_id) === String(defect.item_id) &&
             d.status !== "Resolved" &&
-            String(d.defect_id) !== String(defect.defect_id);
+            String(d.defect_id) !== String(defect.defect_id) &&
+            defectBlocksRental(d.severity);
         });
         if (!stillOpen && item.status === "In Repair") {
           updateRow(eqSheet, item.__row, { status: "Available" });
@@ -803,7 +880,7 @@ function handleClientCreate(payload, token) {
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var clientId = nextId("client_id");
+    var clientId = nextId("client_id", maxIdIn(getSheet(SHEETS.CLIENTS), "client_id"));
     appendRow(getSheet(SHEETS.CLIENTS), {
       client_id: clientId,
       client_name: payload.client_name || "",
@@ -859,13 +936,21 @@ function handleStaffCreate(payload, token) {
   try {
     var sheet = getSheet(SHEETS.STAFF);
     var rows = readRows(sheet);
-    var isBootstrap = rows.length === 0;
+    // Самозагрузка первого администратора — без токена, но ровно один раз за
+    // жизнь таблицы: отметку в Meta не сотрёт даже очистка листа Staff. Иначе
+    // достаточно было бы удалить строку сотрудника, чтобы путь «стань админом
+    // без пароля» открылся снова, и узнать об этом было бы негде.
+    // Если доступ администратора потерян, владелец таблицы удаляет строку
+    // bootstrap_done на листе Meta — это осознанное действие, а не открытый
+    // эндпоинт.
+    var isBootstrap = rows.length === 0 && !metaGet("bootstrap_done");
     if (!isBootstrap) {
-      // Сюда попадают в двух случаях: админ добавляет сотрудника (нормально)
-      // и кто-то повторно жмёт «создать первого администратора» на экране
-      // входа, когда сотрудники уже заведены — во втором случае токена нет,
-      // и общее «сессия недействительна» только запутает.
-      if (!token) throw apiError(403, "Сотрудники уже есть, обратитесь к администратору");
+      if (!token) {
+        throw apiError(403, rows.length
+          ? "Сотрудники уже есть, обратитесь к администратору"
+          : "Первый администратор уже создавался. Чтобы завести его заново, " +
+            "удалите строку bootstrap_done на листе Meta.");
+      }
       requireAdmin(token);
     }
 
@@ -873,7 +958,8 @@ function handleStaffCreate(payload, token) {
     var taken = rows.some(function (r) { return String(r.login).trim().toLowerCase() === loginLower; });
     if (taken) throw apiError(409, "Такой логин уже используется");
 
-    var staffId = nextId("staff_id");
+    var staffId = nextId("staff_id", maxIdIn(sheet, "staff_id"));
+    if (isBootstrap) metaSet("bootstrap_done", new Date().toISOString());
     appendRow(sheet, {
       staff_id: staffId,
       full_name: payload.full_name || login,
@@ -905,6 +991,55 @@ function handleStaffSetActive(payload, token) {
   if (!staffRow) throw apiError(404, "Сотрудник не найден");
   updateRow(sheet, staffRow.__row, { active: !!payload.active });
   return {};
+}
+
+// Смена PIN. Себе — с подтверждением текущего PIN (чтобы чужой человек не сменил
+// его с незаблокированного телефона), сотруднику — только администратором.
+// В обоих случаях старая сессия становится недействительной: тому, кому PIN
+// сбросили, придётся войти заново.
+function handleStaffSetPin(payload, token) {
+  var me = checkAuth(token);
+  var newPin = String(payload.pin || "").trim();
+  if (!/^\d{4,6}$/.test(newPin)) throw apiError(400, "PIN — от 4 до 6 цифр");
+
+  var sheet = getSheet(SHEETS.STAFF);
+  var targetId = payload.staff_id === undefined || payload.staff_id === null || payload.staff_id === ""
+    ? me.staff_id
+    : payload.staff_id;
+  var isSelf = String(targetId) === String(me.staff_id);
+
+  var staffRow = isSelf ? me : findRowByValue(sheet, "staff_id", targetId);
+  if (!staffRow) throw apiError(404, "Сотрудник не найден");
+
+  if (isSelf) {
+    // Именно 403, а не 401: сессия в порядке, неверен введённый текущий PIN.
+    // На 401 клиент считает сессию протухшей и выбрасывает на экран входа —
+    // человек терял бы сессию из-за опечатки.
+    if (hashPin(String(payload.current_pin || "")) !== String(staffRow.pin_hash)) {
+      throw apiError(403, "Текущий PIN указан неверно");
+    }
+  } else if (me.role !== "Admin") {
+    throw apiError(403, "Менять PIN другому сотруднику может только администратор");
+  }
+
+  var patch = {
+    pin_hash: hashPin(newPin),
+    failed_attempts: 0,
+    locked_until: "",
+    session_token: "",
+    token_issued_at: "",
+  };
+  var result = {};
+  if (isSelf) {
+    // Свою сессию продлеваем новым токеном, иначе человек сменил бы PIN и
+    // тут же вылетел на экран входа.
+    var fresh = Utilities.getUuid();
+    patch.session_token = fresh;
+    patch.token_issued_at = new Date().toISOString();
+    result.token = fresh;
+  }
+  updateRow(sheet, staffRow.__row, patch);
+  return result;
 }
 
 // ---------------------------------------------------------------------
@@ -1011,10 +1146,32 @@ function updateRow(sheet, rowIndex, patchObject) {
   range.setValues([values]);
 }
 
-function nextId(key) {
+function maxIdIn(sheet, column) {
+  return readRows(sheet).reduce(function (max, row) {
+    var n = Number(row[column]);
+    return n > max ? n : max;
+  }, 0);
+}
+
+// Лист Meta — хранилище «ключ: значение» для счётчиков и отметок.
+function metaGet(key) {
+  var row = findRowByValue(getSheet(SHEETS.META), "key", key);
+  return row ? row.value : "";
+}
+
+function metaSet(key, value) {
   var sheet = getSheet(SHEETS.META);
   var row = findRowByValue(sheet, "key", key);
-  var value = row ? Number(row.value) : 0;
+  if (row) updateRow(sheet, row.__row, { value: value });
+  else appendRow(sheet, { key: key, value: value });
+}
+
+// minimum — подстраховка: если счётчик в Meta потерялся, номер всё равно не
+// совпадёт с уже существующим (сотрудников и клиентов перезаливка не удаляет).
+function nextId(key, minimum) {
+  var sheet = getSheet(SHEETS.META);
+  var row = findRowByValue(sheet, "key", key);
+  var value = Math.max(row ? Number(row.value) : 0, Number(minimum || 0));
   value += 1;
   if (row) {
     updateRow(sheet, row.__row, { value: value });
@@ -1137,7 +1294,7 @@ function checkAuth(token) {
 function requireAdmin(token) {
   var staffRow = checkAuth(token);
   if (staffRow.role !== "Admin") {
-    throw apiError(403, "Только администратор может добавлять сотрудников");
+    throw apiError(403, "Действие доступно только администратору");
   }
   return staffRow;
 }

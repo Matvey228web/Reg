@@ -18,6 +18,7 @@
   document.querySelectorAll("#screen-home [data-nav]").forEach((el) => {
     el.addEventListener("click", () => Router.navigate(el.dataset.nav));
   });
+  document.getElementById("pin-change-btn").addEventListener("click", () => Router.navigate("pin"));
   document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
 
   Router.init();
@@ -28,6 +29,7 @@
   RepairScreen.init();
   ClientsScreen.init();
   StaffScreen.init();
+  PinScreen.init();
 
   const session = Auth.requireAuth();
   if (session) Router.reset("home");

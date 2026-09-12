@@ -17,10 +17,16 @@ const StaffScreen = (() => {
           <button class="btn btn--secondary" data-toggle-active="${s.staff_id}" data-active="${s.active}" style="margin-top:8px; width:auto;">
             ${s.active ? "Отключить" : "Включить"}
           </button>
+          <button class="btn btn--secondary" data-reset-pin="${s.staff_id}" data-name="${escapeHtml(s.full_name)}" style="margin-top:8px; width:auto;">
+            Сбросить PIN
+          </button>
         </div>
       `).join("");
       list.querySelectorAll("[data-toggle-active]").forEach((btn) => {
         btn.addEventListener("click", () => toggleActive(btn.dataset.toggleActive, btn.dataset.active !== "true"));
+      });
+      list.querySelectorAll("[data-reset-pin]").forEach((btn) => {
+        btn.addEventListener("click", () => resetPin(btn.dataset.resetPin, btn.dataset.name));
       });
     } catch (err) {
       list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
@@ -36,6 +42,51 @@ const StaffScreen = (() => {
       TG.hapticError();
       TG.showAlert(err.message);
     }
+  }
+
+  // Сброс PIN сотруднику. Нативного запроса ввода в Telegram нет (есть только
+  // alert и confirm), поэтому поле разворачиваем прямо в карточке.
+  // Прежняя сессия сотрудника аннулируется — войдёт заново с новым PIN.
+  function resetPin(staffId, name) {
+    const card = document.querySelector(`[data-reset-pin="${staffId}"]`).closest(".card");
+    if (card.querySelector(".pin-reset-form")) return;
+    const box = document.createElement("div");
+    box.className = "pin-reset-form section";
+    box.innerHTML = `
+      <div class="field">
+        <label>Новый PIN для ${escapeHtml(name)} (4–6 цифр)</label>
+        <input type="password" inputmode="numeric" pattern="[0-9]*" class="pin-reset-input" />
+      </div>
+      <button class="btn pin-reset-save" style="width:auto;">Сохранить</button>
+      <button class="btn btn--secondary pin-reset-cancel" style="width:auto;">Отмена</button>
+      <div class="pin-reset-error"></div>`;
+    card.appendChild(box);
+    const input = box.querySelector(".pin-reset-input");
+    const err = box.querySelector(".pin-reset-error");
+    input.focus();
+
+    box.querySelector(".pin-reset-cancel").addEventListener("click", () => box.remove());
+    box.querySelector(".pin-reset-save").addEventListener("click", async () => {
+      const pin = input.value.trim();
+      err.innerHTML = "";
+      if (!/^\d{4,6}$/.test(pin)) {
+        err.innerHTML = `<div class="error-box">PIN — от 4 до 6 цифр</div>`;
+        return;
+      }
+      const save = box.querySelector(".pin-reset-save");
+      save.disabled = true;
+      try {
+        await apiPost("/staff/set-pin", { staff_id: Number(staffId), pin });
+        TG.hapticSuccess();
+        box.remove();
+        TG.showAlert(`PIN изменён. Передайте его ${name} — войти надо будет заново.`);
+      } catch (e) {
+        TG.hapticError();
+        err.innerHTML = `<div class="error-box">${escapeHtml(e.message)}</div>`;
+      } finally {
+        save.disabled = false;
+      }
+    });
   }
 
   function resetAddForm() {

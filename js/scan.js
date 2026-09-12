@@ -114,9 +114,9 @@ const ScanScreen = (() => {
             <div class="field">
               <label for="scan-defect-severity">Серьёзность</label>
               <select id="scan-defect-severity">
-                <option value="Minor">Незначительный</option>
-                <option value="Major">Серьёзный</option>
-                <option value="Out of Service">Не работает</option>
+                <option value="Minor">Незначительный — можно выдавать</option>
+                <option value="Major">Серьёзный — снять с выдачи</option>
+                <option value="Out of Service">Не работает — снять с выдачи</option>
               </select>
             </div>
           </div>
@@ -139,9 +139,9 @@ const ScanScreen = (() => {
           <div class="field">
             <label for="scan-standalone-severity">Серьёзность</label>
             <select id="scan-standalone-severity">
-              <option value="Minor">Незначительный</option>
-              <option value="Major">Серьёзный</option>
-              <option value="Out of Service">Не работает</option>
+              <option value="Minor">Незначительный — можно выдавать</option>
+              <option value="Major">Серьёзный — снять с выдачи</option>
+              <option value="Out of Service">Не работает — снять с выдачи</option>
             </select>
           </div>
         </div>`;
@@ -165,7 +165,7 @@ const ScanScreen = (() => {
       });
       TG.hapticSuccess();
       TG.showAlert("Оборудование выдано");
-      reset();
+      await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(err.message);
@@ -187,7 +187,7 @@ const ScanScreen = (() => {
       });
       TG.hapticSuccess();
       TG.showAlert("Оборудование принято");
-      reset();
+      await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(err.message);
@@ -208,7 +208,9 @@ const ScanScreen = (() => {
       });
       TG.hapticSuccess();
       TG.showAlert("Дефект сохранён");
-      reset();
+      // Перечитываем предмет, а не закрываем экран: человеку надо увидеть,
+      // изменился ли статус — незначительный дефект выдачу не блокирует.
+      await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(err.message);

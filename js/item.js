@@ -87,9 +87,9 @@ const ItemScreen = (() => {
           <div class="field">
             <label for="item-defect-severity">Серьёзность</label>
             <select id="item-defect-severity">
-              <option value="Minor">Незначительный</option>
-              <option value="Major">Серьёзный</option>
-              <option value="Out of Service">Не работает</option>
+              <option value="Minor">Незначительный — можно выдавать</option>
+              <option value="Major">Серьёзный — снять с выдачи</option>
+              <option value="Out of Service">Не работает — снять с выдачи</option>
             </select>
           </div>
           <button class="btn" id="item-defect-submit">Сохранить дефект</button>

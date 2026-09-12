@@ -514,5 +514,115 @@ check('по коду из справочника создаётся следую
   reuse.ok && String(reuse.data.item_id).slice(0, 4) === String(freshId).slice(0, 4),
   reuse.ok ? reuse.data.item_id : reuse);
 
+console.log('\n== перезаливка каталога не ломает счётчики и доступ ==');
+// Раньше перезаливка чистила Meta целиком, а импорт вдобавок превращал
+// нечисловые значения в 0. Сотрудники и клиенты перезаливку переживают, а их
+// счётчики обнулялись — новый сотрудник получал номер уже работающего. Тем же
+// путём затиралась отметка bootstrap_done, то есть снова открывался путь
+// «стань администратором без пароля».
+const staffBefore = readRows(getSheet(SHEETS.STAFF)).map(x => x.staff_id);
+const flagBefore = metaGet('bootstrap_done');
+check('отметка bootstrap_done поставлена при создании первого админа', !!flagBefore, flagBefore);
+reimportInventory();
+check('отметка bootstrap_done уцелела после перезаливки',
+  metaGet('bootstrap_done') === flagBefore, [flagBefore, metaGet('bootstrap_done')]);
+check('сотрудники перезаливку пережили',
+  JSON.stringify(readRows(getSheet(SHEETS.STAFF)).map(x => x.staff_id)) === JSON.stringify(staffBefore),
+  readRows(getSheet(SHEETS.STAFF)).map(x => x.staff_id));
+r = call('/staff/create', { full_name: 'Новый', login: 'newbie', pin: '3333' }, token);
+check('новому сотруднику достаётся свободный номер, а не номер работающего',
+  r.ok && staffBefore.indexOf(r.data.staff_id) === -1, [staffBefore, r.data]);
+r = call('/client/create', { client_name: 'Второй клиент', project_name: 'Тест' }, token);
+check('новому клиенту тоже достаётся свободный номер', r.ok && r.data.client_id !== clientId,
+  [clientId, r.data]);
+
+console.log('\n== дефект снимает с выдачи по серьёзности, одинаково на всех путях ==');
+// Раньше приём с дефектом всегда уводил в ремонт, а отдельная заявка — только
+// при «не работает»: серьёзная поломка оставляла технику доступной к выдаче.
+const status = (id) => call('/item/lookup', { item_id: id }).data.status;
+const dItem = call('/item/create', { name: 'Aputure 600d', category: 'LGT' }, token).data.item_id;
+
+r = call('/defect/report', { item_id: dItem, description: 'Царапина на корпусе', severity: 'Minor' }, token);
+check('незначительный дефект принят', r.ok === true, r);
+check('...и предмет остаётся доступным', status(dItem) === 'Available', status(dItem));
+
+r = call('/defect/report', { item_id: dItem, description: 'Не держит фокус', severity: 'Major' }, token);
+check('серьёзный дефект снимает с выдачи', status(dItem) === 'In Repair', status(dItem));
+check('новый статус вернулся в ответе заявки', r.ok && r.data.status === 'In Repair', r.data);
+check('предмет в ремонте выдать нельзя',
+  call('/transaction/checkout', { item_id: dItem, client_id: clientId }, token).status === 409);
+
+const majorDefect = call('/item/lookup', { item_id: dItem })
+  .data.open_defects.filter(d => d.severity === 'Major')[0];
+r = call('/defect/resolve', { defect_id: majorDefect.defect_id, resolution_notes: 'Починили' }, token);
+check('серьёзный дефект закрыт', r.ok === true, r);
+check('предмет снова доступен, хотя царапина ещё открыта', status(dItem) === 'Available', status(dItem));
+check('незначительный дефект остался в открытых',
+  call('/item/lookup', { item_id: dItem }).data.open_defects.length === 1);
+
+call('/defect/report', { item_id: dItem, description: 'Не включается', severity: 'Out of Service' }, token);
+check('«не работает» снимает с выдачи', status(dItem) === 'In Repair', status(dItem));
+
+const cItem = call('/item/create', { name: 'Godox VL150', category: 'LGT' }, token).data.item_id;
+call('/transaction/checkout', { item_id: cItem, client_id: clientId }, token);
+r = call('/transaction/checkin',
+  { item_id: cItem, has_defect: true, defect_description: 'Пыль на линзе', defect_severity: 'Minor' }, token);
+check('приём с незначительным дефектом прошёл', r.ok === true, r);
+check('...и предмет сразу доступен снова', status(cItem) === 'Available', status(cItem));
+
+console.log('\n== смена PIN ==');
+const petrId = call('/staff/create',
+  { full_name: 'Пётр', login: 'petr', pin: '1234', role: 'Warehouse Staff' }, token).data.staff_id;
+let petrToken = call('/auth/login', { login: 'petr', pin: '1234' }).data.token;
+check('слишком короткий PIN отклонён',
+  call('/staff/set-pin', { pin: '12', current_pin: '1234' }, petrToken).status === 400);
+// 403, а не 401: сессия цела, ошибся человек — иначе клиент выбросил бы его на вход
+check('неверный текущий PIN отклонён, но сессия не рушится',
+  call('/staff/set-pin', { pin: '5555', current_pin: '0000' }, petrToken).status === 403);
+check('...и токен после этого ещё живой', call('/equipment/list', {}, petrToken).ok === true);
+r = call('/staff/set-pin', { pin: '5555', current_pin: '1234' }, petrToken);
+check('свой PIN сменён', r.ok === true, r);
+check('взамен выдан новый токен, человек не вылетает из приложения', r.ok && !!r.data.token, r.data);
+check('старый токен больше не действует', call('/equipment/list', {}, petrToken).status === 401);
+check('старый PIN не пускает', call('/auth/login', { login: 'petr', pin: '1234' }).status === 401);
+petrToken = call('/auth/login', { login: 'petr', pin: '5555' }).data.token;
+check('новый PIN пускает', !!petrToken);
+
+r = call('/staff/set-pin', { staff_id: petrId, pin: '7777' }, token);
+check('администратор сбрасывает PIN сотруднику без текущего PIN', r.ok === true, r);
+check('сессия сотрудника при сбросе обнуляется', call('/equipment/list', {}, petrToken).status === 401);
+petrToken = call('/auth/login', { login: 'petr', pin: '7777' }).data.token;
+check('сотрудник склада не может менять PIN другому',
+  call('/staff/set-pin', { staff_id: 1, pin: '9999' }, petrToken).status === 403);
+
+console.log('\n== защита от перебора PIN ==');
+for (let i = 0; i < 5; i++) call('/auth/login', { login: 'petr', pin: '0000' });
+r = call('/auth/login', { login: 'petr', pin: '7777' });
+check('после 5 промахов не пускает даже верный PIN', r.ok === false && r.status === 429, r);
+const petrRow = () => readRows(getSheet(SHEETS.STAFF)).filter(x => x.login === 'petr')[0];
+updateRow(getSheet(SHEETS.STAFF), petrRow().__row,
+  { locked_until: new Date(Date.now() - 1000).toISOString() });
+r = call('/auth/login', { login: 'petr', pin: '7777' });
+check('когда блокировка истекла, вход снова работает', r.ok === true, r);
+check('счётчик промахов обнулён удачным входом', Number(petrRow().failed_attempts || 0) === 0,
+  petrRow().failed_attempts);
+
+console.log('\n== самозагрузка первого администратора закрыта навсегда ==');
+// Раньше защита держалась на «в Staff есть строки»: почистив лист, кто угодно
+// снова стал бы администратором без пароля.
+const staffSheet = getSheet(SHEETS.STAFF);
+staffSheet.getRange(2, 1, staffSheet.getLastRow() - 1, staffSheet.getLastColumn()).clearContent();
+check('лист Staff пуст', readRows(staffSheet).length === 0, readRows(staffSheet).length);
+r = call('/staff/create', { full_name: 'Чужой', login: 'intruder', pin: '0000' });
+check('на пустом Staff администратора без токена не создать', r.ok === false && r.status === 403, r);
+check('в отказе сказано, как владелец таблицы вернёт доступ',
+  /bootstrap_done/.test(String(r.error)), r.error);
+
+const flagRow = readRows(getSheet(SHEETS.META)).filter(m => m.key === 'bootstrap_done')[0];
+check('отметка bootstrap_done стоит в Meta', !!flagRow, flagRow);
+updateRow(getSheet(SHEETS.META), flagRow.__row, { key: '', value: '' });
+r = call('/staff/create', { full_name: 'Матвей', login: 'matvey', pin: '4321' });
+check('после удаления отметки вручную самозагрузка снова доступна', r.ok === true, r);
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

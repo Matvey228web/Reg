@@ -5,6 +5,12 @@
 // первого администратора без токена) в моке недостижима без ручной правки — она нужна
 // для симметрии с реальным Apps Script бэкендом, где Staff изначально пуста.
 
+// Правило серьёзности — такое же, как в бэкенде (defectBlocksRental в Code.gs):
+// царапина выдачу не блокирует, «серьёзный» и «не работает» блокируют.
+function mockDefectBlocksRental(severity) {
+  return severity === "Major" || severity === "Out of Service";
+}
+
 const MockStore = (() => {
   const unitCounters = {};   // "01"+"02" -> сколько экземпляров модели уже заведено
   let nextClientId = 3;
@@ -114,6 +120,18 @@ const MockStore = (() => {
     return staff_id;
   }
 
+  // Смена PIN аннулирует прежние сессии сотрудника; себе взамен выдаём новую,
+  // иначе человек сменил бы PIN и тут же вылетел на экран входа.
+  function rotateToken(staff_id, issueNew) {
+    Array.from(tokens.entries()).forEach(([tok, id]) => {
+      if (String(id) === String(staff_id)) tokens.delete(tok);
+    });
+    if (!issueNew) return null;
+    const fresh = "mock-token-" + staff_id + "-" + Date.now();
+    tokens.set(fresh, staff_id);
+    return fresh;
+  }
+
   function findStaffById(staff_id) {
     return staff.find((s) => s.staff_id === staff_id);
   }
@@ -122,7 +140,7 @@ const MockStore = (() => {
     const staff_id = requireToken(token);
     const s = findStaffById(staff_id);
     if (!s || s.role !== "Admin") {
-      const err = new Error("Только администратор может добавлять сотрудников");
+      const err = new Error("Действие доступно только администратору");
       err.status = 403;
       throw err;
     }
@@ -131,7 +149,7 @@ const MockStore = (() => {
 
   return {
     staff, equipment, clients, transactions, defects, tokens,
-    findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin,
+    findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin, rotateToken,
     models,
     // Номер вида XXYYZZ: категория, модель, порядковый номер экземпляра.
     nextItemId(category, modelCode) {
@@ -260,7 +278,8 @@ const MockAPI = {
             status: "Open", reported_at: new Date().toISOString(),
             resolved_at: null, resolution_notes: "",
           });
-          item.status = "In Repair";
+          item.status = mockDefectBlocksRental(body.defect_severity || "Minor")
+            ? "In Repair" : "Available";
         } else {
           item.status = "Available";
         }
@@ -279,8 +298,10 @@ const MockAPI = {
           severity: body.severity || "Minor", status: "Open",
           reported_at: new Date().toISOString(), resolved_at: null, resolution_notes: "",
         });
-        if (body.severity === "Out of Service") item.status = "In Repair";
-        return { defect_id };
+        if (mockDefectBlocksRental(body.severity || "Minor") && item.status === "Available") {
+          item.status = "In Repair";
+        }
+        return { defect_id, status: item.status };
       }
 
       case "/defect/resolve": {
@@ -292,7 +313,9 @@ const MockAPI = {
         if (defect.status === "Resolved") {
           defect.resolved_at = new Date().toISOString();
           const item = MockStore.findItem(defect.item_id);
-          const stillOpen = MockStore.defects.some((d) => d.item_id === defect.item_id && d.status !== "Resolved" && d.defect_id !== defect.defect_id);
+          const stillOpen = MockStore.defects.some((d) => d.item_id === defect.item_id &&
+            d.status !== "Resolved" && d.defect_id !== defect.defect_id &&
+            mockDefectBlocksRental(d.severity));
           if (item && !stillOpen && item.status === "In Repair") item.status = "Available";
         }
         return {};
@@ -360,9 +383,8 @@ const MockAPI = {
         if (isBootstrap) {
           // Первая запись в системе — разрешаем без токена, всегда как Admin.
         } else {
-          // Без токена сюда попадают, повторно нажав «создать первого
-          // администратора» на экране входа — общее «сессия недействительна»
-          // там только запутает, поэтому объясняем причину прямо.
+          // Без токена сюда попасть уже нельзя из интерфейса, но причину
+          // объясняем прямо: общее «сессия недействительна» запутало бы.
           if (!token) {
             const e = new Error("Сотрудники уже есть, обратитесь к администратору");
             e.status = 403;
@@ -382,6 +404,31 @@ const MockAPI = {
           active: true,
         });
         return { staff_id };
+      }
+
+      case "/staff/set-pin": {
+        const staff_id = MockStore.requireToken(token);
+        const me = MockStore.staff.find((x) => x.staff_id === staff_id);
+        const newPin = String(body.pin || "").trim();
+        if (!/^\d{4,6}$/.test(newPin)) {
+          const e = new Error("PIN — от 4 до 6 цифр"); e.status = 400; throw e;
+        }
+        const targetId = body.staff_id === undefined || body.staff_id === null || body.staff_id === ""
+          ? staff_id : body.staff_id;
+        const isSelf = String(targetId) === String(staff_id);
+        const target = isSelf ? me : MockStore.staff.find((x) => String(x.staff_id) === String(targetId));
+        if (!target) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (isSelf) {
+          if (String(body.current_pin || "") !== String(me.pin)) {
+            const e = new Error("Текущий PIN указан неверно"); e.status = 403; throw e;
+          }
+        } else if (me.role !== "Admin") {
+          const e = new Error("Менять PIN другому сотруднику может только администратор");
+          e.status = 403; throw e;
+        }
+        target.pin = newPin;
+        const rotated = MockStore.rotateToken(target.staff_id, isSelf);
+        return isSelf ? { token: rotated } : {};
       }
 
       case "/staff/list": {

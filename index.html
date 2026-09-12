@@ -35,25 +35,6 @@
       <button type="submit" class="btn" id="login-submit">Войти</button>
     </form>
 
-    <div class="section">
-      <button class="btn btn--secondary" id="bootstrap-toggle" style="font-size:13px;">Нет сотрудников в системе? Создать первого администратора</button>
-      <div id="bootstrap-form" style="display:none;">
-        <div id="bootstrap-error"></div>
-        <div class="field">
-          <label for="bootstrap-name">Ваше имя</label>
-          <input id="bootstrap-name" type="text" required />
-        </div>
-        <div class="field">
-          <label for="bootstrap-login">Логин</label>
-          <input id="bootstrap-login" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" required />
-        </div>
-        <div class="field">
-          <label for="bootstrap-pin">Придумайте PIN-код</label>
-          <input id="bootstrap-pin" type="password" inputmode="numeric" pattern="[0-9]*" required />
-        </div>
-        <button class="btn" id="bootstrap-submit">Создать администратора и войти</button>
-      </div>
-    </div>
   </div>
 
   <!-- Экран: главное меню -->
@@ -77,7 +58,8 @@
         <div class="card-title">🗝 Сотрудники</div>
       </div>
     </div>
-    <button class="btn btn--secondary" id="logout-btn" style="margin-top:20px;">Выйти</button>
+    <button class="btn btn--secondary" id="pin-change-btn" style="margin-top:20px;">Сменить свой PIN</button>
+    <button class="btn btn--secondary" id="logout-btn" style="margin-top:8px;">Выйти</button>
   </div>
 
   <!-- Экран: каталог оборудования -->
@@ -213,6 +195,26 @@
     </div>
   </div>
 
+  <!-- Экран: смена своего PIN (доступен любой роли) -->
+  <div class="screen" id="screen-pin">
+    <h1>Смена PIN</h1>
+    <div id="pin-change-error"></div>
+    <p class="hint" id="pin-change-hint">Новый PIN — от 4 до 6 цифр.</p>
+    <div class="field">
+      <label for="pin-current">Текущий PIN</label>
+      <input id="pin-current" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" />
+    </div>
+    <div class="field">
+      <label for="pin-new">Новый PIN</label>
+      <input id="pin-new" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+    </div>
+    <div class="field">
+      <label for="pin-repeat">Новый PIN ещё раз</label>
+      <input id="pin-repeat" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+    </div>
+    <button class="btn" id="pin-change-submit">Сменить PIN</button>
+  </div>
+
   <!-- Панель разделов: переход между разделами в один тап, без возврата на главную.
        «Сотрудники» сюда не ставим — раздел админский и редкий, он на главной. -->
   <nav class="tabbar" id="tabbar" style="display:none;">
@@ -239,6 +241,7 @@
 <script src="js/repair.js"></script>
 <script src="js/clients.js"></script>
 <script src="js/staff.js"></script>
+<script src="js/pin.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
