@@ -114,6 +114,8 @@ const ItemScreen = (() => {
         });
         TG.hapticSuccess();
         TG.showAlert("Дефект сохранён");
+        Cache.clear("defects");
+        Cache.clear("equipment");
         load();
       } catch (err) {
         TG.hapticError();

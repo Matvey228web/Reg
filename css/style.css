@@ -261,3 +261,27 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
 }
 .swipe-action-ico { font-size: 20px; line-height: 1; }
 .pin-reset-form { margin-top: 10px; }
+
+/* Строка над списком: возраст данных и кнопка обновления. Возраст показываем
+   всегда — доверять кэшу можно только зная, насколько он свежий. */
+.refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 0 10px;
+  min-height: 28px;
+}
+.refresh-age { font-size: 12px; color: var(--tg-hint-color); }
+.refresh-btn {
+  border: none;
+  background: var(--tg-secondary-bg-color);
+  color: var(--tg-link-color);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.refresh-btn:disabled { opacity: 0.5; cursor: default; }

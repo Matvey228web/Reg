@@ -37,9 +37,7 @@ const ScanScreen = (() => {
       currentItem = item;
       // Статус мог измениться — поправим его в кэше каталога, чтобы список не
       // показывал устаревшее «Доступно» до следующего обновления.
-      if (typeof CatalogScreen !== "undefined" && CatalogScreen.patchCached) {
-        CatalogScreen.patchCached(item.item_id, { status: item.status });
-      }
+      Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
       mode = item.status === "Available" ? "checkout" : item.status === "Rented" ? "checkin" : null;
       if (mode === "checkout") await loadClients();
       renderItem();
@@ -195,6 +193,7 @@ const ScanScreen = (() => {
       });
       TG.hapticSuccess();
       TG.showAlert("Оборудование принято");
+      if (hasDefect) Cache.clear("defects");   // в ремонте появилась запись
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
@@ -216,6 +215,7 @@ const ScanScreen = (() => {
       });
       TG.hapticSuccess();
       TG.showAlert("Дефект сохранён");
+      Cache.clear("defects");
       // Перечитываем предмет, а не закрываем экран: человеку надо увидеть,
       // изменился ли статус — незначительный дефект выдачу не блокирует.
       await lookup(currentItem.item_id);

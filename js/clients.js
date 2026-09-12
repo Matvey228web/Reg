@@ -1,39 +1,71 @@
 // Экран "Клиенты": список клиентов/проектов, добавление нового, история аренды по клику.
 
 const ClientsScreen = (() => {
+  const CACHE = "clients";
   let itemsById = {};
   let expandedClientId = null;
+  let busy = false;
 
+  // Названия предметов — из кэша каталога. Раньше экран тянул весь каталог
+  // заново: второй запрос по 5–8 секунд ради данных, лежащих рядом.
   async function loadItemsMap() {
-    try {
-      const items = await apiPost("/equipment/list", {});
-      itemsById = Object.fromEntries(items.map((i) => [i.item_id, i]));
-    } catch {
-      itemsById = {};
+    let items = Cache.items("equipment");
+    if (!items || !items.length) {
+      try {
+        items = await apiPost("/equipment/list", { category: "all", status: "all" });
+        Cache.set("equipment", items);
+      } catch {
+        items = [];
+      }
     }
+    itemsById = Object.fromEntries(items.map((i) => [i.item_id, i]));
   }
 
-  async function loadList() {
+  function drawRefreshRow() {
+    renderRefreshRow("clients-refresh", CACHE, () => loadList({ force: true }), busy);
+  }
+
+  function render(clients) {
     const list = document.getElementById("clients-list");
-    list.innerHTML = `<p class="empty">Загрузка…</p>`;
+    if (!clients.length) {
+      list.innerHTML = `<p class="empty">Клиентов пока нет</p>`;
+      return;
+    }
+    list.innerHTML = clients.map((c) => `
+      <div class="card" data-client-id="${c.client_id}">
+        <div class="card-title">${escapeHtml(c.client_name)}</div>
+        <div class="card-sub">${escapeHtml(c.project_name || "")}${c.phone ? " · " + escapeHtml(c.phone) : ""}</div>
+        <div id="client-history-${c.client_id}"></div>
+      </div>
+    `).join("");
+    list.querySelectorAll("[data-client-id]").forEach((el) => {
+      el.addEventListener("click", () => toggleHistory(el.dataset.clientId));
+    });
+  }
+
+  async function loadList({ force = false } = {}) {
+    const list = document.getElementById("clients-list");
+    const cached = Cache.items(CACHE);
+
+    if (cached && cached.length) render(cached);
+    drawRefreshRow();
+
+    if (!force && cached && cached.length && Cache.isFresh(CACHE)) return;
+
+    if (!cached || !cached.length) list.innerHTML = skeleton(3);
+    busy = true;
+    drawRefreshRow();
     try {
       const clients = await apiPost("/clients/list", {});
-      if (!clients.length) {
-        list.innerHTML = `<p class="empty">Клиентов пока нет</p>`;
-        return;
-      }
-      list.innerHTML = clients.map((c) => `
-        <div class="card" data-client-id="${c.client_id}">
-          <div class="card-title">${escapeHtml(c.client_name)}</div>
-          <div class="card-sub">${escapeHtml(c.project_name || "")}${c.phone ? " · " + escapeHtml(c.phone) : ""}</div>
-          <div id="client-history-${c.client_id}"></div>
-        </div>
-      `).join("");
-      list.querySelectorAll("[data-client-id]").forEach((el) => {
-        el.addEventListener("click", () => toggleHistory(el.dataset.clientId));
-      });
+      Cache.set(CACHE, clients);
+      render(clients);
     } catch (err) {
-      list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      if (!cached || !cached.length) {
+        list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      }
+    } finally {
+      busy = false;
+      drawRefreshRow();
     }
   }
 
@@ -92,6 +124,7 @@ const ClientsScreen = (() => {
         phone: document.getElementById("new-client-phone").value.trim(),
       });
       TG.hapticSuccess();
+      Cache.clear(CACHE);   // список пополнился, пусть подтянется свежий
       resetAddForm();
       loadList();
     } catch (err) {

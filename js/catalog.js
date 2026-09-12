@@ -2,12 +2,12 @@
 // нового предмета с QR.
 //
 // Про скорость. Бэкенд на Apps Script отвечает 5–8 секунд — это его потолок, а
-// не наш код (замерено). Поэтому каталог держится в localStorage: экран
-// рисуется мгновенно из кэша, свежие данные подтягиваются в фоне, а поиск и
-// фильтры работают локально и не ждут сервер вообще.
+// не наш код (замерено). Поэтому список живёт в общем кэше (js/cache.js):
+// экран рисуется мгновенно, поиск и фильтры считаются локально, а на сервер
+// мы идём только когда кэша нет, он устарел или человек нажал «Обновить».
 
 const CatalogScreen = (() => {
-  const CACHE_KEY = "mifs_catalog_cache_v1";
+  const CACHE = "equipment";
   const PAGE_SIZE = 50;
 
   let currentFilters = { category: "all", status: "all" };
@@ -15,35 +15,7 @@ const CatalogScreen = (() => {
   let shown = 0;          // сколько карточек уже отрисовано
   let searchQuery = "";
   let searchTimer = null;
-
-  function readCache() {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      return parsed && Array.isArray(parsed.items) ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function writeCache(items) {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ items, saved_at: Date.now() }));
-    } catch {
-      // переполнение хранилища не должно ломать экран
-    }
-  }
-
-  // Точечное обновление кэша после выдачи, приёма или дефекта — чтобы не
-  // перезапрашивать весь каталог из-за одной изменившейся позиции.
-  function patchCached(itemId, patch) {
-    const cache = readCache();
-    if (!cache) return;
-    const idx = cache.items.findIndex((i) => String(i.item_id) === String(itemId));
-    if (idx === -1) return;
-    cache.items[idx] = { ...cache.items[idx], ...patch };
-    writeCache(cache.items);
-  }
+  let busy = false;
 
   function populateSelects() {
     const catSel = document.getElementById("catalog-filter-category");
@@ -142,25 +114,37 @@ const CatalogScreen = (() => {
     if (btn) btn.addEventListener("click", () => render(false));
   }
 
-  async function loadList({ useCache = true } = {}) {
-    const list = document.getElementById("catalog-list");
-    const cache = useCache ? readCache() : null;
+  function drawRefreshRow() {
+    renderRefreshRow("catalog-refresh", CACHE, () => loadList({ force: true }), busy);
+  }
 
-    if (cache && cache.items.length) {
-      allItems = cache.items;
+  // force — нажали «Обновить». Без него на сервер идём только при отсутствии
+  // кэша или когда он устарел: иначе каждое переключение вкладки снова стоило
+  // бы 5–8 секунд ожидания.
+  async function loadList({ force = false } = {}) {
+    const list = document.getElementById("catalog-list");
+    const cached = Cache.items(CACHE);
+
+    if (cached && cached.length) {
+      allItems = cached;
       render();
-    } else {
+    }
+    drawRefreshRow();
+
+    if (!force && cached && cached.length && Cache.isFresh(CACHE)) return;
+
+    if (!cached || !cached.length) {
       list.innerHTML = skeleton(5);
       document.getElementById("catalog-more").innerHTML = "";
     }
-
+    busy = true;
+    drawRefreshRow();
     try {
-      // С сервера берём каталог целиком один раз, а фильтры применяем локально:
-      // при 5–8 с на запрос переспрашивать сервер на каждое переключение
-      // фильтра означало бы ждать по восемь секунд на каждый тап.
+      // Каталог берём целиком один раз, фильтры применяем локально: спрашивать
+      // сервер на каждое переключение фильтра значило бы ждать снова.
       const items = await apiPost("/equipment/list", { category: "all", status: "all" });
       allItems = items;
-      writeCache(items);
+      Cache.set(CACHE, items);
       render();
     } catch (err) {
       if (!allItems.length) {
@@ -170,6 +154,9 @@ const CatalogScreen = (() => {
         // кэш показан — не затираем его ошибкой, просто сообщаем
         showBoxError("catalog-add-error", "Не удалось обновить список: " + err.message);
       }
+    } finally {
+      busy = false;
+      drawRefreshRow();
     }
   }
 
@@ -213,7 +200,7 @@ const CatalogScreen = (() => {
       renderQrResult(item_id, name);
       document.getElementById("catalog-add-form").style.display = "none";
       loadModels();
-      loadList({ useCache: false });
+      loadList({ force: true });
     } catch (err) {
       TG.hapticError();
       showBoxError("catalog-add-error", err.message);
@@ -278,5 +265,5 @@ const CatalogScreen = (() => {
     Router.register("catalog", { onShow });
   }
 
-  return { init, loadList, patchCached };
+  return { init, loadList };
 })();
