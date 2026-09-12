@@ -42,8 +42,8 @@ const MockStore = (() => {
 
   // Справочник моделей: категория + двузначный код + название.
   const models = [
-    { category: "CAM", model_code: 1, model_name: "Sony FX6" },
-    { category: "LEN", model_code: 1, model_name: "Sigma 24-70mm f/2.8" },
+    { category: "CAM", model_code: "01", model_name: "Sony FX6" },
+    { category: "LEN", model_code: "01", model_name: "Sigma 24-70mm f/2.8" },
   ];
 
   // Счётчики экземпляров восстанавливаем из уже заведённых демо-позиций,
@@ -151,8 +151,9 @@ const MockStore = (() => {
       const found = models.find((m) => m.category === category && MockStore.normalizeModelName(m.model_name) === needle);
       if (found) return found;
       const max = models.filter((m) => m.category === category)
-        .reduce((a, m) => Math.max(a, m.model_code), 0);
-      const created = { category, model_code: max + 1, model_name: String(modelName).trim() };
+        .reduce((a, m) => Math.max(a, Number(m.model_code)), 0);
+      // код модели держим строкой "01" — как в бэкенде и внутри номера предмета
+      const created = { category, model_code: String(max + 1).padStart(2, "0"), model_name: String(modelName).trim() };
       models.push(created);
       return created;
     },
@@ -198,7 +199,7 @@ const MockAPI = {
       case "/item/create": {
         MockStore.requireToken(token);
         const model = body.model_code
-          ? MockStore.models.find((m) => m.category === body.category && m.model_code === Number(body.model_code))
+          ? MockStore.models.find((m) => m.category === body.category && Number(m.model_code) === Number(body.model_code))
           : MockStore.findOrCreateModel(body.category, body.model_name || body.name);
         if (!model) { const e = new Error("Модель не найдена в справочнике"); e.status = 404; throw e; }
         const item_id = MockStore.nextItemId(body.category, model.model_code);

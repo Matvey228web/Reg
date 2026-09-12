@@ -267,7 +267,9 @@ function importInventory() {
           }
           modelMax[category] = modelCode;
           modelIndex[modelKey] = modelCode;
-          newModels.push({ category: category, model_code: modelCode, model_name: name, created_at: now });
+          // pad2 — чтобы код модели в справочнике выглядел так же, как в
+          // каталоге и внутри номера предмета: "01", а не "1".
+          newModels.push({ category: category, model_code: pad2(modelCode), model_name: name, created_at: now });
         }
 
         // Номер экземпляра внутри модели. Счётчики держим в памяти: 600+
@@ -578,7 +580,10 @@ function handleModelsList(payload, token) {
     rows = rows.filter(function (r) { return r.category === payload.category; });
   }
   return rows.map(function (r) {
-    return { category: r.category, model_code: Number(r.model_code), model_name: r.model_name };
+    // Наружу отдаём тот же вид, в котором код лежит в таблице и стоит внутри
+    // номера предмета: "04". Иначе фронтенд и таблица говорят о модели
+    // по-разному, и сравнение строкой однажды промахнётся.
+    return { category: r.category, model_code: pad2(Number(r.model_code)), model_name: r.model_name };
   }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
 }
 
@@ -783,7 +788,7 @@ function handleEquipmentList(payload, token) {
     return {
       item_id: r.item_id, name: r.name, category: r.category, status: r.status,
       serial_number: r.serial_number, inventory_number: r.inventory_number,
-      model_code: r.model_code,
+      model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
     };
   });
 }
@@ -1101,7 +1106,7 @@ function findOrCreateModel(category, modelName) {
   }
   var code = nextModelCode(category);
   appendRow(getSheet(SHEETS.MODELS), {
-    category: category, model_code: code, model_name: name, created_at: new Date().toISOString(),
+    category: category, model_code: pad2(code), model_name: name, created_at: new Date().toISOString(),
   });
   return { model_code: code, model_name: name };
 }

@@ -485,5 +485,34 @@ check('добавленный предмет находится по номер�
 check('model_code добавленного предмета остался двузначным',
   String(addedRow.model_code).length === 2, addedRow.model_code);
 
+console.log('\n== код модели в справочнике и в каталоге выглядит одинаково ==');
+// Справочник и каталог хранят одну и ту же величину. Пока она где-то лежит
+// числом 1, а где-то строкой "01", любое сравнение строкой сломается молча —
+// тот же класс ошибки, что мы ловили на ведущих нулях в номерах.
+const modelRows = readRows(getSheet(SHEETS.MODELS));
+check('все коды моделей — двузначные строки',
+  modelRows.every(m => /^\d{2}$/.test(String(m.model_code))),
+  modelRows.map(m => m.model_code));
+const eqForModels = readRows(getSheet(SHEETS.EQUIPMENT));
+check('код модели в каталоге в том же виде',
+  eqForModels.every(r => /^\d{2}$/.test(String(r.model_code))),
+  eqForModels.slice(0, 5).map(r => r.model_code));
+// модель, заведённая из приложения, а не импортом — тот же вид
+const freshId = call('/item/create', { name: 'Arri Alexa 35', category: 'CAM' }, token).data.item_id;
+const freshModelCode = String(freshId).slice(2, 4);
+const freshModel = readRows(getSheet(SHEETS.MODELS))
+  .filter(m => m.model_name === 'Arri Alexa 35')[0];
+check('новая модель из приложения записана с ведущим нулём',
+  /^\d{2}$/.test(String(freshModel.model_code)), freshModel.model_code);
+check('код модели в справочнике совпадает с номером предмета',
+  String(freshModel.model_code) === freshModelCode, [freshModel.model_code, freshId]);
+const byCode = call('/models/list', { category: 'CAM' }, token);
+check('модель по-прежнему находится по коду',
+  byCode.ok && byCode.data.some(m => String(m.model_code) === String(freshModel.model_code)), byCode.data);
+const reuse = call('/item/create', { model_code: freshModel.model_code, category: 'CAM' }, token);
+check('по коду из справочника создаётся следующий экземпляр той же модели',
+  reuse.ok && String(reuse.data.item_id).slice(0, 4) === String(freshId).slice(0, 4),
+  reuse.ok ? reuse.data.item_id : reuse);
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
