@@ -20,6 +20,7 @@
   });
   document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
 
+  Router.init();
   Auth.init();
   CatalogScreen.init();
   ScanScreen.init();

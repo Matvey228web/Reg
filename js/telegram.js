@@ -107,38 +107,30 @@ const TG = (() => {
     },
   };
 
-  function getFallbackBackButton() {
-    let btn = document.getElementById("fallback-back-button");
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.id = "fallback-back-button";
-      btn.className = "fallback-back-button";
-      btn.textContent = "← Назад";
-      document.body.appendChild(btn);
-    }
-    return btn;
+  // Нативная BackButton появилась в Bot API 6.1. На клиентах старее вызовы
+  // молча ничего не делают, поэтому проверяем версию, а не наличие webApp.
+  function hasNativeBackButton() {
+    return !!(webApp && webApp.BackButton &&
+      (typeof webApp.isVersionAtLeast !== "function" || webApp.isVersionAtLeast("6.1")));
   }
 
   const backButton = {
     show(onClick) {
-      if (webApp) {
+      if (hasNativeBackButton()) {
         webApp.BackButton.offClick(backButton._handler);
         backButton._handler = onClick;
         webApp.BackButton.onClick(onClick);
         webApp.BackButton.show();
         return;
       }
-      const btn = getFallbackBackButton();
-      btn.onclick = onClick;
-      btn.style.display = "block";
+      // Вне Telegram и на старых клиентах «назад» рисует сама страница
+      // (#back-row в index.html), подменять нечего.
     },
     hide() {
-      if (webApp) {
+      if (hasNativeBackButton()) {
         webApp.BackButton.hide();
         return;
       }
-      const btn = document.getElementById("fallback-back-button");
-      if (btn) btn.style.display = "none";
     },
   };
 
