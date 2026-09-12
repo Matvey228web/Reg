@@ -113,7 +113,9 @@
     <h1>Сканировать</h1>
     <div id="scan-error"></div>
     <div id="scan-result"></div>
-    <button class="btn btn--secondary" id="scan-start-btn">📷 Сканировать ещё раз</button>
+    <!-- Текст меняется на «ещё раз» после первого найденного предмета: при
+         входе на экран сканировать ещё нечего было. -->
+    <button class="btn btn--secondary" id="scan-start-btn">📷 Сканировать</button>
     <div class="field" id="scan-manual-wrap">
       <label for="scan-manual-input">Или введите номер вручную</label>
       <input type="text" id="scan-manual-input" inputmode="numeric" placeholder="010101" />
@@ -142,30 +144,26 @@
     <div id="repair-list"></div>
   </div>
 
-  <!-- Экран: клиенты/проекты -->
-  <div class="screen" id="screen-clients">
-    <h1>Клиенты</h1>
-    <div class="refresh-row" id="clients-refresh"></div>
-    <div id="clients-list"></div>
-    <button class="btn btn--secondary" id="clients-add-toggle" style="margin-top:6px;">+ Добавить клиента</button>
-
-    <div id="clients-add-form" style="display:none;" class="section">
-      <h2>Новый клиент</h2>
-      <div id="clients-add-error"></div>
-      <div class="field">
-        <label for="new-client-name">Имя / компания</label>
-        <input id="new-client-name" type="text" required />
-      </div>
-      <div class="field">
-        <label for="new-client-project">Проект</label>
-        <input id="new-client-project" type="text" />
-      </div>
-      <div class="field">
-        <label for="new-client-phone">Телефон</label>
-        <input id="new-client-phone" type="text" />
-      </div>
-      <button class="btn" id="new-client-submit">Добавить</button>
+  <!-- Экран: заказы с сайта брони (раньше здесь были «Клиенты») -->
+  <div class="screen" id="screen-orders">
+    <h1>Заказы</h1>
+    <div class="filters">
+      <select id="orders-filter-status">
+        <option value="Issued">Выданные</option>
+        <option value="overdue">Просроченные</option>
+        <option value="New">Оформленные</option>
+        <option value="Returned">Возвращённые</option>
+        <option value="all" selected>Все</option>
+      </select>
     </div>
+    <div class="field">
+      <input type="search" id="orders-search" placeholder="Поиск по номеру, имени или телефону"
+             autocapitalize="off" autocorrect="off" spellcheck="false" />
+    </div>
+    <button class="btn btn--secondary btn--sticky" id="orders-add-toggle">+ Новый заказ</button>
+    <div id="orders-add" class="section" style="display:none;"></div>
+    <div class="refresh-row" id="orders-refresh"></div>
+    <div id="orders-list"></div>
   </div>
 
   <!-- Экран: сотрудники (только для Admin) -->
@@ -240,7 +238,7 @@
     <button class="tab" data-tab="catalog"><span class="tab-ico">📦</span>Каталог</button>
     <button class="tab" data-tab="scan"><span class="tab-ico">📷</span>Скан</button>
     <button class="tab" data-tab="repair"><span class="tab-ico">🛠</span>Ремонт</button>
-    <button class="tab" data-tab="clients"><span class="tab-ico">👥</span>Клиенты</button>
+    <button class="tab" data-tab="orders"><span class="tab-ico">🧾</span>Заказы</button>
   </nav>
 
   <!-- Сюда складываются этикетки на момент печати: у термопринтера этикеток
@@ -263,7 +261,7 @@
 <script src="js/scan.js"></script>
 <script src="js/item.js"></script>
 <script src="js/repair.js"></script>
-<script src="js/clients.js"></script>
+<script src="js/orders.js"></script>
 <script src="js/staff.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/labels.js"></script>

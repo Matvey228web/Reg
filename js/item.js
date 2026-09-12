@@ -2,21 +2,25 @@
 
 const ItemScreen = (() => {
   let currentItemId = null;
-  let clientsById = {};
+  let ordersById = {};
 
-  async function loadClientsMap() {
-    try {
-      const clients = await apiPost("/clients/list", {});
-      clientsById = Object.fromEntries(clients.map((c) => [String(c.client_id), c]));
-    } catch {
-      clientsById = {};
-    }
+  // Подписи к выдачам берём из кэша заказов. Раньше карточка на каждое открытие
+  // запрашивала весь список клиентов — ещё 5–8 секунд ради одной строки текста.
+  function loadOrdersMap() {
+    const orders = Cache.items("orders") || [];
+    ordersById = Object.fromEntries(orders.map((o) => [String(o.order_id), o]));
   }
 
-  function clientLabel(clientId) {
-    if (!clientId) return "—";
-    const c = clientsById[String(clientId)];
-    return c ? c.client_name + (c.project_name ? " · " + c.project_name : "") : `Клиент #${clientId}`;
+  // Старые строки журнала сделаны по прежней модели «клиент/проект»: заказа у них
+  // нет, и подменять его выдумкой нельзя — показываем как есть.
+  function txLabel(tx) {
+    const order = ordersById[String(tx.order_id || "")];
+    if (order) {
+      return `№${order.order_no}` + (order.student_name ? " · " + order.student_name : "");
+    }
+    if (tx.order_id) return `Заказ #${tx.order_id}`;
+    if (tx.client_id) return `Клиент #${tx.client_id} (старая запись)`;
+    return "Без заказа";
   }
 
   async function load() {
@@ -28,7 +32,7 @@ const ItemScreen = (() => {
         apiPost("/item/lookup", { item_id: currentItemId }),
         apiPost("/item/history", { item_id: currentItemId }),
       ]);
-      await loadClientsMap();
+      loadOrdersMap();
       render(item, history);
     } catch (err) {
       content.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
@@ -44,7 +48,7 @@ const ItemScreen = (() => {
       .sort((a, b) => new Date(b.checked_out_at) - new Date(a.checked_out_at))
       .map((t) => `
         <div class="card">
-          <div class="card-title">${escapeHtml(clientLabel(t.client_id))} ${statusBadge(t.status)}</div>
+          <div class="card-title">${escapeHtml(txLabel(t))} ${statusBadge(t.status)}</div>
           <div class="card-sub">Выдано: ${formatDate(t.checked_out_at)}${t.checked_in_at ? " · Принято: " + formatDate(t.checked_in_at) : ""}</div>
         </div>`).join("") || `<p class="empty">Пока не было выдач</p>`;
 

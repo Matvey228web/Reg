@@ -97,16 +97,20 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
 }
 .badge--available { background: var(--success); }
 .badge--rented { background: var(--warning); }
-.badge--repair { background: var(--danger); }
 .badge--retired { background: var(--tg-hint-color); }
 .badge--open { background: var(--danger); }
 .badge--in-repair { background: var(--warning); }
 .badge--resolved { background: var(--success); }
 .badge--closed { background: var(--tg-hint-color); }
 
+/* Ошибка должна читаться и в тёмной теме Telegram. Светло-розовый фон был
+   зашит цветом: на тёмном экране он превращался в яркое пятно с почти
+   нечитаемым красным текстом. Полупрозрачная подложка works в обеих темах,
+   а «ошибочность» несут красная полоса и цвет заголовка. */
 .error-box {
-  background: #ffe3e3;
-  color: var(--danger);
+  background: rgba(224, 49, 49, 0.14);
+  border-left: 3px solid var(--danger);
+  color: var(--tg-text-color);
   border-radius: var(--radius);
   padding: 10px 12px;
   font-size: 14px;
@@ -305,6 +309,56 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   color: #fff; margin: 14px 0 4px;
 }
 .qr-overlay-caption { color: #bbb; font-size: 14px; margin-bottom: 16px; }
+
+/* --- Заказы --- */
+.order-no { font-family: monospace; letter-spacing: 0.5px; }
+.card-title .badge { margin-left: 6px; vertical-align: 2px; }
+
+.order-line {
+  border-top: 1px solid var(--tg-bg-color);
+  padding: 8px 0;
+}
+.order-line:first-of-type { border-top: none; }
+.order-line-name { font-size: 14px; }
+.order-line-qty { font-size: 12px; color: var(--tg-hint-color); margin-top: 2px; }
+.order-line-ok { font-size: 12px; color: var(--success); margin-top: 2px; }
+.order-line-warn { color: var(--warning); }
+.order-line-pick { width: 100%; margin-top: 6px; padding: 6px 10px; border-radius: var(--radius);
+  border: 1px solid var(--tg-secondary-bg-color); background: var(--tg-bg-color); color: var(--tg-text-color); }
+
+/* Дописанное в заказ свободным полем: на складе это отдельная строка работы,
+   поэтому и выглядеть должна отдельно, а не сливаться с составом. */
+.order-extra {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--tg-bg-color);
+  font-size: 13px;
+}
+
+/* Предупреждения разбора: что не распознано. Их читают перед сохранением,
+   поэтому они не серые. */
+.order-warn {
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  background: var(--tg-secondary-bg-color);
+  border-left: 3px solid var(--warning);
+}
+
+.order-raw { margin-top: 12px; font-size: 13px; color: var(--tg-hint-color); }
+.order-raw summary { cursor: pointer; }
+.order-raw pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--tg-bg-color);
+  border-radius: var(--radius);
+  padding: 10px;
+  font-size: 12px;
+  max-height: 40vh;
+  overflow: auto;
+}
 
 /* --- Этикетки ---
    Размеры в миллиметрах: этикетка печатается на термопринтере, где страница и

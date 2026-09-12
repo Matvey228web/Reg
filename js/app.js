@@ -28,7 +28,7 @@
   ScanScreen.init();
   ItemScreen.init();
   RepairScreen.init();
-  ClientsScreen.init();
+  OrdersScreen.init();
   StaffScreen.init();
   PinScreen.init();
   SettingsScreen.init();

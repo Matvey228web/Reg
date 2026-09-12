@@ -17,12 +17,15 @@ const STATUS_LABELS = {
   Available: "Доступно", Rented: "В аренде", "In Repair": "В ремонте", Retired: "Списано",
   Open: "Открыт", Closed: "Закрыт", Resolved: "Решён",
   Minor: "Незначительный", Major: "Серьёзный", "Out of Service": "Не работает",
+  // Статусы заказа. «Оформлен» — заказ есть, но техника ещё не выдана.
+  New: "Оформлен", Issued: "Выдан", Returned: "Возвращён", Cancelled: "Отменён",
 };
 
 function statusBadgeClass(status) {
   const map = {
     Available: "badge--available", Rented: "badge--rented", "In Repair": "badge--in-repair",
     Retired: "badge--retired", Open: "badge--open", Closed: "badge--closed", Resolved: "badge--resolved",
+    New: "badge--closed", Issued: "badge--rented", Returned: "badge--resolved", Cancelled: "badge--retired",
   };
   return map[status] || "badge--retired";
 }

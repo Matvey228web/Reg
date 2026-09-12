@@ -24,6 +24,124 @@ const MOCK_SETTINGS_SPEC = {
 let mockCats = CONFIG.CATEGORIES.map((c) => ({ ...c }));
 function mockCategories() { return mockCats; }
 
+// --- Заказы в демо-режиме ---
+// Настоящие версии этих функций — в apps-script/Code.gs (normalizePhone,
+// parseOrderMessage, mapOrderFields, orderStatus) и покрыты node-тестами.
+// Здесь ровно столько, чтобы экран заказов можно было прогнать в браузере.
+
+function mockNormalizePhone(raw) {
+  let digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 11 && digits.charAt(0) === "8") digits = "7" + digits.substring(1);
+  if (digits.length === 10) digits = "7" + digits;
+  return "+" + digits;
+}
+
+function mockRuDate(raw) {
+  const m = String(raw || "").trim().match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
+  if (!m) return /^\d{4}-\d{2}-\d{2}/.test(String(raw)) ? String(raw).substring(0, 10) : "";
+  return m[3] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[1]).padStart(2, "0");
+}
+
+function mockFieldKey(key) {
+  return String(key || "").toLowerCase().replace(/[^a-zа-яё0-9]/g, "");
+}
+
+function mockParseOrder(text) {
+  const fields = {}, raw_keys = {}, items = [];
+  let order_no = "", source_url = "", amount = 0, currency = "";
+  const itemRe = /^\s*(\d+)\s*[.)]\s*(.+?)\s*:\s*([\d\s.,]*)\s*\(\s*(\d+)\s*[x×х]\s*([\d\s.,]+)\s*\)\s*$/;
+  const kvRe = /^\s*([A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё0-9_ ]*?)\s*:\s*(.*)$/;
+  const money = (s) => {
+    const n = parseFloat(String(s).replace(/\s/g, "").replace(",", "."));
+    return isNaN(n) ? 0 : n;
+  };
+
+  String(text).split(/\r?\n/).forEach((line) => {
+    const trimmed = line.replace(/\t/g, " ").trim();
+    if (!trimmed) return;
+    const orderM = trimmed.match(/^Заказ\s*№\s*(\S+)/i);
+    if (orderM) { order_no = orderM[1]; return; }
+    if (/^https?:\/\//i.test(trimmed)) { source_url = trimmed; return; }
+    const itemM = trimmed.match(itemRe);
+    if (itemM) {
+      items.push({ line_no: Number(itemM[1]), raw_name: itemM[2].trim(),
+        total: money(itemM[3]), qty: Number(itemM[4]), price: money(itemM[5]) });
+      return;
+    }
+    const kvM = trimmed.match(kvRe);
+    if (!kvM) return;
+    const key = kvM[1].trim(), value = kvM[2].trim();
+    if (!value && key.indexOf(" ") !== -1) return;
+    fields[mockFieldKey(key)] = value;
+    raw_keys[mockFieldKey(key)] = key;
+  });
+
+  const pick = (names) => {
+    for (const n of names) {
+      const k = mockFieldKey(n);
+      if (fields[k]) return fields[k];
+    }
+    return "";
+  };
+  const amountLine = pick(["Сумма платежа"]);
+  if (amountLine) {
+    const am = amountLine.match(/^([\d\s.,]+)\s*(\S*)$/);
+    if (am) { amount = money(am[1]); currency = am[2] || ""; }
+  }
+
+  const guardianName = pick(["Full_name_guardian"]);
+  const adultRaw = pick(["Are_you_an_adult"]);
+  const isAdult = adultRaw ? !/^(нет|no|false)$/i.test(adultRaw) : !guardianName;
+
+  const order = {
+    order_no, request_code: pick(["Код заявки"]),
+    student_name: pick(["Full_name_minor", "Full_name", "Full_name_adult"]),
+    student_phone: mockNormalizePhone(pick(["Phone_minors", "Phone_minor", "Phone"])),
+    student_tg: pick(["Telegram_Minors", "Telegram_minor", "Telegram"]),
+    is_adult: isAdult ? "TRUE" : "FALSE",
+    guardian_name: isAdult ? "" : guardianName,
+    guardian_phone: isAdult ? "" : mockNormalizePhone(pick(["Phone_guardian"])),
+    project: pick(["Type_and_name_of_the_project"]),
+    issue_date: mockRuDate(pick(["Date_of_issue"])),
+    return_date: mockRuDate(pick(["Date_completion"])),
+    extra_input: pick(["Input"]),
+    amount, currency, source_url, raw_text: String(text),
+  };
+
+  const withMatch = items.map((line) => {
+    const needle = MockStore.normalizeModelName(line.raw_name);
+    const exact = MockStore.models.find((m) => MockStore.normalizeModelName(m.model_name) === needle);
+    const suggestions = exact ? [] : MockStore.models.filter((m) => {
+      const c = MockStore.normalizeModelName(m.model_name);
+      return c && (c.indexOf(needle) !== -1 || needle.indexOf(c) !== -1);
+    }).slice(0, 5).map((m) => ({ category: m.category, model_code: m.model_code, model_name: m.model_name }));
+    return { ...line,
+      model_code: exact ? exact.model_code : "",
+      category: exact ? exact.category : "",
+      suggestions };
+  });
+
+  const warnings = [];
+  if (!order.student_name) warnings.push("Не распознано имя арендатора");
+  if (!order.student_phone) warnings.push("Не распознан телефон арендатора — историю по нему будет не собрать");
+  if (!order_no) warnings.push("Не распознан номер заказа");
+  const unmatched = withMatch.filter((i) => !i.model_code).length;
+  if (unmatched) {
+    warnings.push("Не сопоставлено с каталогом позиций: " + unmatched +
+      " — их можно выдавать количеством, без сканирования");
+  }
+
+  return { order, items: withMatch, fields, raw_keys, warnings, already_exists: null };
+}
+
+function mockOrderStatus(order, openCount, totalCount) {
+  if (order.status === "Cancelled") return "Cancelled";
+  if (openCount > 0) return "Issued";
+  if (totalCount > 0) return "Returned";
+  return "New";
+}
+
 function mockDefectBlocksRental(severity) {
   return severity === "Major" || severity === "Out of Service";
 }
@@ -31,9 +149,11 @@ function mockDefectBlocksRental(severity) {
 const MockStore = (() => {
   const unitCounters = {};   // "01"+"02" -> сколько экземпляров модели уже заведено
   let nextClientId = 3;
-  let nextTransactionId = 3;
+  let nextTransactionId = 4;
   let nextDefectId = 2;
   let nextStaffId = 3;
+  let nextStudentId = 2;
+  let nextOrderId = 3;
 
   const staff = [
     { staff_id: 1, full_name: "Иван Петров", login: "ivan", pin: "1234", role: "Warehouse Staff", active: true },
@@ -45,6 +165,7 @@ const MockStore = (() => {
       item_id: "010101",
       name: "Sony FX6",
       category: "CAM",
+      model_code: "01",
       serial_number: "SN-FX6-118",
       inventory_number: "1013400892",
       status: "Available",
@@ -55,11 +176,36 @@ const MockStore = (() => {
       item_id: "020101",
       name: "Sigma 24-70mm f/2.8",
       category: "LEN",
+      model_code: "01",
       serial_number: "SN-SIG-042",
       inventory_number: "",
       status: "Rented",
       condition_notes: "",
       current_transaction_id: 1,
+    },
+    // Две единицы позиции из настоящего заказа: одна уже выдана по нему,
+    // вторая свободна — на ней видно и «выдано 1 из 4», и саму выдачу.
+    {
+      item_id: "030101",
+      name: "OSTERRIG SIRIUS 100CM",
+      category: "LGT",
+      model_code: "01",
+      serial_number: "SN-OST-001",
+      inventory_number: "",
+      status: "Rented",
+      condition_notes: "",
+      current_transaction_id: 2,
+    },
+    {
+      item_id: "030102",
+      name: "OSTERRIG SIRIUS 100CM",
+      category: "LGT",
+      model_code: "01",
+      serial_number: "SN-OST-002",
+      inventory_number: "",
+      status: "Available",
+      condition_notes: "",
+      current_transaction_id: null,
     },
   ];
 
@@ -67,6 +213,7 @@ const MockStore = (() => {
   const models = [
     { category: "CAM", model_code: "01", model_name: "Sony FX6" },
     { category: "LEN", model_code: "01", model_name: "Sigma 24-70mm f/2.8" },
+    { category: "LGT", model_code: "01", model_name: "OSTERRIG SIRIUS 100CM" },
   ];
 
   // Счётчики экземпляров восстанавливаем из уже заведённых демо-позиций,
@@ -82,15 +229,72 @@ const MockStore = (() => {
     { client_id: 2, client_name: "Пётр Иванов", project_name: "Свадебная съёмка", phone: "+7 900 000-00-02", notes: "" },
   ];
 
+  // Заказы и арендаторы. Один заказ нарочно просрочен: бейдж просрочки — то,
+  // ради чего вкладку открывают, и в демо он должен быть виден.
+  const students = [
+    { student_id: 1, full_name: "Ильина-Ноктина Полина Ильинична", phone: "+79257868093",
+      tg_username: "@poliviks_notkina", created_at: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(), notes: "" },
+  ];
+
+  function mockDate(offsetDays) {
+    return new Date(Date.now() + offsetDays * 24 * 3600 * 1000).toISOString().substring(0, 10);
+  }
+
+  const orders = [
+    {
+      order_id: 1, order_no: "1525686941", request_code: "3288736:8358371482",
+      student_id: 1, student_name: "Ильина-Ноктина Полина Ильинична",
+      student_phone: "+79257868093", student_tg: "@poliviks_notkina",
+      is_adult: false, guardian_name: "Ильина-Ноткина Елена Борисовна",
+      guardian_phone: "+79257868093", project: "км",
+      issue_date: mockDate(-5), return_date: mockDate(-2), extra_input: "+ 4 ковра гойда",
+      amount: 214050, currency: "RUB", source_url: "https://example.org/mifs_rent/reservation",
+      status: "New", raw_text: "Заказ №1525686941\n(демо-режим: исходное сообщение сокращено)",
+      created_at: new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString(),
+      created_by: 1, created_by_name: "Матвей Одинцов", closed_at: "",
+    },
+    {
+      order_id: 2, order_no: "1525686942", request_code: "", student_id: 1,
+      student_name: "Ильина-Ноктина Полина Ильинична", student_phone: "+79257868093",
+      student_tg: "@poliviks_notkina", is_adult: true, guardian_name: "", guardian_phone: "",
+      project: "Курсовая", issue_date: mockDate(1), return_date: mockDate(4), extra_input: "",
+      amount: 0, currency: "", source_url: "", status: "New", raw_text: "",
+      created_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
+      created_by: 1, created_by_name: "Матвей Одинцов", closed_at: "",
+    },
+  ];
+
+  const orderItems = [
+    { order_id: 1, line_no: 1, raw_name: "GODOX OCTABOX 120", model_code: "", category: "", qty: 1, price: 0, total: 0, issued_qty: 0, note: "" },
+    { order_id: 1, line_no: 2, raw_name: "OSTERRIG SIRIUS 100CM", model_code: "01", category: "LGT", qty: 4, price: 38500, total: 154000, issued_qty: 1, note: "" },
+    { order_id: 1, line_no: 3, raw_name: "SANDBAG BIG", model_code: "", category: "", qty: 20, price: 2500, total: 50000, issued_qty: 0, note: "" },
+  ];
+
   const transactions = [
     {
       transaction_id: 1,
       item_id: "020101",
       client_id: 1,
+      order_id: "",
+      order_line: "",
       staff_out: 1,
       staff_in: null,
       checked_out_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
       expected_return_at: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString(),
+      checked_in_at: null,
+      status: "Open",
+      notes: "",
+    },
+    {
+      transaction_id: 2,
+      item_id: "030101",
+      client_id: null,
+      order_id: 1,
+      order_line: "2",
+      staff_out: 1,
+      staff_in: null,
+      checked_out_at: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
+      expected_return_at: mockDate(-2),
       checked_in_at: null,
       status: "Open",
       notes: "",
@@ -166,8 +370,11 @@ const MockStore = (() => {
 
   return {
     staff, equipment, clients, transactions, defects, tokens,
+    students, orders, orderItems,
     findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin, rotateToken,
     models,
+    nextStudentId: () => nextStudentId++,
+    nextOrderId: () => nextOrderId++,
     // Номер вида XXYYZZ: категория, модель, порядковый номер экземпляра.
     nextItemId(category, modelCode) {
       const cat = (mockCategories().find((c) => c.code === category) || { num: "06" }).num;
@@ -261,17 +468,39 @@ const MockAPI = {
           e.status = 409;
           throw e;
         }
+        let order_id = "", order_line = "", expected = body.expected_return_at || null;
+        if (body.order_id) {
+          const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
+          if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+          if (order.status === "Cancelled") {
+            const e = new Error("Заказ отменён, выдавать по нему нельзя");
+            e.status = 409;
+            throw e;
+          }
+          order_id = order.order_id;
+          if (!expected) expected = order.return_date || null;
+          // Списываем экземпляр с подходящей строки состава; не нашлось —
+          // «вне заказа», но выдача проходит.
+          const line = MockStore.orderItems.find((i) =>
+            String(i.order_id) === String(order_id) && i.model_code &&
+            i.category === item.category &&
+            String(i.model_code) === String(item.model_code) && i.issued_qty < i.qty);
+          if (line) { line.issued_qty += 1; order_line = String(line.line_no); }
+          else order_line = "off-order";
+          order.status = "Issued";
+        }
         const transaction_id = MockStore.nextTransactionId();
         MockStore.transactions.push({
           transaction_id, item_id: item.item_id, client_id: body.client_id,
+          order_id, order_line,
           staff_out: staff_id, staff_in: null,
           checked_out_at: new Date().toISOString(),
-          expected_return_at: body.expected_return_at || null,
+          expected_return_at: expected,
           checked_in_at: null, status: "Open", notes: body.notes || "",
         });
         item.status = "Rented";
         item.current_transaction_id = transaction_id;
-        return { transaction_id };
+        return { transaction_id, order_line };
       }
 
       case "/transaction/checkin": {
@@ -283,6 +512,19 @@ const MockAPI = {
         tx.status = "Closed";
         tx.checked_in_at = new Date().toISOString();
         tx.staff_in = staff_id;
+
+        if (tx.order_id) {
+          const line = MockStore.orderItems.find((i) =>
+            String(i.order_id) === String(tx.order_id) && String(i.line_no) === String(tx.order_line));
+          if (line && line.issued_qty > 0) line.issued_qty -= 1;
+          const order = MockStore.orders.find((o) => String(o.order_id) === String(tx.order_id));
+          if (order && order.status !== "Cancelled") {
+            const stillOut = MockStore.transactions.filter(
+              (t) => String(t.order_id) === String(tx.order_id) && t.status === "Open").length;
+            order.status = stillOut ? "Issued" : "Returned";
+            order.closed_at = stillOut ? "" : new Date().toISOString();
+          }
+        }
 
         let defect_id = null;
         if (body.has_defect) {
@@ -357,6 +599,149 @@ const MockAPI = {
       case "/model/create": {
         MockStore.requireToken(token);
         return { ...MockStore.findOrCreateModel(body.category, body.model_name) };
+      }
+
+      // Заказы. Настоящий разбор сообщения живёт в apps-script/Code.gs и покрыт
+      // тестами в apps-script/test-local.js; здесь — та же логика в объёме,
+      // которого хватает, чтобы прогнать экран в браузере.
+      case "/order/parse": {
+        MockStore.requireToken(token);
+        const parsed = mockParseOrder(body.text || "");
+        if (!parsed.order.order_no && !parsed.items.length) {
+          const e = new Error("Не похоже на сообщение о заказе: ни номера, ни позиций не нашлось");
+          e.status = 400;
+          throw e;
+        }
+        const existing = MockStore.orders.find((o) => o.order_no === parsed.order.order_no);
+        parsed.already_exists = existing ? existing.order_id : null;
+        return parsed;
+      }
+
+      case "/order/create": {
+        const staff_id = MockStore.requireToken(token);
+        const orderNo = String(body.order_no || "").trim();
+        if (!orderNo) { const e = new Error("Укажите номер заказа"); e.status = 400; throw e; }
+        if (MockStore.orders.some((o) => o.order_no === orderNo)) {
+          const e = new Error("Заказ " + orderNo + " уже заведён");
+          e.status = 409;
+          throw e;
+        }
+        const phone = mockNormalizePhone(body.student_phone);
+        let student = phone ? MockStore.students.find((s) => s.phone === phone) : null;
+        let student_created = false;
+        if (phone && !student) {
+          student = {
+            student_id: MockStore.nextStudentId(), full_name: body.student_name || "",
+            phone, tg_username: body.student_tg || "", created_at: new Date().toISOString(), notes: "",
+          };
+          MockStore.students.push(student);
+          student_created = true;
+        }
+        const order_id = MockStore.nextOrderId();
+        const staffRow = MockStore.findStaffById(staff_id);
+        MockStore.orders.push({
+          order_id, order_no: orderNo, request_code: body.request_code || "",
+          student_id: student ? student.student_id : "",
+          student_name: body.student_name || "", student_phone: phone,
+          student_tg: body.student_tg || "",
+          is_adult: !(body.is_adult === "FALSE" || body.is_adult === false),
+          guardian_name: body.guardian_name || "", guardian_phone: mockNormalizePhone(body.guardian_phone),
+          project: body.project || "", issue_date: body.issue_date || "", return_date: body.return_date || "",
+          extra_input: body.extra_input || "", amount: Number(body.amount || 0),
+          currency: body.currency || "", source_url: body.source_url || "",
+          status: "New", raw_text: body.raw_text || "", created_at: new Date().toISOString(),
+          created_by: staff_id, created_by_name: staffRow ? staffRow.full_name : "",
+          closed_at: "",
+        });
+        (body.items || []).forEach((line, idx) => {
+          MockStore.orderItems.push({
+            order_id, line_no: Number(line.line_no || idx + 1), raw_name: line.raw_name || "",
+            model_code: line.model_code || "", category: line.category || "",
+            qty: Number(line.qty || 1), price: Number(line.price || 0), total: Number(line.total || 0),
+            issued_qty: 0, note: "",
+          });
+        });
+        return { order_id, student_id: student ? student.student_id : "", student_created };
+      }
+
+      case "/orders/list": {
+        MockStore.requireToken(token);
+        return MockStore.orders.map((o) => {
+          const txs = MockStore.transactions.filter((t) => String(t.order_id) === String(o.order_id));
+          const open = txs.filter((t) => t.status === "Open").length;
+          const { raw_text, ...rest } = o;
+          return { ...rest, status: mockOrderStatus(o, open, txs.length), issued_open: open, issued_total: txs.length };
+        });
+      }
+
+      case "/order/card": {
+        MockStore.requireToken(token);
+        const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
+        if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        const txs = MockStore.transactions.filter((t) => String(t.order_id) === String(order.order_id));
+        const open = txs.filter((t) => t.status === "Open").length;
+        return {
+          order: { ...order, status: mockOrderStatus(order, open, txs.length) },
+          items: MockStore.orderItems.filter((i) => String(i.order_id) === String(order.order_id)).map((i) => ({ ...i })),
+          transactions: txs.map((t) => ({ ...t })),
+        };
+      }
+
+      case "/order/update": {
+        MockStore.requireToken(token);
+        const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
+        if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        if (body.status === "Cancelled") {
+          const open = MockStore.transactions.filter(
+            (t) => String(t.order_id) === String(order.order_id) && t.status === "Open").length;
+          if (open) {
+            const e = new Error("По заказу " + open + " позиций на руках — сначала примите их");
+            e.status = 409;
+            throw e;
+          }
+        }
+        ["project", "issue_date", "return_date", "extra_input", "guardian_name",
+         "guardian_phone", "student_tg", "status"].forEach((field) => {
+          if (body[field] !== undefined) order[field] = body[field];
+        });
+        return { order_id: order.order_id };
+      }
+
+      case "/order/line-update": {
+        MockStore.requireToken(token);
+        const line = MockStore.orderItems.find(
+          (i) => String(i.order_id) === String(body.order_id) && String(i.line_no) === String(body.line_no));
+        if (!line) { const e = new Error("Строка заказа не найдена"); e.status = 404; throw e; }
+        if (body.issued_qty !== undefined) {
+          if (Number(body.issued_qty) > line.qty) {
+            const e = new Error("В заказе этой позиции " + line.qty + ", выдать больше нельзя");
+            e.status = 400;
+            throw e;
+          }
+          line.issued_qty = Number(body.issued_qty);
+        }
+        if (body.model_code !== undefined) {
+          line.model_code = body.model_code || "";
+          line.category = body.category || "";
+        }
+        return { order_id: line.order_id, line_no: line.line_no };
+      }
+
+      case "/students/list": {
+        MockStore.requireToken(token);
+        return MockStore.students.map((s) => ({ ...s }));
+      }
+
+      case "/student/history": {
+        MockStore.requireToken(token);
+        return {
+          orders: MockStore.orders
+            .filter((o) => String(o.student_id) === String(body.student_id))
+            .map((o) => ({
+              order_id: o.order_id, order_no: o.order_no, project: o.project,
+              issue_date: o.issue_date, return_date: o.return_date, status: o.status,
+            })),
+        };
       }
 
       case "/clients/list": {

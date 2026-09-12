@@ -3,13 +3,14 @@
 
 const ScanScreen = (() => {
   let currentItem = null;
-  let clients = [];
+  let orders = [];
   let mode = null; // "checkout" | "checkin" | "defect"
 
   function reset() {
     currentItem = null;
     mode = null;
     document.getElementById("scan-result").innerHTML = "";
+    document.getElementById("scan-start-btn").textContent = "📷 Сканировать";
     showBoxError("scan-error", "");
     TG.mainButton.hide();
   }
@@ -39,7 +40,8 @@ const ScanScreen = (() => {
       // показывал устаревшее «Доступно» до следующего обновления.
       Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
       mode = item.status === "Available" ? "checkout" : item.status === "Rented" ? "checkin" : null;
-      if (mode === "checkout") await loadClients();
+      if (mode === "checkout") await loadOrders();
+      document.getElementById("scan-start-btn").textContent = "📷 Сканировать ещё раз";
       renderItem();
     } catch (err) {
       currentItem = null;
@@ -47,12 +49,27 @@ const ScanScreen = (() => {
     }
   }
 
-  async function loadClients() {
-    try {
-      clients = await apiPost("/clients/list", {});
-    } catch {
-      clients = [];
+  // Заказы берём из общего кэша: на выдаче человек стоит у стойки, и лишние
+  // 5–8 секунд здесь заметнее всего. Если кэша нет — запрашиваем один раз и
+  // кладём туда же, откуда потом их прочитает вкладка «Заказы».
+  async function loadOrders() {
+    let all = Cache.items("orders");
+    if (!all) {
+      try {
+        all = await apiPost("/orders/list", { status: "all" });
+        Cache.set("orders", all);
+      } catch {
+        all = [];
+      }
     }
+    // Выдавать можно по заказу, который оформлен или уже частично выдан.
+    orders = all.filter((o) => o.status === "New" || o.status === "Issued");
+  }
+
+  function orderLabel(order) {
+    const who = String(order.student_name || "").split(" ").slice(0, 2).join(" ");
+    const until = order.return_date ? " · до " + order.return_date : "";
+    return `№${order.order_no} · ${who}${until}`;
   }
 
   function renderItem() {
@@ -75,7 +92,7 @@ const ScanScreen = (() => {
       <div id="mode-form"></div>
     `;
     document.getElementById("mode-checkout").addEventListener("click", async () => {
-      mode = "checkout"; await loadClients(); renderItem(); renderForm();
+      mode = "checkout"; await loadOrders(); renderItem(); renderForm();
     });
     document.getElementById("mode-checkin").addEventListener("click", () => { mode = "checkin"; renderItem(); renderForm(); });
     document.getElementById("mode-defect").addEventListener("click", () => { mode = "defect"; renderItem(); renderForm(); });
@@ -89,21 +106,32 @@ const ScanScreen = (() => {
       box.innerHTML = `
         <div class="section">
           <div class="field">
-            <label for="scan-client">Клиент / проект</label>
-            <select id="scan-client">
+            <label for="scan-order">Заказ</label>
+            <select id="scan-order">
               <option value="">— выберите —</option>
-              ${clients.map((c) => `<option value="${c.client_id}">${escapeHtml(c.client_name)}${c.project_name ? " · " + escapeHtml(c.project_name) : ""}</option>`).join("")}
+              ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
+              <option value="none">Без заказа (для склада)</option>
             </select>
+            ${orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
+            или выдайте без заказа.</p>`}
           </div>
           <div class="field">
             <label for="scan-return-date">Ожидаемая дата возврата</label>
             <input type="date" id="scan-return-date" />
+            <p class="hint">Подставляется из заказа; можно поправить.</p>
           </div>
           <div class="field">
             <label for="scan-notes">Заметки</label>
             <textarea id="scan-notes"></textarea>
           </div>
         </div>`;
+      // Срок возврата приходит из заказа — вводить его заново значит рано или
+      // поздно ввести не то, что обещано студенту на сайте.
+      document.getElementById("scan-order").addEventListener("change", (e) => {
+        const picked = e.target.selectedOptions[0];
+        const date = picked ? picked.dataset.return : "";
+        if (date) document.getElementById("scan-return-date").value = date;
+      });
       TG.mainButton.show("Подтвердить выдачу", submitCheckout);
     } else if (mode === "checkin") {
       box.innerHTML = `
@@ -159,18 +187,26 @@ const ScanScreen = (() => {
   }
 
   async function submitCheckout() {
-    const clientId = document.getElementById("scan-client").value;
-    if (!clientId) { TG.showAlert("Выберите клиента"); return; }
+    const picked = document.getElementById("scan-order").value;
+    // «Без заказа» выбирается сознательно: иначе выдача без заказа случалась бы
+    // просто от того, что список не пролистали.
+    if (!picked) { TG.showAlert("Выберите заказ или «Без заказа»"); return; }
+    const orderId = picked === "none" ? null : Number(picked);
     TG.mainButton.setLoading(true);
     try {
-      await apiPost("/transaction/checkout", {
+      const result = await apiPost("/transaction/checkout", {
         item_id: currentItem.item_id,
-        client_id: Number(clientId),
+        order_id: orderId,
         expected_return_at: document.getElementById("scan-return-date").value || null,
         notes: document.getElementById("scan-notes").value.trim(),
       });
       TG.hapticSuccess();
-      TG.showAlert("Оборудование выдано");
+      // Выдача вне состава заказа разрешена (в заказе есть свободное поле, куда
+      // технику дописывают руками), но человек должен об этом узнать сразу.
+      TG.showAlert(result && result.order_line === "off-order" && orderId
+        ? "Выдано. В составе заказа этой позиции нет — отмечено как «вне заказа»."
+        : "Оборудование выдано");
+      if (orderId) Cache.clear("orders");   // изменился статус и состав заказа
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
@@ -194,6 +230,7 @@ const ScanScreen = (() => {
       TG.hapticSuccess();
       TG.showAlert("Оборудование принято");
       if (hasDefect) Cache.clear("defects");   // в ремонте появилась запись
+      Cache.clear("orders");                   // заказ мог закрыться возвратом
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
