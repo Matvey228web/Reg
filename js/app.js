@@ -7,12 +7,15 @@
   Router.register("home", {
     onShow() {
       const session = Auth.getSession();
-      document.getElementById("home-user").textContent = session
-        ? `${session.full_name} · ${session.role === "Admin" ? "Администратор" : "Сотрудник склада"}`
+      // Имя крупно, роль строкой ниже: это заголовок экрана, а не подпись.
+      document.getElementById("home-user").innerHTML = session
+        ? `${escapeHtml(session.full_name)}<span>${session.role === "Admin" ? "Администратор" : "Сотрудник склада"}</span>`
         : "";
       const isAdmin = !!session && session.role === "Admin";
-      document.getElementById("home-staff-card").style.display = isAdmin ? "block" : "none";
-      document.getElementById("home-settings-card").style.display = isAdmin ? "block" : "none";
+      // Пустая строка, а не "block": раскладку карточки задаёт стиль, а inline
+      // display её перебивал — стрелка уезжала под название.
+      document.getElementById("home-staff-card").style.display = isAdmin ? "" : "none";
+      document.getElementById("home-settings-card").style.display = isAdmin ? "" : "none";
     },
   });
 

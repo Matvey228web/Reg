@@ -48,14 +48,14 @@
          Главная — это кабинет: кто вошёл и что он может настроить. -->
     <div class="menu-grid">
       <div class="card" data-nav="staff" id="home-staff-card" style="display:none;">
-        <div class="card-title">🗝 Сотрудники</div>
+        <div class="card-title">Сотрудники</div>
       </div>
       <div class="card" data-nav="settings" id="home-settings-card" style="display:none;">
-        <div class="card-title">⚙️ Настройки</div>
+        <div class="card-title">Настройки</div>
       </div>
     </div>
-    <button class="btn btn--secondary" id="pin-change-btn" style="margin-top:20px;">Сменить свой PIN</button>
-    <button class="btn btn--secondary" id="logout-btn" style="margin-top:8px;">Выйти</button>
+    <button class="btn btn--secondary" id="pin-change-btn">Сменить свой PIN</button>
+    <button class="btn btn--secondary" id="logout-btn">Выйти</button>
   </div>
 
   <!-- Экран: каталог оборудования -->
@@ -70,8 +70,10 @@
     </div>
     <!-- Кнопка стоит ДО списка и липнет при прокрутке: раньше она была после
          списка и на 628 карточках уезжала под них — найти её было невозможно. -->
-    <button class="btn btn--secondary btn--sticky" id="catalog-add-toggle">+ Добавить оборудование</button>
-    <button class="btn btn--secondary" id="catalog-labels-btn">🏷 Печать этикеток</button>
+    <div class="btn-row sticky-bar">
+      <button class="btn" id="catalog-add-toggle">+ Добавить</button>
+      <button class="btn btn--secondary" id="catalog-labels-btn">Этикетки</button>
+    </div>
 
     <div id="catalog-add-form" style="display:none;" class="section">
       <h2>Новое оборудование</h2>
@@ -115,7 +117,10 @@
     <div id="scan-result"></div>
     <!-- Текст меняется на «ещё раз» после первого найденного предмета: при
          входе на экран сканировать ещё нечего было. -->
-    <button class="btn btn--secondary" id="scan-start-btn">📷 Сканировать</button>
+    <button class="btn" id="scan-start-btn">
+      <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>
+      <span id="scan-start-text">Сканировать</span>
+    </button>
     <div class="field" id="scan-manual-wrap">
       <label for="scan-manual-input">Или введите номер вручную</label>
       <input type="text" id="scan-manual-input" inputmode="numeric" placeholder="010101" />
@@ -158,7 +163,7 @@
       <input type="search" id="orders-search" placeholder="Поиск по номеру, имени или телефону"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
     </div>
-    <button class="btn btn--secondary btn--sticky" id="orders-add-toggle">+ Новый заказ</button>
+    <div class="sticky-bar"><button class="btn" id="orders-add-toggle">+ Новый заказ</button></div>
     <div id="orders-add" class="section" style="display:none;"></div>
     <div class="refresh-row" id="orders-refresh"></div>
     <div id="orders-list"></div>
@@ -168,7 +173,7 @@
   <div class="screen" id="screen-staff">
     <h1>Сотрудники</h1>
     <div id="staff-list"></div>
-    <button class="btn btn--secondary" id="staff-add-toggle" style="margin-top:6px;">+ Добавить сотрудника</button>
+    <button class="btn" id="staff-add-toggle">+ Добавить сотрудника</button>
 
     <div id="staff-add-form" style="display:none;" class="section">
       <h2>Новый сотрудник</h2>
@@ -231,12 +236,14 @@
 
   <!-- Панель разделов: переход между разделами в один тап, без возврата на главную.
        «Сотрудники» сюда не ставим — раздел админский и редкий, он на главной. -->
+  <!-- Иконки нарисованы, а не набраны эмодзи: эмодзи выглядят по-разному на
+       каждой платформе, всегда цветные и не подхватывают цвет активной вкладки. -->
   <nav class="tabbar" id="tabbar" style="display:none;">
-    <button class="tab" data-tab="home"><span class="tab-ico">🏠</span>Главная</button>
-    <button class="tab" data-tab="catalog"><span class="tab-ico">📦</span>Каталог</button>
-    <button class="tab" data-tab="scan"><span class="tab-ico">📷</span>Скан</button>
-    <button class="tab" data-tab="repair"><span class="tab-ico">🛠</span>Ремонт</button>
-    <button class="tab" data-tab="orders"><span class="tab-ico">🧾</span>Заказы</button>
+    <button class="tab" data-tab="home"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 2l9 7.5V21a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 22V13h6v9"/></svg></span>Главная</button>
+    <button class="tab" data-tab="catalog"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>Каталог</button>
+    <button class="tab" data-tab="scan"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></span>Скан</button>
+    <button class="tab" data-tab="repair"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>Ремонт</button>
+    <button class="tab" data-tab="orders"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a1 1 0 0 0 1 1h5"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span>Заказы</button>
   </nav>
 
   <!-- Сюда складываются этикетки на момент печати: у термопринтера этикеток

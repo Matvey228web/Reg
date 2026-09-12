@@ -25,13 +25,20 @@ const CONFIG = {
   // num — первые две цифры номера предмета (XXYYZZ). У категории, в которой уже
   // есть техника, номер менять нельзя: он напечатан на этикетках.
   CATEGORIES: [
-    { code: "CAM", num: "01", label: "Камера" },
-    { code: "LEN", num: "02", label: "Объектив" },
-    { code: "LGT", num: "03", label: "Свет" },
+    { code: "CAM", num: "01", label: "Камеры" },
+    { code: "LEN", num: "02", label: "Объективы" },
+    { code: "LGT", num: "03", label: "Осветители" },
     { code: "AUD", num: "04", label: "Звук" },
     { code: "GRP", num: "05", label: "Грип" },
     { code: "OTH", num: "06", label: "Другое" },
     // Учитываются количеством, а не поштучно. Правила количества — отдельно.
-    { code: "CNS", num: "07", label: "Расходники (штучно/навес)" },
+    { code: "CNS", num: "07", label: "Расходники" },
+    { code: "SUP", num: "08", label: "Штативы и поддержка" },
+    { code: "MOD", num: "09", label: "Модификаторы света" },
+    { code: "MON", num: "10", label: "Мониторы и видеотракт" },
+    { code: "RIG", num: "11", label: "Обвес камеры" },
+    { code: "FLT", num: "12", label: "Фильтры" },
+    { code: "PWR", num: "13", label: "Питание" },
+    { code: "MED", num: "14", label: "Носители" },
   ],
 };

@@ -1,4 +1,16 @@
+/* Оформление Mifs Rent.
+ *
+ * Цвета берём из темы Telegram: это мини-приложение, и оно должно выглядеть
+ * частью мессенджера, а не гостем в нём. Тему пользователя мы заранее не знаем,
+ * поэтому все собственные поверхности и границы заданы ПОЛУПРОЗРАЧНЫМ СЕРЫМ:
+ * одно и то же значение одинаково уместно и на белом, и на тёмном фоне. Любой
+ * зашитый цвет однажды оказывается ярким пятном в тёмной теме — этот класс
+ * ошибки мы уже ловили на подложке сообщений об ошибке.
+ */
+
 :root {
+  /* Приходят из Telegram (js/telegram.js). Здесь — значения на случай запуска
+     в обычном браузере. */
   --tg-bg-color: #ffffff;
   --tg-text-color: #111111;
   --tg-hint-color: #8e8e93;
@@ -7,17 +19,45 @@
   --tg-button-text-color: #ffffff;
   --tg-secondary-bg-color: #f2f2f7;
 
-  --danger: #e03131;
-  --warning: #f08c00;
-  --success: #2f9e44;
-  --radius: 12px;
+  --ink: var(--tg-text-color);
+  --muted: var(--tg-hint-color);
+  --accent: var(--tg-button-color);
+  --on-accent: var(--tg-button-text-color);
+
+  /* Поверхности и границы — серый с прозрачностью, см. комментарий выше. */
+  --surface: rgba(128, 128, 128, 0.10);
+  --surface-strong: rgba(128, 128, 128, 0.17);
+  --hairline: rgba(128, 128, 128, 0.24);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 6px 24px rgba(0, 0, 0, 0.16);
+
+  /* Цвета состояний. Подобраны так, чтобы белый текст на них читался: у
+     «оранжевого предупреждения» в исходном виде контраст с белым был ниже
+     нормы, и бейдж «В аренде» на свету читался с трудом. */
+  --danger: #c92a2a;
+  --warning: #c2410c;
+  --success: #2f7d32;
+  /* Те же смыслы, но для тонких линий и акцентов, где контраст не нужен. */
+  --danger-line: #e03131;
+  --warning-line: #f08c00;
+
+  /* Шкала отступов: четыре, восемь и далее. Без неё отступы расползаются по
+     экранам и вёрстка выглядит случайной. */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px; --s5: 20px; --s6: 28px;
+
+  --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-pill: 999px;
+
+  /* Минимальная цель для пальца. Склад — работа руками, часто в перчатке. */
+  --tap: 48px;
 
   /* Запас сверху под шапку Telegram («Закрыть», стрелка, «…») — она висит НАД
-     содержимым, и без запаса заголовок экрана оказывается под ней. Значения
-     приходят из SDK (js/telegram.js), здесь — на случай, если их нет. */
+     содержимым. Значения приходят из SDK, здесь — на случай, если их нет. */
   --safe-top: 56px;
   --safe-bottom: 0px;
   --gutter: 18px;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --tabbar-h: calc(var(--tap) + 18px);
 }
 
 * { box-sizing: border-box; }
@@ -27,8 +67,12 @@ html, body {
   padding: 0;
   height: 100%;
   background: var(--tg-bg-color);
-  color: var(--tg-text-color);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Запас под шапку Telegram даём один раз здесь, а не на каждом экране: иначе
@@ -36,151 +80,330 @@ html, body {
 #app {
   min-height: 100%;
   padding-top: var(--safe-top);
-  padding-bottom: calc(80px + var(--safe-bottom));
+  padding-bottom: calc(var(--tabbar-h) + var(--s5) + var(--safe-bottom) + env(safe-area-inset-bottom, 0px));
 }
 
-.screen { display: none; padding: var(--gutter); }
+.screen { display: none; padding: var(--s3) var(--gutter) 0; }
 .screen--active { display: block; }
 
-h1 { font-size: 20px; margin: 4px 0 16px; }
-h2 { font-size: 17px; margin: 0 0 12px; }
-p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
+/* Обводка по Tab — приложение открывают и в браузере на компьютере, там без
+   неё не видно, где находишься. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
 
-.field { margin-bottom: 14px; }
-.field label { display: block; font-size: 13px; color: var(--tg-hint-color); margin-bottom: 4px; }
+h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.2px; margin: var(--s1) 0 var(--s4); }
+h2 { font-size: 17px; font-weight: 600; margin: 0 0 var(--s3); }
+p.hint { color: var(--muted); font-size: 13px; line-height: 1.45; margin: var(--s1) 0 var(--s4); }
+a { color: var(--tg-link-color); }
+
+/* --- Поля ввода ---
+   Поле — «углубление»: фон страницы плюс тонкая рамка. Раньше поля, карточки и
+   вторичные кнопки заливались одним и тем же серым, и кнопка «Сканировать»
+   выглядела ровно как поле ввода рядом с ней. */
+.field { margin-bottom: var(--s3); }
+.field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: var(--s1);
+}
 .field input, .field select, .field textarea {
   width: 100%;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--tg-secondary-bg-color);
-  background: var(--tg-secondary-bg-color);
-  color: var(--tg-text-color);
-  font-size: 16px;
+  min-height: var(--tap);
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--tg-bg-color);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;   /* меньше 16px — и Safari на iPhone увеличивает страницу */
+  line-height: 1.3;
+  transition: border-color 0.15s ease;
 }
-.field textarea { resize: vertical; min-height: 60px; }
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); }
+.field input:focus, .field select:focus, .field textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.field textarea { resize: vertical; min-height: 96px; padding-top: 12px; }
+.field .hint { margin-top: var(--s2); margin-bottom: 0; }
 
+/* Своя стрелка у выпадающих списков: системная выглядит по-разному в каждом
+   браузере, и рядом с нашими скруглениями смотрится чужеродно. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+}
+
+/* --- Кнопки ---
+   Главное действие — залитое акцентом, вторичное — приглушённая плашка с
+   рамкой. До этого и то и другое было серым прямоугольником, и глазу не за что
+   было зацепиться. */
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
   width: 100%;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  border: none;
-  background: var(--tg-button-color);
-  color: var(--tg-button-text-color);
+  min-height: var(--tap);
+  padding: 12px 18px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: inherit;
   font-size: 16px;
   font-weight: 600;
   text-align: center;
   cursor: pointer;
-  margin-bottom: 10px;
+  margin-bottom: var(--s2);
+  box-shadow: var(--shadow-1);
+  transition: transform 0.12s ease, opacity 0.12s ease;
 }
-.btn:disabled { opacity: 0.5; }
-.btn--secondary { background: var(--tg-secondary-bg-color); color: var(--tg-text-color); }
+.btn:active { transform: scale(0.985); }
+.btn:disabled { opacity: 0.45; box-shadow: none; cursor: default; transform: none; }
+.btn--secondary {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--hairline);
+  box-shadow: none;
+}
 .btn--danger { background: var(--danger); color: #fff; }
 
-.card {
-  background: var(--tg-secondary-bg-color);
-  border-radius: var(--radius);
-  padding: 14px;
-  margin-bottom: 10px;
+.btn-ico {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.card:active { opacity: 0.85; }
-.card-title { font-weight: 600; margin-bottom: 2px; }
-.card-sub { font-size: 13px; color: var(--tg-hint-color); }
 
+/* Два действия рядом, а не одно под другим: главное шире, второстепенное
+   прижато к краю. Столбик одинаковых во всю ширину кнопок читается как список
+   равных вариантов, хотя равными они не являются. */
+.btn-row { display: flex; gap: var(--s2); }
+.btn-row .btn { margin-bottom: var(--s2); }
+.btn-row .btn--secondary { flex: 0 1 auto; width: auto; padding-left: var(--s4); padding-right: var(--s4); }
+/* Равные по смыслу действия — равными долями. */
+.btn-row--equal .btn { flex: 1 1 0; width: auto; min-width: 0; padding-left: var(--s2); padding-right: var(--s2); font-size: 14px; }
+
+/* --- Карточки и строки списка --- */
+.card {
+  background: var(--surface);
+  border-radius: var(--r-md);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s2);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.card:active { transform: scale(0.99); background: var(--surface-strong); }
+
+/* Заголовок строки — название слева, состояние справа. Раньше бейдж стоял
+   сразу за текстом, и в списке они прыгали по строке вслед за длиной названия. */
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.card-title .badge { flex: none; }
+.card-title .badge:first-of-type { margin-left: auto; }
+.card-sub {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.card-sub:empty { display: none; }
+
+/* --- Бейджи состояния ---
+   Заливка сплошная, текст белый: так контраст не зависит от того, светлая тема
+   или тёмная. Нейтральные состояния («Списано», «Оформлен») не кричат — им
+   хватает приглушённой плашки. */
 .badge {
   display: inline-block;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  background: var(--surface-strong);
+  color: var(--muted);
+  white-space: nowrap;
 }
-.badge--available { background: var(--success); }
-.badge--rented { background: var(--warning); }
-.badge--retired { background: var(--tg-hint-color); }
-.badge--open { background: var(--danger); }
-.badge--in-repair { background: var(--warning); }
-.badge--resolved { background: var(--success); }
-.badge--closed { background: var(--tg-hint-color); }
+.badge--available, .badge--resolved { background: var(--success); color: #fff; }
+.badge--rented, .badge--in-repair { background: var(--warning); color: #fff; }
+.badge--open { background: var(--danger); color: #fff; }
+.badge--retired, .badge--closed { background: var(--surface-strong); color: var(--muted); }
 
-/* Ошибка должна читаться и в тёмной теме Telegram. Светло-розовый фон был
-   зашит цветом: на тёмном экране он превращался в яркое пятно с почти
-   нечитаемым красным текстом. Полупрозрачная подложка works в обеих темах,
-   а «ошибочность» несут красная полоса и цвет заголовка. */
 .error-box {
-  background: rgba(224, 49, 49, 0.14);
-  border-left: 3px solid var(--danger);
-  color: var(--tg-text-color);
-  border-radius: var(--radius);
-  padding: 10px 12px;
+  background: rgba(224, 49, 49, 0.13);
+  border-left: 3px solid var(--danger-line);
+  color: var(--ink);
+  border-radius: var(--r-sm);
+  padding: var(--s3) var(--s4);
   font-size: 14px;
-  margin-bottom: 12px;
+  margin-bottom: var(--s3);
 }
 
 .empty {
-  color: var(--tg-hint-color);
+  color: var(--muted);
   text-align: center;
-  padding: 24px 0;
+  padding: var(--s6) var(--s4);
   font-size: 14px;
+  line-height: 1.5;
 }
 
-.filters { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; }
-.filters select { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--tg-secondary-bg-color); background: var(--tg-secondary-bg-color); }
+/* Ряд фильтров-таблеток, прокручивается вбок, полосу прокрутки не показываем. */
+/* Фильтры переносятся на вторую строку, а не прокручиваются вбок: их два-три,
+   и уехавший за край список статусов выглядит обрезанным, а не прокручиваемым. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+.filters select {
+  flex: none;
+  width: auto;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 6px 34px 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--hairline);
+  background-color: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  background-position: right 12px center;
+}
 
-.menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.menu-grid .card { text-align: center; padding: 22px 10px; }
-.menu-grid .card-title { font-size: 15px; }
+/* --- Кабинет на главной --- */
+.screen-user {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin: var(--s1) 0 var(--s5);
+}
+.screen-user span {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0;
+  margin-top: 2px;
+}
 
-.qr-wrap { display: flex; flex-direction: column; align-items: center; padding: 20px 0; }
-.qr-wrap canvas { background: #fff; padding: 12px; border-radius: var(--radius); }
-.qr-id { font-family: monospace; font-size: 15px; margin-top: 10px; letter-spacing: 0.5px; }
+/* Разделы кабинета — строки во всю ширину со стрелкой, а не два серых квадрата:
+   так видно, что по ним переходят, и название не приходится ужимать. */
+.menu-grid { display: block; margin-bottom: var(--s5); }
+.menu-grid .card {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: var(--tap);
+  padding: var(--s3) var(--s4);
+  text-align: left;
+}
+.menu-grid .card-title {
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+}
+.menu-grid .card::after {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-top: 2px solid var(--muted);
+  transform: rotate(45deg);
+  opacity: 0.7;
+}
 
-.section { margin-top: 20px; }
-.section-title { font-size: 13px; text-transform: uppercase; color: var(--tg-hint-color); margin-bottom: 8px; }
+.qr-wrap { display: flex; flex-direction: column; align-items: center; padding: var(--s5) 0; }
+.qr-wrap canvas { background: #fff; padding: var(--s3); border-radius: var(--r-md); box-shadow: var(--shadow-1); }
+.qr-id { font-family: var(--font-mono); font-size: 16px; margin-top: var(--s3); letter-spacing: 1px; }
 
-.top-user { font-size: 13px; color: var(--tg-hint-color); margin-bottom: 10px; }
+.section { margin-top: var(--s5); }
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: var(--s2);
+}
 
-/* Первая строка кабинета вместо заголовка: кто вошёл — полезнее, чем слово
-   «Главная», которое и так написано на вкладке. */
-.screen-user { font-size: 17px; font-weight: 600; margin: 4px 0 16px; }
-
-.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-height: var(--tap);
+  padding: var(--s2) 0;
+}
+.toggle-row label { font-size: 15px; }
+.toggle-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
 
 /* Кнопка-замена Telegram MainButton вне Telegram (обычный браузер) */
 .fallback-main-button {
   display: none;
   position: fixed;
-  left: 16px;
-  right: 16px;
-  bottom: 76px; /* выше панели разделов, иначе она её перекрывает */
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: calc(var(--tabbar-h) + var(--s2) + env(safe-area-inset-bottom, 0px));
   z-index: 100;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  width: auto;
+  box-shadow: var(--shadow-2);
 }
-
 
 /* Кнопка «назад» внутри страницы — не зависит от версии Telegram */
-.back-row { padding: 8px var(--gutter) 0; }
+.back-row { padding: var(--s2) var(--gutter) 0; }
 .back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
   border: none;
-  background: var(--tg-secondary-bg-color);
-  color: var(--tg-text-color);
-  font-size: 15px;
-  padding: 8px 14px;
-  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 38px;
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
   cursor: pointer;
 }
-.back-btn:active { opacity: 0.7; }
+.back-btn:active { background: var(--surface-strong); }
 
-/* Панель разделов снизу */
+/* --- Панель разделов ---
+   Иконки нарисованные, а не эмодзи: эмодзи выглядят по-разному на каждой
+   платформе, всегда цветные и не подхватывают цвет активной вкладки. */
 .tabbar {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   z-index: 90;
   display: flex;
   background: var(--tg-bg-color);
-  border-top: 1px solid var(--tg-secondary-bg-color);
-  padding: 6px 4px;
-  padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--hairline);
+  padding: var(--s2) var(--s1);
+  padding-bottom: calc(var(--s2) + env(safe-area-inset-bottom, 0px));
 }
 .tab {
   flex: 1;
@@ -190,35 +413,56 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 4px 0;
-  font-size: 11px;
-  color: var(--tg-hint-color);
+  justify-content: center;
+  gap: 3px;
+  min-height: var(--tap);
+  padding: var(--s1) 0;
   font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.12s ease;
 }
-.tab-ico { font-size: 20px; line-height: 1; }
-.tab--active { color: var(--tg-link-color); font-weight: 600; }
+.tab-ico { display: block; width: 24px; height: 24px; }
+.tab-ico svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tab--active { color: var(--accent); font-weight: 600; }
+.tab--active .tab-ico svg { stroke-width: 2.1; }
+.tab:active { opacity: 0.6; }
 
-/* Кнопка, которая не должна уезжать при прокрутке длинного списка */
-.btn--sticky {
+/* Полоса с действием, которая не должна уезжать при прокрутке длинного списка.
+   Подложка лежит на самой полосе, а не на кнопке: иначе она перекрасила бы
+   кнопку в цвет фона. Отрицательные поля растягивают подложку до краёв экрана —
+   иначе список просвечивал бы в боковых отступах. */
+.sticky-bar {
   position: sticky;
-  top: calc(var(--safe-top) + 4px);
+  top: var(--safe-top);
   z-index: 20;
-  margin-top: 6px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  margin: 0 calc(var(--gutter) * -1) var(--s2);
+  padding: var(--s2) var(--gutter) 0;
+  background: var(--tg-bg-color);
+  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, 0.4);
 }
 
 /* Скелетон загрузки: плашки в форме будущих карточек с бегущим блеском.
    Без гифки — файл не нужен, и цвета сами следуют теме Telegram. */
 .skeleton { display: block; }
 .skeleton-card {
-  height: 64px;
-  border-radius: var(--radius);
-  margin-bottom: 10px;
+  height: 68px;
+  border-radius: var(--r-md);
+  margin-bottom: var(--s2);
   background: linear-gradient(90deg,
-    var(--tg-secondary-bg-color) 25%,
-    rgba(128, 128, 128, 0.18) 37%,
-    var(--tg-secondary-bg-color) 63%);
+    var(--surface) 25%,
+    var(--surface-strong) 37%,
+    var(--surface) 63%);
   background-size: 400% 100%;
   animation: skeleton-shine 1.3s ease-in-out infinite;
 }
@@ -228,14 +472,15 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton-card { animation: none; }
+  .btn, .card { transition: none; }
 }
 
 /* Свайп влево по строке открывает действие под ней */
 .swipe {
   position: relative;
   overflow: hidden;
-  border-radius: var(--radius);
-  margin-bottom: 10px;
+  border-radius: var(--r-md);
+  margin-bottom: var(--s2);
 }
 .swipe-body {
   position: relative;
@@ -264,11 +509,11 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--s1);
   cursor: pointer;
 }
 .swipe-action-ico { font-size: 20px; line-height: 1; }
-.pin-reset-form { margin-top: 10px; }
+.pin-reset-form { margin-top: var(--s2); }
 
 /* Строка над списком: возраст данных и кнопка обновления. Возраст показываем
    всегда — доверять кэшу можно только зная, насколько он свежий. */
@@ -276,23 +521,25 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin: 2px 0 10px;
-  min-height: 28px;
+  gap: var(--s3);
+  margin: var(--s1) 0 var(--s3);
+  min-height: 32px;
 }
-.refresh-age { font-size: 12px; color: var(--tg-hint-color); }
+.refresh-age { font-size: 12px; color: var(--muted); }
 .refresh-btn {
-  border: none;
-  background: var(--tg-secondary-bg-color);
+  border: 1px solid var(--hairline);
+  background: transparent;
   color: var(--tg-link-color);
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 999px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
   cursor: pointer;
 }
-.refresh-btn:disabled { opacity: 0.5; cursor: default; }
+.refresh-btn:active { background: var(--surface); }
+.refresh-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* QR во весь экран: единственный надёжный способ передать код с iPhone —
    скачивание из мини-приложения Telegram часто блокируется вебвью. */
@@ -300,65 +547,81 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--s5);
 }
 .qr-overlay-inner { text-align: center; max-width: 460px; width: 100%; }
-.qr-overlay canvas { background: #fff; padding: 12px; border-radius: var(--radius); max-width: 100%; }
+.qr-overlay canvas { background: #fff; padding: var(--s3); border-radius: var(--r-md); max-width: 100%; }
 .qr-overlay-id {
-  font-family: monospace; font-size: 22px; letter-spacing: 2px;
-  color: #fff; margin: 14px 0 4px;
+  font-family: var(--font-mono);
+  font-size: 24px; letter-spacing: 3px;
+  color: #fff; margin: var(--s4) 0 var(--s1);
 }
-.qr-overlay-caption { color: #bbb; font-size: 14px; margin-bottom: 16px; }
+.qr-overlay-caption { color: #bbb; font-size: 14px; margin-bottom: var(--s4); }
 
 /* --- Заказы --- */
-.order-no { font-family: monospace; letter-spacing: 0.5px; }
-.card-title .badge { margin-left: 6px; vertical-align: 2px; }
+/* Номер заказа моноширинным: так десять цифр читаются и сверяются глазами.
+   Сам знак «№» из моноширинного шрифта исключён — в Menlo и подобных его нет,
+   и вместо знака рисовался слипшийся «Nº». */
+.order-no { font-family: var(--font-mono); letter-spacing: 0.5px; }
+.order-no-sign { font-family: var(--font-body); margin-right: 1px; }
 
 .order-line {
-  border-top: 1px solid var(--tg-bg-color);
-  padding: 8px 0;
+  border-top: 1px solid var(--hairline);
+  padding: var(--s2) 0;
 }
-.order-line:first-of-type { border-top: none; }
-.order-line-name { font-size: 14px; }
-.order-line-qty { font-size: 12px; color: var(--tg-hint-color); margin-top: 2px; }
+.order-line:first-of-type { border-top: none; padding-top: 0; }
+.order-line-name { font-size: 14px; font-weight: 500; }
+.order-line-qty { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .order-line-ok { font-size: 12px; color: var(--success); margin-top: 2px; }
-.order-line-warn { color: var(--warning); }
-.order-line-pick { width: 100%; margin-top: 6px; padding: 6px 10px; border-radius: var(--radius);
-  border: 1px solid var(--tg-secondary-bg-color); background: var(--tg-bg-color); color: var(--tg-text-color); }
+.order-line-warn { color: var(--warning-line); font-weight: 600; }
+.order-line-pick {
+  width: 100%;
+  margin-top: var(--s2);
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline);
+  background-color: var(--tg-bg-color);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  background-position: right 10px center;
+}
 
 /* Дописанное в заказ свободным полем: на складе это отдельная строка работы,
    поэтому и выглядеть должна отдельно, а не сливаться с составом. */
 .order-extra {
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  background: var(--tg-bg-color);
+  margin-top: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--surface-strong);
   font-size: 13px;
 }
 
 /* Предупреждения разбора: что не распознано. Их читают перед сохранением,
    поэтому они не серые. */
 .order-warn {
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  margin-bottom: 12px;
+  border-radius: var(--r-sm);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s3);
   font-size: 13px;
-  background: var(--tg-secondary-bg-color);
-  border-left: 3px solid var(--warning);
+  line-height: 1.5;
+  background: var(--surface);
+  border-left: 3px solid var(--warning-line);
 }
 
-.order-raw { margin-top: 12px; font-size: 13px; color: var(--tg-hint-color); }
-.order-raw summary { cursor: pointer; }
+.order-raw { margin-top: var(--s3); font-size: 13px; color: var(--muted); }
+.order-raw summary { cursor: pointer; padding: var(--s2) 0; }
 .order-raw pre {
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--tg-bg-color);
-  border-radius: var(--radius);
-  padding: 10px;
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
   font-size: 12px;
   max-height: 40vh;
   overflow: auto;
@@ -376,9 +639,9 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   color: #000;
   overflow: hidden;
   box-sizing: border-box;
-  border: 1px dashed var(--tg-hint-color);   /* только на экране, при печати снимается */
+  border: 1px dashed var(--muted);   /* только на экране, при печати снимается */
   border-radius: 2px;
-  margin-bottom: 8px;
+  margin-bottom: var(--s2);
 }
 .label--small { width: 30mm; height: 20mm; }
 .label--medium { width: 40mm; height: 30mm; }
@@ -414,4 +677,13 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
     break-after: page;
   }
   .label:last-child { page-break-after: auto; break-after: auto; }
+}
+
+/* На широком экране мобильная вёрстка растягивается в полосу на весь монитор.
+   Ограничиваем ширину — читать длинные строки через весь экран невозможно. */
+@media (min-width: 720px) {
+  .screen { max-width: 680px; margin: 0 auto; }
+  .tabbar { justify-content: center; gap: var(--s6); }
+  .tab { flex: 0 0 96px; }
+  .fallback-main-button { left: 50%; transform: translateX(-50%); width: 360px; }
 }

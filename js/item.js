@@ -77,9 +77,11 @@ const ItemScreen = (() => {
           <canvas id="item-qr-canvas"></canvas>
           <div class="qr-id">${escapeHtml(item.item_id)}</div>
         </div>
-        <button class="btn btn--secondary" id="item-qr-big">Во весь экран</button>
-        <button class="btn btn--secondary" id="item-qr-download">Скачать PNG</button>
-        <button class="btn btn--secondary" id="item-qr-label">Печать этикетки</button>
+        <div class="btn-row btn-row--equal">
+          <button class="btn btn--secondary" id="item-qr-big">Во весь экран</button>
+          <button class="btn btn--secondary" id="item-qr-download">Скачать PNG</button>
+          <button class="btn btn--secondary" id="item-qr-label">Этикетка</button>
+        </div>
         <p class="hint">Внутри Telegram скачивание файла часто блокируется вебвью —
         тогда откройте QR во весь экран и отсканируйте его вторым телефоном.</p>
       </div>

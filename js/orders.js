@@ -70,7 +70,7 @@ const OrdersScreen = (() => {
     return `
       <div class="card" data-order-id="${order.order_id}">
         <div class="card-title">
-          <span class="order-no">№${escapeHtml(order.order_no)}</span>
+          <span class="order-no"><span class="order-no-sign">№</span>${escapeHtml(order.order_no)}</span>
           ${statusBadge(order.status)}
           ${overdue ? `<span class="badge badge--open">Просрочен</span>` : ""}
         </div>
@@ -280,7 +280,7 @@ const OrdersScreen = (() => {
         : ""}
 
       <div class="card">
-        <div class="card-title"><span class="order-no">№${escapeHtml(o.order_no || "—")}</span></div>
+        <div class="card-title"><span class="order-no"><span class="order-no-sign">№</span>${escapeHtml(o.order_no || "—")}</span></div>
         <div class="card-sub">${escapeHtml(o.student_name || "имя не распознано")}</div>
         <div class="card-sub">${escapeHtml(o.student_phone || "телефон не распознан")} ${escapeHtml(o.student_tg || "")}</div>
         ${o.is_adult === "FALSE" ? `<div class="card-sub">Представитель: ${escapeHtml(o.guardian_name || "—")} ${escapeHtml(o.guardian_phone || "")}</div>` : ""}

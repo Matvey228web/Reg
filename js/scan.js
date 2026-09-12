@@ -10,7 +10,12 @@ const ScanScreen = (() => {
     currentItem = null;
     mode = null;
     document.getElementById("scan-result").innerHTML = "";
-    document.getElementById("scan-start-btn").textContent = "📷 Сканировать";
+    // Пока предмет не найден, сканирование — главное действие экрана. Как только
+    // он найден и открыта форма выдачи, главным становится «Подтвердить», а
+    // сканирование уходит на второй план.
+    const startBtn = document.getElementById("scan-start-btn");
+    document.getElementById("scan-start-text").textContent = "Сканировать";
+    startBtn.classList.remove("btn--secondary");
     showBoxError("scan-error", "");
     TG.mainButton.hide();
   }
@@ -41,7 +46,8 @@ const ScanScreen = (() => {
       Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
       mode = item.status === "Available" ? "checkout" : item.status === "Rented" ? "checkin" : null;
       if (mode === "checkout") await loadOrders();
-      document.getElementById("scan-start-btn").textContent = "📷 Сканировать ещё раз";
+      document.getElementById("scan-start-text").textContent = "Сканировать ещё раз";
+      document.getElementById("scan-start-btn").classList.add("btn--secondary");
       renderItem();
     } catch (err) {
       currentItem = null;
