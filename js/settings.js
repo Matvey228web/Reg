@@ -23,8 +23,29 @@ const SettingsScreen = (() => {
       data = await apiPost("/settings/get", {});
       render();
     } catch (err) {
-      box.innerHTML = "";
-      showBoxError("settings-error", err.message);
+      // Пустой экран с одной красной строкой ничего не объясняет. Если бэкенд
+      // просто старее приложения — показываем, что именно сделать, и красную
+      // строку не дублируем: инструкция и есть сообщение об ошибке.
+      if (backendOutdated(err.message)) {
+        showBoxError("settings-error", "");
+        box.innerHTML = `
+          <p class="hint">Настройки живут в таблице, а её бэкенд ещё не обновлён —
+          поэтому этот экран пока пустой.</p>
+          <div class="section">
+            <h2>Что нужно сделать</h2>
+            <ol class="hint" style="padding-left:18px;">
+              <li>Откройте таблицу склада → Расширения → Apps Script.</li>
+              <li>Замените содержимое <b>Code.gs</b> присланным файлом целиком.</li>
+              <li>Deploy → Manage deployments → карандаш → New version → Deploy.</li>
+            </ol>
+            <p class="hint">Важно выбрать именно «новую версию» существующего
+            развёртывания, а не создавать новое: у нового будет другой адрес, и
+            приложение перестанет находить таблицу.</p>
+          </div>`;
+      } else {
+        showBoxError("settings-error", err.message);
+        box.innerHTML = "";
+      }
     }
   }
 

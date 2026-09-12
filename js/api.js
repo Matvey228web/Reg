@@ -8,6 +8,26 @@ class ApiError extends Error {
   }
 }
 
+// Бэкенд в таблице живёт своей жизнью: код приложения обновляется выкладкой, а
+// Code.gs — руками. Пока его не вставили, новые разделы отвечают «Неизвестный
+// эндпоинт». Складмену это слово не говорит ничего, поэтому подменяем текст
+// здесь, в единственной точке, где рождается ошибка, — иначе пришлось бы
+// помнить про это на каждом экране.
+const BACKEND_OUTDATED_TEXT =
+  "Раздел заработает после обновления бэкенда в таблице: вставьте Code.gs и " +
+  "опубликуйте новую версию (Deploy → Manage deployments → карандаш → New version).";
+
+// Узнаёт и исходный ответ сервера, и уже подменённый текст: экранам удобнее
+// спрашивать один раз, не думая, через какую точку ошибка к ним пришла.
+function backendOutdated(message) {
+  var text = String(message || "");
+  return /Неизвестный эндпоинт/i.test(text) || text === BACKEND_OUTDATED_TEXT;
+}
+
+function humanError(message) {
+  return backendOutdated(message) ? BACKEND_OUTDATED_TEXT : String(message || "Ошибка запроса");
+}
+
 function getStoredSession() {
   try {
     const raw = localStorage.getItem(CONFIG.SESSION_STORAGE_KEY);
@@ -28,7 +48,7 @@ async function apiPost(endpoint, body = {}) {
       if (e.status === 401) {
         localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
       }
-      throw new ApiError(e.message || "Ошибка запроса", e.status || 500);
+      throw new ApiError(humanError(e.message), e.status || 500);
     }
   }
 
@@ -64,7 +84,7 @@ async function apiPost(endpoint, body = {}) {
   }
 
   if (!payload.ok) {
-    throw new ApiError(payload.error || "Ошибка запроса", logicalStatus);
+    throw new ApiError(humanError(payload.error), logicalStatus);
   }
   return payload.data;
 }

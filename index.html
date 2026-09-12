@@ -37,10 +37,12 @@
 
   </div>
 
-  <!-- Экран: главное меню -->
+  <!-- Экран: главное меню.
+       Заголовков на экранах с вкладкой внизу нет: панель разделов и так всё
+       время говорит, где вы находитесь, а заголовок отъедал первый экран —
+       на «Скане» он занимал место, где должна открываться камера. -->
   <div class="screen" id="screen-home">
-    <h1>Mifs Rent</h1>
-    <div class="top-user" id="home-user"></div>
+    <div class="screen-user" id="home-user"></div>
 
     <!-- Разделы живут в нижней панели, дублировать их карточками здесь не нужно.
          Главная — это кабинет: кто вошёл и что он может настроить. -->
@@ -58,7 +60,6 @@
 
   <!-- Экран: каталог оборудования -->
   <div class="screen" id="screen-catalog">
-    <h1>Каталог</h1>
     <div class="filters">
       <select id="catalog-filter-category"></select>
       <select id="catalog-filter-status"></select>
@@ -110,7 +111,6 @@
 
   <!-- Экран: сканирование -->
   <div class="screen" id="screen-scan">
-    <h1>Сканировать</h1>
     <div id="scan-error"></div>
     <div id="scan-result"></div>
     <!-- Текст меняется на «ещё раз» после первого найденного предмета: при
@@ -131,7 +131,6 @@
 
   <!-- Экран: ремонт/дефекты -->
   <div class="screen" id="screen-repair">
-    <h1>Ремонт</h1>
     <div class="filters">
       <select id="repair-filter-status">
         <option value="all">Все</option>
@@ -146,7 +145,6 @@
 
   <!-- Экран: заказы с сайта брони (раньше здесь были «Клиенты») -->
   <div class="screen" id="screen-orders">
-    <h1>Заказы</h1>
     <div class="filters">
       <select id="orders-filter-status">
         <option value="Issued">Выданные</option>

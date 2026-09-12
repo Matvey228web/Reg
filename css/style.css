@@ -140,6 +140,10 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
 
 .top-user { font-size: 13px; color: var(--tg-hint-color); margin-bottom: 10px; }
 
+/* Первая строка кабинета вместо заголовка: кто вошёл — полезнее, чем слово
+   «Главная», которое и так написано на вкладке. */
+.screen-user { font-size: 17px; font-weight: 600; margin: 4px 0 16px; }
+
 .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
 
 /* Кнопка-замена Telegram MainButton вне Telegram (обычный браузер) */

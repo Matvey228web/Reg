@@ -121,21 +121,12 @@ const OrdersScreen = (() => {
       render(orders);
     } catch (err) {
       if (!cached || !cached.length) {
-        list.innerHTML = `<div class="error-box">${escapeHtml(backendHint(err.message))}</div>`;
+        list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       }
     } finally {
       busy = false;
       drawRefreshRow();
     }
-  }
-
-  // Пока в таблице не обновлён Code.gs, эндпоинтов заказов там нет. Показать
-  // «Неизвестный эндпоинт» складмену бесполезно — он не знает, что это значит.
-  function backendHint(message) {
-    if (/Неизвестный эндпоинт/i.test(String(message))) {
-      return "Раздел заработает после обновления бэкенда в таблице (вставить Code.gs и опубликовать новую версию).";
-    }
-    return message;
   }
 
   // ---- карточка заказа ----
@@ -154,7 +145,7 @@ const OrdersScreen = (() => {
       const data = await apiPost("/order/card", { order_id: Number(orderId) });
       box.innerHTML = detailHtml(data);
     } catch (err) {
-      box.innerHTML = `<div class="error-box">${escapeHtml(backendHint(err.message))}</div>`;
+      box.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
     }
   }
 
@@ -371,7 +362,7 @@ const OrdersScreen = (() => {
       draft = data;
       showAdd(confirmHtml(data));
     } catch (err) {
-      showBoxError("orders-add-error", backendHint(err.message));
+      showBoxError("orders-add-error", err.message);
     } finally {
       btn.disabled = false;
     }
@@ -400,7 +391,7 @@ const OrdersScreen = (() => {
       loadList({ force: true });
     } catch (err) {
       TG.hapticError();
-      showBoxError("orders-add-error", backendHint(err.message));
+      showBoxError("orders-add-error", err.message);
       btn.disabled = false;
     }
   }
@@ -433,7 +424,7 @@ const OrdersScreen = (() => {
       loadList({ force: true });
     } catch (err) {
       TG.hapticError();
-      showBoxError("orders-add-error", backendHint(err.message));
+      showBoxError("orders-add-error", err.message);
       btn.disabled = false;
     }
   }
