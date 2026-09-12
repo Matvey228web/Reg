@@ -387,6 +387,10 @@ function importInventory() {
         var inventory = row["Инвентарный номер"] || "";
         if (!name && !serial && !inventory) continue;
         if (!name) name = "[без названия] " + (serial || inventory);
+        // Сводим известные синонимы к одному имени до того, как по имени будут
+        // определены категория и модель: иначе один аппарат разъедется на две
+        // модели с разными блоками номеров.
+        name = canonicalModelName(name);
 
         var importKey = tab + "#" + (i + 1);
         if (seenImport[importKey]) { stats.alreadyImported++; continue; }
@@ -2343,6 +2347,36 @@ function normalizeModelName(name) {
   return s;
 }
 
+// Одна и та же вещь бывает записана двумя разными именами: маркетинговым и
+// каталожным. Sony A7 IV и Sony ILCE-7M4 — один и тот же аппарат, и без
+// сведения он становится двумя моделями с разными кодами: 30 единиц получают
+// номера из одного блока, 30 — из другого, хотя на полке это одна позиция.
+//
+// normalizeModelName такое не чинит и не должна: она приводит написание
+// (регистр, дефисы, кириллические двойники), а «A7 IV = ILCE-7M4» — знание о
+// технике, а не о буквах. Поэтому список ведётся руками.
+//
+// Слева — как называть в каталоге, справа — что считать тем же самым.
+var MODEL_ALIASES = [
+  { name: "Sony ILCE-7M4", aliases: ["Sony A7 IV", "Sony A7IV", "Sony Alpha 7 IV", "Sony A7 4"] },
+];
+
+var MODEL_ALIAS_INDEX = null;
+
+function canonicalModelName(name) {
+  if (!MODEL_ALIAS_INDEX) {
+    MODEL_ALIAS_INDEX = {};
+    MODEL_ALIASES.forEach(function (entry) {
+      MODEL_ALIAS_INDEX[normalizeModelName(entry.name)] = entry.name;
+      entry.aliases.forEach(function (alias) {
+        MODEL_ALIAS_INDEX[normalizeModelName(alias)] = entry.name;
+      });
+    });
+  }
+  var found = MODEL_ALIAS_INDEX[normalizeModelName(name)];
+  return found || String(name || "").trim();
+}
+
 // Следующий свободный код модели в категории (YY). 99 моделей на категорию.
 function nextModelCode(category) {
   var rows = readRows(getSheet(SHEETS.MODELS));
@@ -2385,7 +2419,7 @@ function modelByCode(category, modelCode) {
 
 // Находит модель по названию или заводит новую. Возвращает {model_code, model_name}.
 function findOrCreateModel(category, modelName) {
-  var name = String(modelName || "").trim();
+  var name = canonicalModelName(modelName);
   if (!name) throw apiError(400, "Укажите название модели");
   var needle = normalizeModelName(name);
   var rows = readRows(getSheet(SHEETS.MODELS));

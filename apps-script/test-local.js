@@ -685,6 +685,28 @@ check('монитор отделён от «прочего»',
 check('мешки и флаги попадают в грип',
   importCategory('', '', 'SANDBAG BIG') === 'GRP' && importCategory('', '', 'ФЛАГ БОЛЬШОЙ') === 'GRP');
 
+// Одна камера под двумя именами. Нормализация написания такое не ловит:
+// «A7 IV» и «ILCE-7M4» — разные буквы, но один аппарат.
+check('маркетинговое имя сводится к каталожному',
+  canonicalModelName('Sony A7 iv') === 'Sony ILCE-7M4', canonicalModelName('Sony A7 iv'));
+check('каталожное имя остаётся собой',
+  canonicalModelName('Sony ILCE-7M4') === 'Sony ILCE-7M4');
+check('разное написание синонима тоже сводится',
+  canonicalModelName('SONY  a7-iv') === 'Sony ILCE-7M4', canonicalModelName('SONY  a7-iv'));
+check('незнакомая модель не трогается',
+  canonicalModelName('  Canon C70 ') === 'Canon C70', canonicalModelName('  Canon C70 '));
+check('7RM3 и 7RM3A остаются разными моделями',
+  canonicalModelName('Sony ILCE 7RM3') !== canonicalModelName('Sony ILCE-7RM3A'));
+
+// И то же самое через создание предмета: оба имени должны лечь в одну модель.
+const aliasA = call('/item/create', { name: 'Sony ILCE-7M4', category: 'CAM' }, token).data.item_id;
+const aliasB = call('/item/create', { name: 'Sony A7 IV', category: 'CAM' }, token).data.item_id;
+check('оба имени дают один код модели, разные экземпляры',
+  aliasA.slice(0, 4) === aliasB.slice(0, 4) && aliasA !== aliasB, [aliasA, aliasB]);
+check('в каталоге записано каталожное имя',
+  findRowByValue(getSheet(SHEETS.EQUIPMENT), 'item_id', aliasB).name === 'Sony ILCE-7M4',
+  findRowByValue(getSheet(SHEETS.EQUIPMENT), 'item_id', aliasB).name);
+
 console.log('\n== настройки: чтение, проверка, сохранение ==');
 let cfg = call('/settings/get', {}, token);
 check('настройки отдаются вошедшему', cfg.ok === true, cfg);
