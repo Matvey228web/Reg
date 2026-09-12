@@ -21,7 +21,19 @@ const MOCK_SETTINGS_SPEC = {
   login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
   import_source_id: { text: true, hint: "идентификатор таблицы Google или пусто" },
 };
-let mockCats = CONFIG.CATEGORIES.map((c) => ({ ...c }));
+let mockCats = CONFIG.CATEGORIES.map((c) => ({
+  ...c,
+  // Мешки, флаги и расходники считаются количеством: личного QR у них нет.
+  by_qty: c.code === "GRP" || c.code === "CNS",
+}));
+function mockByQty(code) {
+  const c = mockCats.find((x) => x.code === code);
+  return !!(c && c.by_qty);
+}
+function mockItemQty(item) {
+  const n = Number(item.qty);
+  return n > 0 ? n : 1;
+}
 function mockCategories() { return mockCats; }
 
 // --- Заказы в демо-режиме ---
@@ -197,6 +209,19 @@ const MockStore = (() => {
       current_transaction_id: 2,
     },
     {
+      item_id: "050101",
+      name: "SANDBAG BIG",
+      category: "GRP",
+      model_code: "01",
+      serial_number: "",
+      inventory_number: "",
+      status: "Available",
+      condition_notes: "",
+      current_transaction_id: null,
+      qty: 25,
+      qty_out: 4,
+    },
+    {
       item_id: "030102",
       name: "OSTERRIG SIRIUS 100CM",
       category: "LGT",
@@ -214,6 +239,7 @@ const MockStore = (() => {
     { category: "CAM", model_code: "01", model_name: "Sony FX6" },
     { category: "LEN", model_code: "01", model_name: "Sigma 24-70mm f/2.8" },
     { category: "LGT", model_code: "01", model_name: "OSTERRIG SIRIUS 100CM" },
+    { category: "GRP", model_code: "01", model_name: "SANDBAG BIG" },
   ];
 
   // Счётчики экземпляров восстанавливаем из уже заведённых демо-позиций,
@@ -435,7 +461,10 @@ const MockAPI = {
         const currentTransaction = item.current_transaction_id
           ? MockStore.transactions.find((t) => t.transaction_id === item.current_transaction_id)
           : null;
-        return { ...item, current_transaction: currentTransaction, open_defects: openDefects };
+        const total = mockItemQty(item);
+        const out = Number(item.qty_out || 0);
+        return { ...item, current_transaction: currentTransaction, open_defects: openDefects,
+                 qty: total, qty_out: out, qty_free: total - out, by_qty: mockByQty(item.category) };
       }
 
       case "/item/create": {
@@ -444,6 +473,19 @@ const MockAPI = {
           ? MockStore.models.find((m) => m.category === body.category && Number(m.model_code) === Number(body.model_code))
           : MockStore.findOrCreateModel(body.category, body.model_name || body.name);
         if (!model) { const e = new Error("Модель не найдена в справочнике"); e.status = 404; throw e; }
+        const bulk = mockByQty(body.category);
+        const qty = bulk ? Math.floor(Number(body.qty || 1)) : 1;
+        if (bulk && (!qty || qty < 1)) {
+          const e = new Error("Укажите количество — целое число от одного"); e.status = 400; throw e;
+        }
+        if (bulk) {
+          const exists = MockStore.equipment.find((i) =>
+            i.category === body.category && String(i.model_code) === String(model.model_code));
+          if (exists) {
+            exists.qty = mockItemQty(exists) + qty;
+            return { item_id: exists.item_id, qty: exists.qty, added: qty };
+          }
+        }
         const item_id = MockStore.nextItemId(body.category, model.model_code);
         MockStore.equipment.push({
           item_id,
@@ -455,15 +497,27 @@ const MockAPI = {
           status: "Available",
           condition_notes: body.condition_notes || "",
           current_transaction_id: null,
+          qty: qty,
+          qty_out: 0,
         });
-        return { item_id };
+        return { item_id, qty };
       }
 
       case "/transaction/checkout": {
         const staff_id = MockStore.requireToken(token);
         const item = MockStore.findItem(body.item_id);
         if (!item) { const e = new Error("Предмет не найден"); e.status = 404; throw e; }
-        if (item.status !== "Available") {
+        const bulkOut = mockByQty(item.category);
+        const totalOut = mockItemQty(item);
+        const alreadyOut = Number(item.qty_out || 0);
+        const takeQty = bulkOut ? Math.floor(Number(body.qty || 1)) : 1;
+        if (bulkOut) {
+          if (!takeQty || takeQty < 1) { const e = new Error("Укажите количество — целое число от одного"); e.status = 400; throw e; }
+          if (alreadyOut + takeQty > totalOut) {
+            const e = new Error("На складе свободно " + (totalOut - alreadyOut) + " из " + totalOut + " — больше выдать нельзя");
+            e.status = 409; throw e;
+          }
+        } else if (item.status !== "Available") {
           const e = new Error("Предмет уже выдан или недоступен");
           e.status = 409;
           throw e;
@@ -497,21 +551,52 @@ const MockAPI = {
           checked_out_at: new Date().toISOString(),
           expected_return_at: expected,
           checked_in_at: null, status: "Open", notes: body.notes || "",
+          qty: takeQty, qty_in: 0,
         });
-        item.status = "Rented";
-        item.current_transaction_id = transaction_id;
-        return { transaction_id, order_line };
+        if (bulkOut) {
+          item.qty_out = alreadyOut + takeQty;
+          item.status = item.qty_out >= totalOut ? "Rented" : "Available";
+        } else {
+          item.status = "Rented";
+          item.current_transaction_id = transaction_id;
+        }
+        return { transaction_id, order_line, qty: takeQty };
       }
 
       case "/transaction/checkin": {
         const staff_id = MockStore.requireToken(token);
         const item = MockStore.findItem(body.item_id);
         if (!item) { const e = new Error("Предмет не найден"); e.status = 404; throw e; }
-        const tx = MockStore.transactions.find((t) => t.item_id === item.item_id && t.status === "Open");
-        if (!tx) { const e = new Error("Открытой выдачи для этого предмета не найдено"); e.status = 409; throw e; }
-        tx.status = "Closed";
-        tx.checked_in_at = new Date().toISOString();
-        tx.staff_in = staff_id;
+        const openList = MockStore.transactions.filter((t) => t.item_id === item.item_id && t.status === "Open");
+        if (!openList.length) { const e = new Error("Открытой выдачи для этого предмета не найдено"); e.status = 409; throw e; }
+        const tx = openList[0];
+        const bulkIn = mockByQty(item.category);
+
+        if (bulkIn) {
+          // Приём количеством закрывает выдачи по очереди, начиная с ранней.
+          const back = Math.floor(Number(body.qty || 1));
+          const onHands = openList.reduce((sum, t) => sum + (Number(t.qty || 1) - Number(t.qty_in || 0)), 0);
+          if (!back || back < 1) { const e = new Error("Укажите количество — целое число от одного"); e.status = 400; throw e; }
+          if (back > onHands) { const e = new Error("На руках " + onHands + " — принять больше нельзя"); e.status = 409; throw e; }
+          let left = back;
+          openList.forEach((t) => {
+            if (left <= 0) return;
+            const take = Math.min(Number(t.qty || 1) - Number(t.qty_in || 0), left);
+            left -= take;
+            t.qty_in = Number(t.qty_in || 0) + take;
+            if (t.qty_in >= Number(t.qty || 1)) {
+              t.status = "Closed";
+              t.checked_in_at = new Date().toISOString();
+              t.staff_in = staff_id;
+            }
+          });
+          item.qty_out = Math.max(0, Number(item.qty_out || 0) - back);
+          item.status = item.qty_out >= mockItemQty(item) ? "Rented" : "Available";
+        } else {
+          tx.status = "Closed";
+          tx.checked_in_at = new Date().toISOString();
+          tx.staff_in = staff_id;
+        }
 
         if (tx.order_id) {
           const line = MockStore.orderItems.find((i) =>
@@ -537,13 +622,15 @@ const MockAPI = {
             status: "Open", reported_at: new Date().toISOString(),
             resolved_at: null, resolution_notes: "",
           });
-          item.status = mockDefectBlocksRental(body.defect_severity || "Minor")
-            ? "In Repair" : "Available";
-        } else {
+          if (mockDefectBlocksRental(body.defect_severity || "Minor")) item.status = "In Repair";
+          else if (!bulkIn) item.status = "Available";
+        } else if (!bulkIn) {
+          // У штучной позиции статус уже посчитан по остатку выше: «доступно»
+          // здесь затёрло бы «всё на руках».
           item.status = "Available";
         }
-        item.current_transaction_id = null;
-        return { transaction_id: tx.transaction_id, defect_id };
+        if (!bulkIn) item.current_transaction_id = null;
+        return { transaction_id: tx.transaction_id, defect_id, qty: bulkIn ? Number(body.qty || 1) : 1 };
       }
 
       case "/defect/report": {
@@ -585,8 +672,15 @@ const MockAPI = {
         let list = MockStore.equipment;
         if (body && body.status && body.status !== "all") list = list.filter((i) => i.status === body.status);
         if (body && body.category && body.category !== "all") list = list.filter((i) => i.category === body.category);
-        return list.map(({ item_id, name, category, status, serial_number, inventory_number }) =>
-          ({ item_id, name, category, status, serial_number, inventory_number }));
+        return list.map((i) => {
+          const total = mockItemQty(i);
+          const out = Number(i.qty_out || 0);
+          return {
+            item_id: i.item_id, name: i.name, category: i.category, status: i.status,
+            serial_number: i.serial_number, inventory_number: i.inventory_number,
+            model_code: i.model_code, qty: total, qty_out: out, qty_free: total - out,
+          };
+        });
       }
 
       case "/models/list": {
@@ -670,7 +764,11 @@ const MockAPI = {
           const txs = MockStore.transactions.filter((t) => String(t.order_id) === String(o.order_id));
           const open = txs.filter((t) => t.status === "Open").length;
           const { raw_text, ...rest } = o;
-          return { ...rest, status: mockOrderStatus(o, open, txs.length), issued_open: open, issued_total: txs.length };
+          const itemsText = MockStore.orderItems
+            .filter((i) => String(i.order_id) === String(o.order_id))
+            .map((i) => i.raw_name).join(", ");
+          return { ...rest, status: mockOrderStatus(o, open, txs.length),
+                   issued_open: open, issued_total: txs.length, items_text: itemsText };
         });
       }
 
@@ -852,7 +950,7 @@ const MockAPI = {
         }
         const maxNum = mockCats.reduce((m, c) => Math.max(m, Number(c.num)), 0);
         const num = String(maxNum + 1).padStart(2, "0");
-        const created = { code, num, label: String(body.label).trim() };
+        const created = { code, num, label: String(body.label).trim(), by_qty: !!body.by_qty };
         mockCats.push(created);
         return created;
       }
@@ -866,6 +964,15 @@ const MockAPI = {
           const label = String(body.label).trim();
           if (!label) { const e = new Error("Название не может быть пустым"); e.status = 400; throw e; }
           cat.label = label;
+        }
+        if (body.by_qty !== undefined && !!body.by_qty !== !!cat.by_qty) {
+          const filled = MockStore.equipment.filter((i) => i.category === code).length;
+          if (filled) {
+            const e = new Error("В категории уже " + filled + " позиций. Способ учёта меняется " +
+              "только у пустой категории: иначе поштучные записи молча стали бы количеством.");
+            e.status = 409; throw e;
+          }
+          cat.by_qty = !!body.by_qty;
         }
         if (body.num !== undefined && String(body.num).padStart(2, "0") !== cat.num) {
           const used = MockStore.equipment.filter((i) => i.category === code).length;

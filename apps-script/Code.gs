@@ -56,6 +56,12 @@ var CATEGORY_CODES = {
 
 // Названия для людей. Живут рядом с кодами только как умолчания для засева:
 // после засева название правится в таблице и в админке.
+// Категории, которые учитываются количеством, а не поштучно: у мешков, флагов и
+// расходников нет и не будет личного номера — клеить QR на каждый сэндбэг никто
+// не станет. Флаг живёт в таблице (колонка by_qty) и правится в «Настройках»;
+// здесь — только значение при заведении категории.
+var CATEGORY_BY_QTY = { GRP: true, CNS: true };
+
 var CATEGORY_LABELS = {
   CAM: "Камеры",
   LEN: "Объективы",
@@ -76,7 +82,11 @@ var CATEGORY_LABELS = {
 // Единственное описание структуры таблицы: используется и при создании
 // вкладок в setupSheets(), и как источник порядка колонок при записи строк.
 var SCHEMA = {
-  Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id"],
+  // qty / qty_out: для обычной техники это всегда 1 и 0 — строка описывает одну
+  // физическую единицу. Для категорий с учётом количеством (мешки, флаги,
+  // расходники) строка описывает всю кучу: qty штук всего, qty_out на руках.
+  // Заводить сэндбэги по одному с личным QR никто не станет.
+  Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id", "qty", "qty_out"],
   Models: ["category", "model_code", "model_name", "created_at"],
   Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at", "failed_attempts", "locked_until"],
   // Clients — предыдущая модель: справочник «клиент/проект», из которого
@@ -105,9 +115,11 @@ var SCHEMA = {
   OrderItems: ["order_id", "line_no", "raw_name", "model_code", "category",
                "qty", "price", "total", "issued_qty", "note"],
 
-  Transactions: ["transaction_id", "item_id", "client_id", "order_id", "order_line", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
+  // qty / qty_in: сколько штук выдано этой записью и сколько уже вернули.
+  // У поштучной техники это 1 и 0/1 — запись закрывается целиком.
+  Transactions: ["transaction_id", "item_id", "client_id", "order_id", "order_line", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes", "qty", "qty_in"],
   Defects: ["defect_id", "item_id", "reported_by", "reported_by_name", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
-  Categories: ["code", "num", "label", "created_at"],
+  Categories: ["code", "num", "label", "by_qty", "created_at"],
   Meta: ["key", "value"],
 };
 
@@ -238,7 +250,11 @@ function setupSheets() {
         maxNum = Math.max(maxNum, Number(num));
       }
       haveNum[num] = true;
-      seeded.push({ code: code, num: num, label: CATEGORY_LABELS[code] || code, created_at: now });
+      seeded.push({
+        code: code, num: num, label: CATEGORY_LABELS[code] || code,
+        by_qty: CATEGORY_BY_QTY[code] ? "TRUE" : "FALSE",
+        created_at: now,
+      });
     }
 
     if (seeded.length) {
@@ -917,6 +933,12 @@ function handleItemLookup(payload) {
   for (var key in item) result[key] = item[key];
   result.current_transaction = currentTransaction;
   result.open_defects = openDefects;
+  // Позиции, заведённые до появления количества, читаются как «одна штука»:
+  // пустая ячейка не должна означать «ноль на складе».
+  result.qty = itemQty(item);
+  result.qty_out = Number(item.qty_out || 0);
+  result.qty_free = result.qty - result.qty_out;
+  result.by_qty = categoryByQty(item.category);
   return result;
 }
 
@@ -956,9 +978,28 @@ function handleItemCreate(payload, token) {
     var model = payload.model_code
       ? modelByCode(category, payload.model_code)
       : findOrCreateModel(category, payload.model_name || payload.name);
+    // В категориях с учётом количеством одна строка описывает всю кучу, а не
+    // одну вещь. Если такая позиция уже заведена — пополняем её, а не плодим
+    // вторую: двадцать сэндбэгов это одна строка «20 штук», а не два склада по
+    // десять, между которыми потом не разобраться.
+    var byQty = categoryByQty(category);
+    var qty = byQty ? Math.floor(Number(payload.qty || 1)) : 1;
+    if (byQty && (!qty || qty < 1)) throw apiError(400, "Укажите количество — целое число от одного");
+
+    var eqSheet = getSheet(SHEETS.EQUIPMENT);
+    if (byQty) {
+      var existing = readRows(eqSheet).filter(function (r) {
+        return r.category === category && pad2(Number(r.model_code)) === pad2(model.model_code);
+      })[0];
+      if (existing) {
+        updateRow(eqSheet, existing.__row, { qty: Number(existing.qty || 0) + qty });
+        return { item_id: String(existing.item_id), qty: Number(existing.qty || 0) + qty, added: qty };
+      }
+    }
+
     var unit = nextUnitNumber(category, model.model_code);
     var itemId = buildItemId(category, model.model_code, unit);
-    appendRow(getSheet(SHEETS.EQUIPMENT), {
+    appendRow(eqSheet, {
       item_id: itemId,
       name: model.model_name,
       category: category,
@@ -969,8 +1010,10 @@ function handleItemCreate(payload, token) {
       condition_notes: payload.condition_notes || "",
       created_at: new Date().toISOString(),
       current_transaction_id: "",
+      qty: qty,
+      qty_out: 0,
     });
-    return { item_id: itemId };
+    return { item_id: itemId, qty: qty };
   } finally {
     lock.releaseLock();
   }
@@ -985,7 +1028,24 @@ function handleTransactionCheckout(payload, token) {
     var eqSheet = getSheet(SHEETS.EQUIPMENT);
     var item = findRowByValue(eqSheet, "item_id", itemId);
     if (!item) throw apiError(404, "Предмет не найден");
-    if (item.status !== "Available") throw apiError(409, "Предмет уже выдан или недоступен");
+
+    // Позиция с учётом количеством выдаётся частями: на складе остаётся
+    // остаток, и «уже выдан» к ней неприменимо — применимо «столько нет».
+    var byQty = categoryByQty(item.category);
+    var total = itemQty(item);
+    var out = Number(item.qty_out || 0);
+    var takeQty = byQty ? Math.floor(Number(payload.qty || 1)) : 1;
+    if (byQty) {
+      if (!takeQty || takeQty < 1) throw apiError(400, "Укажите количество — целое число от одного");
+      if (item.status === "In Repair" || item.status === "Retired") {
+        throw apiError(409, "Позиция снята с выдачи");
+      }
+      if (out + takeQty > total) {
+        throw apiError(409, "На складе свободно " + (total - out) + " из " + total + " — больше выдать нельзя");
+      }
+    } else if (item.status !== "Available") {
+      throw apiError(409, "Предмет уже выдан или недоступен");
+    }
 
     // Выдача в счёт заказа: срок возврата берём из заказа, а сама выдача
     // списывается с подходящей строки состава.
@@ -1016,12 +1076,63 @@ function handleTransactionCheckout(payload, token) {
       checked_in_at: "",
       status: "Open",
       notes: payload.notes || "",
+      qty: takeQty,
+      qty_in: 0,
     });
-    updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
-    return { transaction_id: txId, order_line: orderLine };
+    if (byQty) {
+      // Пока на складе что-то осталось, позиция остаётся доступной: иначе
+      // выдача одного мешка закрыла бы все двадцать.
+      var newOut = out + takeQty;
+      updateRow(eqSheet, item.__row, {
+        qty_out: newOut,
+        status: newOut >= total ? "Rented" : "Available",
+      });
+    } else {
+      updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
+    }
+    return { transaction_id: txId, order_line: orderLine, qty: takeQty };
   } finally {
     lock.releaseLock();
   }
+}
+
+// Возврат по заказу: строка состава снова свободна, а если на руках больше
+// ничего нет — заказ закрыт. Нужно обеим веткам приёма: мешки и флаги тоже
+// выдаются по заказу, и заказ, закрытый лишь наполовину, ничем не лучше
+// потерянной техники.
+function settleOrderOnCheckin(openTx, txSheet) {
+  if (!openTx.order_id) return;
+  releaseOrderLine(openTx.order_id, openTx.order_line);
+  var orderSheet = getSheet(SHEETS.ORDERS);
+  var order = findRowByValue(orderSheet, "order_id", String(openTx.order_id));
+  if (!order || order.status === "Cancelled") return;
+  var stillOut = 0;
+  readRows(txSheet).forEach(function (t) {
+    if (String(t.order_id || "") === String(openTx.order_id) && t.status === "Open") stillOut += 1;
+  });
+  updateRow(orderSheet, order.__row, stillOut
+    ? { status: "Issued", closed_at: "" }
+    : { status: "Returned", closed_at: new Date().toISOString() });
+}
+
+// Заявка о дефекте при приёме. Вынесена из handleTransactionCheckin: приём
+// поштучный и приём количеством — две ветки, а дефект в них один и тот же.
+function reportDefect(itemId, staffRow, transactionId, payload) {
+  var defectId = nextId("defect_id", maxIdIn(getSheet(SHEETS.DEFECTS), "defect_id"));
+  appendRow(getSheet(SHEETS.DEFECTS), {
+    defect_id: defectId,
+    item_id: itemId,
+    reported_by: staffRow.staff_id,
+    reported_by_name: staffRow.full_name,
+    related_transaction_id: transactionId,
+    description: payload.defect_description || "",
+    severity: payload.defect_severity || "Minor",
+    status: "Open",
+    reported_at: new Date().toISOString(),
+    resolved_at: "",
+    resolution_notes: "",
+  });
+  return defectId;
 }
 
 // Списывает экземпляр с подходящей строки состава заказа и возвращает её номер.
@@ -1071,12 +1182,50 @@ function handleTransactionCheckin(payload, token) {
     if (!item) throw apiError(404, "Предмет не найден");
 
     var txSheet = getSheet(SHEETS.TRANSACTIONS);
-    var openTx = null;
     var txRows = readRows(txSheet);
-    for (var i = 0; i < txRows.length; i++) {
-      if (String(txRows[i].item_id) === itemId && txRows[i].status === "Open") { openTx = txRows[i]; break; }
+    var openList = txRows.filter(function (t) {
+      return String(t.item_id) === itemId && t.status === "Open";
+    });
+    if (!openList.length) throw apiError(409, "Открытой выдачи для этого предмета не найдено");
+    var openTx = openList[0];
+
+    // Приём количеством: закрываем выдачи по очереди, начиная с самой ранней.
+    // Одна запись журнала может закрыться не полностью — тогда в ней остаётся
+    // то, что ещё на руках, и она ждёт следующего возврата.
+    var byQty = categoryByQty(item.category);
+    if (byQty) {
+      var back = Math.floor(Number(payload.qty || 1));
+      var onHands = openList.reduce(function (sum, t) {
+        return sum + (Number(t.qty || 1) - Number(t.qty_in || 0));
+      }, 0);
+      if (!back || back < 1) throw apiError(400, "Укажите количество — целое число от одного");
+      if (back > onHands) throw apiError(409, "На руках " + onHands + " — принять больше нельзя");
+
+      var left = back;
+      openList.forEach(function (t) {
+        if (left <= 0) return;
+        var remains = Number(t.qty || 1) - Number(t.qty_in || 0);
+        var take = Math.min(remains, left);
+        left -= take;
+        var filled = Number(t.qty_in || 0) + take;
+        updateRow(txSheet, t.__row, filled >= Number(t.qty || 1)
+          ? { qty_in: filled, status: "Closed", checked_in_at: new Date().toISOString(),
+              staff_in: staffRow.staff_id, staff_in_name: staffRow.full_name }
+          : { qty_in: filled });
+      });
+
+      var total = itemQty(item);
+      var newOut = Math.max(0, Number(item.qty_out || 0) - back);
+      var defectIdQty = null;
+      var statusQty = newOut >= total ? "Rented" : "Available";
+      if (payload.has_defect) {
+        defectIdQty = reportDefect(itemId, staffRow, openTx.transaction_id, payload);
+        if (defectBlocksRental(payload.defect_severity || "Minor")) statusQty = "In Repair";
+      }
+      updateRow(eqSheet, item.__row, { qty_out: newOut, status: statusQty });
+      settleOrderOnCheckin(openTx, txSheet);
+      return { transaction_id: openTx.transaction_id, defect_id: defectIdQty, qty: back, qty_out: newOut };
     }
-    if (!openTx) throw apiError(409, "Открытой выдачи для этого предмета не найдено");
 
     updateRow(txSheet, openTx.__row, {
       status: "Closed",
@@ -1085,40 +1234,12 @@ function handleTransactionCheckin(payload, token) {
       staff_in_name: staffRow.full_name,
     });
 
-    // Возврат по заказу: строка состава снова свободна, а если на руках больше
-    // ничего нет — заказ закрыт.
-    if (openTx.order_id) {
-      releaseOrderLine(openTx.order_id, openTx.order_line);
-      var orderSheet = getSheet(SHEETS.ORDERS);
-      var order = findRowByValue(orderSheet, "order_id", String(openTx.order_id));
-      if (order && order.status !== "Cancelled") {
-        var stillOut = 0;
-        readRows(txSheet).forEach(function (t) {
-          if (String(t.order_id || "") === String(openTx.order_id) && t.status === "Open") stillOut += 1;
-        });
-        updateRow(orderSheet, order.__row, stillOut
-          ? { status: "Issued", closed_at: "" }
-          : { status: "Returned", closed_at: new Date().toISOString() });
-      }
-    }
+    settleOrderOnCheckin(openTx, txSheet);
 
     var defectId = null;
     var newStatus = "Available";
     if (payload.has_defect) {
-      defectId = nextId("defect_id", maxIdIn(getSheet(SHEETS.DEFECTS), "defect_id"));
-      appendRow(getSheet(SHEETS.DEFECTS), {
-        defect_id: defectId,
-        item_id: itemId,
-        reported_by: staffRow.staff_id,
-        reported_by_name: staffRow.full_name,
-        related_transaction_id: openTx.transaction_id,
-        description: payload.defect_description || "",
-        severity: payload.defect_severity || "Minor",
-        status: "Open",
-        reported_at: new Date().toISOString(),
-        resolved_at: "",
-        resolution_notes: "",
-      });
+      defectId = reportDefect(itemId, staffRow, openTx.transaction_id, payload);
       if (defectBlocksRental(payload.defect_severity || "Minor")) newStatus = "In Repair";
     }
     updateRow(eqSheet, item.__row, { status: newStatus, current_transaction_id: "" });
@@ -1222,10 +1343,13 @@ function handleEquipmentList(payload, token) {
     rows = rows.filter(function (r) { return r.status === payload.status; });
   }
   return rows.map(function (r) {
+    var total = itemQty(r);
+    var out = Number(r.qty_out || 0);
     return {
       item_id: r.item_id, name: r.name, category: r.category, status: r.status,
       serial_number: r.serial_number, inventory_number: r.inventory_number,
       model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
+      qty: total, qty_out: out, qty_free: total - out,
     };
   });
 }
@@ -1631,6 +1755,16 @@ function orderStatus(orderRow, count) {
 function handleOrdersList(payload, token) {
   checkAuth(token);
   var counts = orderCounts(readRows(getSheet(SHEETS.TRANSACTIONS)));
+
+  // Состав заказа строкой: на складе спрашивают «у кого сейчас OSTERRIG», и без
+  // этого искать пришлось бы, открывая заказы по одному. Один проход по листу
+  // на весь список, а не запрос на заказ.
+  var itemsText = {};
+  readRows(getSheet(SHEETS.ORDER_ITEMS)).forEach(function (line) {
+    var key = String(line.order_id);
+    itemsText[key] = (itemsText[key] ? itemsText[key] + ", " : "") + String(line.raw_name || "");
+  });
+
   var rows = readRows(getSheet(SHEETS.ORDERS)).map(function (r) {
     var count = counts[String(r.order_id)] || { open: 0, total: 0 };
     return {
@@ -1655,6 +1789,7 @@ function handleOrdersList(payload, token) {
       issued_total: count.total,
       created_at: r.created_at,
       created_by_name: r.created_by_name || "",
+      items_text: itemsText[String(r.order_id)] || "",
       // raw_text в список не отдаём: это всё сообщение целиком, включая даты
       // рождения. Оно нужно только в карточке одного заказа.
     };
@@ -1969,9 +2104,11 @@ function handleCategoryCreate(payload, token) {
     var num = pad2(maxNum + 1);
 
     appendRow(getSheet(SHEETS.CATEGORIES), {
-      code: code, num: num, label: label, created_at: new Date().toISOString(),
+      code: code, num: num, label: label,
+      by_qty: isTruthyCell(payload.by_qty) ? "TRUE" : "FALSE",
+      created_at: new Date().toISOString(),
     });
-    return { code: code, num: num, label: label };
+    return { code: code, num: num, label: label, by_qty: isTruthyCell(payload.by_qty) };
   } finally {
     lock.releaseLock();
   }
@@ -2003,6 +2140,19 @@ function handleCategoryUpdate(payload, token) {
       throw apiError(409, "Этот номер уже занят другой категорией");
     }
     patch.num = wanted;
+  }
+
+  // Переключение способа учёта меняет смысл уже заведённых строк: там, где была
+  // одна вещь, вдруг оказывается «одна штука из кучи». На пустой категории это
+  // безобидно, на заполненной — тихая порча данных.
+  if (payload.by_qty !== undefined && isTruthyCell(payload.by_qty) !== isTruthyCell(row.by_qty)) {
+    var filled = categoryUsage(code);
+    if (filled) {
+      throw apiError(409, "В категории уже " + filled + " позиций. Способ учёта " +
+        "меняется только у пустой категории: иначе поштучные записи молча стали бы " +
+        "количеством.");
+    }
+    patch.by_qty = isTruthyCell(payload.by_qty) ? "TRUE" : "FALSE";
   }
 
   if (!Object.keys(patch).length) return { code: code, changed: false };
@@ -2227,15 +2377,33 @@ function categories() {
     if (seen[code] || nums[num]) return;
     seen[code] = true;
     nums[num] = true;
-    clean.push({ code: code, num: num, label: String(r.label || code).trim() || code });
+    clean.push({
+      code: code, num: num, label: String(r.label || code).trim() || code,
+      by_qty: isTruthyCell(r.by_qty),
+    });
   });
   if (clean.length) return clean;
 
   var fallback = [];
   for (var code in CATEGORY_CODES) {
-    fallback.push({ code: code, num: CATEGORY_CODES[code], label: CATEGORY_LABELS[code] || code });
+    fallback.push({
+      code: code, num: CATEGORY_CODES[code], label: CATEGORY_LABELS[code] || code,
+      by_qty: !!CATEGORY_BY_QTY[code],
+    });
   }
   return fallback;
+}
+
+// Количество у позиции. Пустая ячейка — это старая строка, заведённая до
+// появления количества: она описывает одну вещь, а не ноль вещей.
+function itemQty(item) {
+  var n = Number(item.qty);
+  return n > 0 ? n : 1;
+}
+
+function categoryByQty(code) {
+  var found = categories().filter(function (c) { return c.code === code; })[0];
+  return found ? !!found.by_qty : !!CATEGORY_BY_QTY[code];
 }
 
 function categoryNum(code) {

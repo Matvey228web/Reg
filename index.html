@@ -90,11 +90,19 @@
         <label for="new-item-name">Название новой модели</label>
         <input id="new-item-name" type="text" />
       </div>
-      <div class="field">
+      <!-- Количество спрашиваем только у категорий, которые считаются кучей:
+           у камеры «сколько штук» смысла не имеет, у сэндбэгов — только оно. -->
+      <div class="field" id="new-item-qty-wrap" style="display:none;">
+        <label for="new-item-qty">Сколько штук</label>
+        <input id="new-item-qty" type="number" inputmode="numeric" min="1" step="1" value="1" />
+        <p class="hint">Личных номеров и QR у таких позиций нет — склад считает их количеством.
+        Если позиция уже заведена, это добавит к остатку.</p>
+      </div>
+      <div class="field" id="new-item-serial-wrap">
         <label for="new-item-serial">Серийный номер</label>
         <input id="new-item-serial" type="text" />
       </div>
-      <div class="field">
+      <div class="field" id="new-item-inventory-wrap">
         <label for="new-item-inventory">Инвентарный номер</label>
         <input id="new-item-inventory" type="text" />
       </div>

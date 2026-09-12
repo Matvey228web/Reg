@@ -54,8 +54,22 @@ const OrdersScreen = (() => {
     }
     const q = document.getElementById("orders-search").value.trim().toLowerCase();
     if (!q) return true;
-    return [order.order_no, order.student_name, order.student_phone, order.student_tg, order.project]
-      .filter(Boolean).join(" ").toLowerCase().indexOf(q) !== -1;
+    // Ищем и по составу заказа: «найди, у кого сейчас OSTERRIG» — обычный вопрос
+    // на складе, а состав до этого был виден только внутри карточки.
+    const haystack = [order.order_no, order.student_name, order.student_phone,
+                      order.student_tg, order.project, order.items_text]
+      .filter(Boolean).join(" ").toLowerCase();
+    if (haystack.indexOf(q) !== -1) return true;
+    // Ник ищем и без «собаки»: в поиске её набирают через раз.
+    if (q.charAt(0) === "@" && haystack.indexOf(q.slice(1)) !== -1) return true;
+    // Телефон — по цифрам: +7, 8 и запись через скобки должны находить одно и то же.
+    const digits = q.replace(/\D/g, "");
+    if (digits.length >= 4) {
+      const phone = String(order.student_phone || "").replace(/\D/g, "");
+      const local = phone.length === 11 ? phone.slice(1) : phone;
+      if (local.indexOf(digits.length === 11 ? digits.slice(1) : digits) !== -1) return true;
+    }
+    return false;
   }
 
   function orderCardHtml(order) {

@@ -73,6 +73,13 @@ const SettingsScreen = (() => {
             <label for="settings-cat-label">Название</label>
             <input id="settings-cat-label" type="text" placeholder="Аккумуляторы" />
           </div>
+          <div class="toggle-row">
+            <label for="settings-cat-new-qty">Считать количеством, без личных номеров</label>
+            <input type="checkbox" id="settings-cat-new-qty" />
+          </div>
+          <p class="hint">«Количеством» — для того, на что не наклеить QR: мешки, флаги,
+          струбцины, расходники. Такая позиция живёт одной строкой с остатком.
+          Способ учёта потом меняется только у пустой категории.</p>
           <p class="hint">Номер система выдаст сама — следующий свободный.</p>
           <button class="btn" id="settings-cat-submit">Добавить</button>
         </div>
@@ -117,27 +124,33 @@ const SettingsScreen = (() => {
     const box = document.getElementById("settings-categories");
     box.innerHTML = (data.categories || []).map((c) => `
       <div class="card">
-        <div class="card-title">${escapeHtml(c.label)}</div>
+        <div class="card-title">${escapeHtml(c.label)}${c.by_qty ? `<span class="badge">количеством</span>` : ""}</div>
         <div class="card-sub">${escapeHtml(c.code)} · номер ${escapeHtml(c.num)}</div>
         <div class="field" style="margin-top:8px;">
           <input type="text" data-cat-label="${escapeHtml(c.code)}" value="${escapeHtml(c.label)}" />
         </div>
+        <div class="toggle-row">
+          <label for="cat-qty-${escapeHtml(c.code)}">Считать количеством, без личных номеров</label>
+          <input type="checkbox" id="cat-qty-${escapeHtml(c.code)}"
+                 data-cat-qty="${escapeHtml(c.code)}" ${c.by_qty ? "checked" : ""} />
+        </div>
         <button class="btn btn--secondary" data-cat-save="${escapeHtml(c.code)}" style="width:auto;">
-          Переименовать
+          Сохранить
         </button>
       </div>`).join("");
 
     box.querySelectorAll("[data-cat-save]").forEach((btn) => {
-      btn.addEventListener("click", () => renameCategory(btn.dataset.catSave));
+      btn.addEventListener("click", () => saveCategory(btn.dataset.catSave));
     });
   }
 
-  async function renameCategory(code) {
+  async function saveCategory(code) {
     const input = document.querySelector(`[data-cat-label="${code}"]`);
     const label = input.value.trim();
     if (!label) { TG.showAlert("Название не может быть пустым"); return; }
+    const byQty = document.querySelector(`[data-cat-qty="${code}"]`).checked;
     try {
-      await apiPost("/category/update", { code, label });
+      await apiPost("/category/update", { code, label, by_qty: byQty });
       TG.hapticSuccess();
       await reloadAndRefreshSession();
     } catch (err) {
@@ -153,7 +166,10 @@ const SettingsScreen = (() => {
     const btn = document.getElementById("settings-cat-submit");
     btn.disabled = true;
     try {
-      await apiPost("/category/create", { code, label });
+      await apiPost("/category/create", {
+        code, label,
+        by_qty: document.getElementById("settings-cat-new-qty").checked,
+      });
       TG.hapticSuccess();
       await reloadAndRefreshSession();
     } catch (err) {

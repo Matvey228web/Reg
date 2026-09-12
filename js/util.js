@@ -48,6 +48,20 @@ function categoryList() {
   return CONFIG.CATEGORIES;
 }
 
+// Считается ли категория количеством (мешки, флаги, расходники) — у такой
+// техники нет личного номера, и в каталоге одна строка описывает всю кучу.
+function categoryByQty(code) {
+  const c = categoryList().find((c) => c.code === code);
+  return !!(c && c.by_qty);
+}
+
+// «21 из 25 свободно» — то, что нужно знать про кучу перед выдачей.
+function qtyText(item) {
+  const total = Number(item.qty || 1);
+  const free = Number(item.qty_free !== undefined ? item.qty_free : total - Number(item.qty_out || 0));
+  return `${free} из ${total} ${plural(total, "свободна", "свободно", "свободно")}`;
+}
+
 function categoryLabel(code) {
   const c = categoryList().find((c) => c.code === code);
   return c ? c.label : code;

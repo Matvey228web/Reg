@@ -685,6 +685,64 @@ check('монитор отделён от «прочего»',
 check('мешки и флаги попадают в грип',
   importCategory('', '', 'SANDBAG BIG') === 'GRP' && importCategory('', '', 'ФЛАГ БОЛЬШОЙ') === 'GRP');
 
+console.log('\n== штучные позиции: учёт количеством ==');
+// Двадцать сэндбэгов — это одна строка «20 штук», а не двадцать номеров с QR.
+r = call('/item/create', { name: 'SANDBAG BIG', category: 'GRP', qty: 20 }, token);
+check('позиция заведена количеством', r.ok === true && r.data.qty === 20, r.data);
+const bagId = r.data.item_id;
+r = call('/item/create', { name: 'SANDBAG BIG', category: 'GRP', qty: 5 }, token);
+check('повторное заведение пополняет ту же строку, а не плодит вторую',
+  r.ok && r.data.item_id === bagId && r.data.qty === 25, r.data);
+check('на складе одна строка сэндбэгов',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(e => e.name === 'SANDBAG BIG').length === 1);
+
+r = call('/item/lookup', { item_id: bagId });
+check('карточка отдаёт количество и остаток',
+  r.ok && r.data.qty === 25 && r.data.qty_out === 0 && r.data.qty_free === 25 && r.data.by_qty === true,
+  r.data);
+
+r = call('/transaction/checkout', { item_id: bagId, qty: 4 }, token);
+check('выдали четыре штуки', r.ok === true && r.data.qty === 4, r);
+r = call('/item/lookup', { item_id: bagId });
+check('остаток уменьшился, позиция осталась доступной',
+  r.ok && r.data.qty_out === 4 && r.data.qty_free === 21 && r.data.status === 'Available', r.data);
+
+r = call('/transaction/checkout', { item_id: bagId, qty: 30 }, token);
+check('выдать больше, чем есть, нельзя (409)', r.ok === false && r.status === 409, r);
+check('в отказе сказано, сколько свободно', /свободно 21 из 25/.test(String(r.error)), r.error);
+
+// Вторая выдача — чтобы проверить, что приём закрывает записи по очереди.
+call('/transaction/checkout', { item_id: bagId, qty: 6 }, token);
+r = call('/transaction/checkin', { item_id: bagId, qty: 7 }, token);
+check('приняли семь штук', r.ok === true && r.data.qty === 7 && r.data.qty_out === 3, r.data);
+const bagTx = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(t => String(t.item_id) === String(bagId));
+check('первая выдача закрыта целиком',
+  bagTx[0].status === 'Closed' && Number(bagTx[0].qty_in) === 4, bagTx[0]);
+check('вторая закрыта частично и осталась открытой',
+  bagTx[1].status === 'Open' && Number(bagTx[1].qty_in) === 3, bagTx[1]);
+r = call('/transaction/checkin', { item_id: bagId, qty: 99 }, token);
+check('принять больше, чем на руках, нельзя (409)', r.ok === false && r.status === 409, r);
+
+// Когда выдали всё — позиция занята; вернули одну — снова доступна.
+call('/transaction/checkout', { item_id: bagId, qty: 22 }, token);
+r = call('/item/lookup', { item_id: bagId });
+check('выдали всё — позиция «в аренде»', r.ok && r.data.status === 'Rented' && r.data.qty_free === 0, r.data);
+call('/transaction/checkin', { item_id: bagId, qty: 1 }, token);
+r = call('/item/lookup', { item_id: bagId });
+check('вернули одну — снова доступна', r.ok && r.data.status === 'Available' && r.data.qty_free === 1, r.data);
+
+// Поштучная техника количеством не считается.
+r = call('/item/lookup', { item_id: itemId });
+check('обычная камера остаётся поштучной', r.ok && r.data.by_qty === false && r.data.qty === 1, r.data);
+
+console.log('\n== способ учёта категории ==');
+r = call('/category/update', { code: 'GRP', by_qty: false }, token);
+check('у заполненной категории способ учёта не меняется (409)', r.ok === false && r.status === 409, r);
+r = call('/category/update', { code: 'MED', by_qty: true }, token);
+check('у пустой категории меняется', r.ok === true, r);
+check('...и это видно в справочнике',
+  categories().filter(c => c.code === 'MED')[0].by_qty === true);
+
 // Одна камера под двумя именами. Нормализация написания такое не ловит:
 // «A7 IV» и «ILCE-7M4» — разные буквы, но один аппарат.
 check('маркетинговое имя сводится к каталожному',
@@ -743,6 +801,8 @@ check('дубль кода отклонён',
   call('/category/create', { code: 'BAT', label: 'Ещё раз' }, token).status === 409);
 check('кривой код отклонён',
   call('/category/create', { code: 'X', label: 'Короткий' }, token).status === 400);
+r = call('/category/create', { code: 'GEL', label: 'Гели и скотч', by_qty: true }, token);
+check('новую категорию можно сразу завести количеством', r.ok === true && r.data.by_qty === true, r.data);
 r = call('/category/update', { code: 'BAT', label: 'Аккумуляторы и зарядки' }, token);
 check('название меняется свободно', r.ok === true, r);
 r = call('/category/update', { code: 'BAT', num: 15 }, token);

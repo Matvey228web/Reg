@@ -38,6 +38,7 @@ const CatalogScreen = (() => {
 
   // Справочник моделей выбранной категории: из него собирается номер XXYYZZ.
   async function loadModels() {
+    applyCategoryMode();
     const sel = document.getElementById("new-item-model");
     const category = document.getElementById("new-item-category").value;
     sel.innerHTML = `<option value="">Загрузка…</option>`;
@@ -60,20 +61,46 @@ const CatalogScreen = (() => {
     document.getElementById("new-model-wrap").style.display = isNew ? "block" : "none";
   }
 
+  // Поля формы зависят от способа учёта: у кучи мешков нет заводского номера,
+  // зато есть количество; у камеры наоборот.
+  function applyCategoryMode() {
+    const category = document.getElementById("new-item-category").value;
+    const bulk = categoryByQty(category);
+    document.getElementById("new-item-qty-wrap").style.display = bulk ? "" : "none";
+    document.getElementById("new-item-serial-wrap").style.display = bulk ? "none" : "";
+    document.getElementById("new-item-inventory-wrap").style.display = bulk ? "none" : "";
+    document.getElementById("new-item-submit").textContent =
+      bulk ? "Добавить на склад" : "Создать и получить QR";
+  }
+
   function matches(item) {
     if (currentFilters.category !== "all" && item.category !== currentFilters.category) return false;
     if (currentFilters.status !== "all" && item.status !== currentFilters.status) return false;
     if (!searchQuery) return true;
-    const haystack = [item.name, item.item_id, item.serial_number, item.inventory_number]
+    // Ищем и по названию категории: «свет» должно находить осветители, даже
+    // когда фильтр стоит на «всех». Номера сравниваем без пробелов и дефисов —
+    // их диктуют и записывают по-разному.
+    const haystack = [item.name, item.item_id, item.serial_number,
+                      item.inventory_number, categoryLabel(item.category)]
       .filter(Boolean).join(" ").toLowerCase();
-    return haystack.indexOf(searchQuery) !== -1;
+    if (haystack.indexOf(searchQuery) !== -1) return true;
+    const digits = searchQuery.replace(/[\s\-]/g, "");
+    if (!digits) return false;
+    return [item.item_id, item.serial_number, item.inventory_number]
+      .filter(Boolean).join(" ").toLowerCase().replace(/[\s\-]/g, "").indexOf(digits) !== -1;
   }
 
   function cardHtml(item) {
+    // У штучных позиций важен не статус, а остаток: «в аренде» про кучу мешков
+    // не говорит ничего, а «21 из 25 свободно» говорит всё.
+    const bulk = categoryByQty(item.category);
+    const meta = [categoryLabel(item.category), item.item_id];
+    if (bulk) meta.push(qtyText(item));
+    else if (item.inventory_number) meta.push("инв. " + item.inventory_number);
     return `
       <div class="card" data-item-id="${escapeHtml(item.item_id)}">
         <div class="card-title">${escapeHtml(item.name)} ${statusBadge(item.status)}</div>
-        <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}${item.inventory_number ? " · инв. " + escapeHtml(item.inventory_number) : ""}</div>
+        <div class="card-sub">${escapeHtml(meta.join(" · "))}</div>
       </div>`;
   }
 
@@ -195,6 +222,15 @@ const CatalogScreen = (() => {
       const payload = { category, serial_number, inventory_number, condition_notes };
       if (modelChoice === "__new") payload.model_name = name;
       else payload.model_code = Number(modelChoice);
+      if (categoryByQty(category)) {
+        payload.qty = Number(document.getElementById("new-item-qty").value) || 1;
+        if (payload.qty < 1) {
+          showBoxError("catalog-add-error", "Количество — целое число от одного");
+          btn.disabled = false;
+          btn.textContent = "Создать и получить QR";
+          return;
+        }
+      }
       const { item_id } = await apiPost("/item/create", payload);
       TG.hapticSuccess();
       renderQrResult(item_id, name);

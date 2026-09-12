@@ -66,13 +66,17 @@ const ItemScreen = (() => {
       <div class="card">
         <div class="card-title">${statusBadge(item.status)}</div>
         <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}</div>
+        ${item.by_qty ? `<div class="card-sub">На складе: ${escapeHtml(qtyText(item))}</div>` : ""}
         ${item.serial_number ? `<div class="card-sub">Заводской №: ${escapeHtml(item.serial_number)}</div>` : ""}
         ${item.inventory_number ? `<div class="card-sub">Инвентарный №: ${escapeHtml(item.inventory_number)}</div>` : ""}
         ${item.condition_notes ? `<div class="card-sub">${escapeHtml(item.condition_notes)}</div>` : ""}
       </div>
 
       <div class="section">
-        <div class="section-title">QR-код предмета</div>
+        <div class="section-title">${item.by_qty ? "QR-код полки" : "QR-код предмета"}</div>
+        ${item.by_qty ? `<p class="hint">У штучных позиций личных номеров нет — этот код
+        относится ко всей полке. Наклейте его на ящик: сканирование откроет остаток
+        и форму выдачи количеством.</p>` : ""}
         <div class="qr-wrap">
           <canvas id="item-qr-canvas"></canvas>
           <div class="qr-id">${escapeHtml(item.item_id)}</div>

@@ -44,7 +44,7 @@ const ScanScreen = (() => {
       // Статус мог измениться — поправим его в кэше каталога, чтобы список не
       // показывал устаревшее «Доступно» до следующего обновления.
       Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
-      mode = item.status === "Available" ? "checkout" : item.status === "Rented" ? "checkin" : null;
+      mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
       if (mode === "checkout") await loadOrders();
       document.getElementById("scan-start-text").textContent = "Сканировать ещё раз";
       document.getElementById("scan-start-btn").classList.add("btn--secondary");
@@ -78,21 +78,33 @@ const ScanScreen = (() => {
     return `№${order.order_no} · ${who}${until}`;
   }
 
+  // У штучной позиции статус описывает кучу целиком, а выдавать и принимать
+  // можно, пока есть остаток или что-то на руках.
+  function canCheckout(item) {
+    if (item.by_qty) return Number(item.qty_free || 0) > 0 && item.status !== "In Repair" && item.status !== "Retired";
+    return item.status === "Available";
+  }
+  function canCheckin(item) {
+    if (item.by_qty) return Number(item.qty_out || 0) > 0;
+    return item.status === "Rented";
+  }
+
   function renderItem() {
     const result = document.getElementById("scan-result");
     const item = currentItem;
     const defectsHtml = item.open_defects && item.open_defects.length
       ? `<p class="hint">Открытые дефекты: ${item.open_defects.length}</p>` : "";
 
+    const bulk = !!item.by_qty;
     result.innerHTML = `
       <div class="card">
         <div class="card-title">${escapeHtml(item.name)} ${statusBadge(item.status)}</div>
-        <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}</div>
+        <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}${bulk ? " · " + escapeHtml(qtyText(item)) : ""}</div>
       </div>
       ${defectsHtml}
       <div class="filters" style="margin-top:12px;">
-        <button class="btn ${mode === "checkout" ? "" : "btn--secondary"}" id="mode-checkout" ${item.status !== "Available" ? "disabled" : ""} style="width:auto;">Выдать</button>
-        <button class="btn ${mode === "checkin" ? "" : "btn--secondary"}" id="mode-checkin" ${item.status !== "Rented" ? "disabled" : ""} style="width:auto;">Принять</button>
+        <button class="btn ${mode === "checkout" ? "" : "btn--secondary"}" id="mode-checkout" ${canCheckout(item) ? "" : "disabled"} style="width:auto;">Выдать</button>
+        <button class="btn ${mode === "checkin" ? "" : "btn--secondary"}" id="mode-checkin" ${canCheckin(item) ? "" : "disabled"} style="width:auto;">Принять</button>
         <button class="btn ${mode === "defect" ? "" : "btn--secondary"}" id="mode-defect" style="width:auto;">Дефект</button>
       </div>
       <div id="mode-form"></div>
@@ -121,6 +133,13 @@ const ScanScreen = (() => {
             ${orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
             или выдайте без заказа.</p>`}
           </div>
+          ${currentItem.by_qty ? `
+          <div class="field">
+            <label for="scan-qty">Сколько выдаём</label>
+            <input type="number" id="scan-qty" inputmode="numeric" min="1" step="1"
+                   max="${Number(currentItem.qty_free || 1)}" value="1" />
+            <p class="hint">${escapeHtml(qtyText(currentItem))}</p>
+          </div>` : ""}
           <div class="field">
             <label for="scan-return-date">Ожидаемая дата возврата</label>
             <input type="date" id="scan-return-date" />
@@ -142,6 +161,13 @@ const ScanScreen = (() => {
     } else if (mode === "checkin") {
       box.innerHTML = `
         <div class="section">
+          ${currentItem.by_qty ? `
+          <div class="field">
+            <label for="scan-qty-in">Сколько принимаем</label>
+            <input type="number" id="scan-qty-in" inputmode="numeric" min="1" step="1"
+                   max="${Number(currentItem.qty_out || 1)}" value="${Number(currentItem.qty_out || 1)}" />
+            <p class="hint">На руках ${Number(currentItem.qty_out || 0)} ${plural(Number(currentItem.qty_out || 0), "штука", "штуки", "штук")}.</p>
+          </div>` : ""}
           <div class="toggle-row">
             <label for="scan-has-defect">Обнаружен дефект?</label>
             <input type="checkbox" id="scan-has-defect" />
@@ -200,9 +226,11 @@ const ScanScreen = (() => {
     const orderId = picked === "none" ? null : Number(picked);
     TG.mainButton.setLoading(true);
     try {
+      const qtyField = document.getElementById("scan-qty");
       const result = await apiPost("/transaction/checkout", {
         item_id: currentItem.item_id,
         order_id: orderId,
+        qty: qtyField ? Number(qtyField.value) || 1 : 1,
         expected_return_at: document.getElementById("scan-return-date").value || null,
         notes: document.getElementById("scan-notes").value.trim(),
       });
@@ -226,8 +254,10 @@ const ScanScreen = (() => {
     const hasDefect = document.getElementById("scan-has-defect").checked;
     TG.mainButton.setLoading(true);
     try {
+      const qtyInField = document.getElementById("scan-qty-in");
       await apiPost("/transaction/checkin", {
         item_id: currentItem.item_id,
+        qty: qtyInField ? Number(qtyInField.value) || 1 : 1,
         has_defect: hasDefect,
         defect_description: hasDefect ? document.getElementById("scan-defect-desc").value.trim() : null,
         defect_severity: hasDefect ? document.getElementById("scan-defect-severity").value : null,
