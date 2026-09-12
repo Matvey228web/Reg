@@ -89,6 +89,32 @@ const ScanScreen = (() => {
     return item.status === "Rented";
   }
 
+  // Выключенная кнопка, которая молчит, — это «не работает» для человека у
+  // стойки. Если выдать или принять нельзя, надо сказать почему и что делать.
+  function unavailableHint(item) {
+    const outText = [];
+    if (!canCheckout(item)) {
+      if (item.status === "In Repair") {
+        outText.push("Выдать нельзя: предмет в ремонте. Закройте дефект в разделе «Ремонт».");
+      } else if (item.status === "Retired") {
+        outText.push("Выдать нельзя: предмет списан.");
+      } else if (item.by_qty && Number(item.qty_free || 0) <= 0) {
+        outText.push("Выдать нечего: все " + Number(item.qty || 0) + " на руках.");
+      } else if (item.status === "Rented") {
+        outText.push("Выдать нельзя: предмет уже на руках — сначала примите его.");
+      }
+    }
+    if (!canCheckin(item)) {
+      if (item.by_qty) outText.push("Принимать нечего: на руках ничего нет.");
+      else if (item.status === "Available") outText.push("Принимать нечего: предмет и так на складе.");
+      else if (item.status === "In Repair" || item.status === "Retired") {
+        outText.push("Принять нельзя: предмет не числится выданным.");
+      }
+    }
+    if (!outText.length) return "";
+    return `<p class="hint">${outText.map(escapeHtml).join(" ")}</p>`;
+  }
+
   function renderItem() {
     const result = document.getElementById("scan-result");
     const item = currentItem;
@@ -107,6 +133,7 @@ const ScanScreen = (() => {
         <button class="btn ${mode === "checkin" ? "" : "btn--secondary"}" id="mode-checkin" ${canCheckin(item) ? "" : "disabled"} style="width:auto;">Принять</button>
         <button class="btn ${mode === "defect" ? "" : "btn--secondary"}" id="mode-defect" style="width:auto;">Дефект</button>
       </div>
+      ${unavailableHint(item)}
       <div id="mode-form"></div>
     `;
     document.getElementById("mode-checkout").addEventListener("click", async () => {
