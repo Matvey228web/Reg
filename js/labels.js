@@ -92,9 +92,14 @@ const LabelsScreen = (() => {
       </div>`}
       <div id="labels-count" class="hint"></div>
       <button class="btn" id="labels-print">Печать</button>
-      <p class="hint">Печать идёт из браузера: выберите свой принтер этикеток и
-      поставьте масштаб 100%, иначе размеры уедут. Из Telegram на телефоне
-      печать недоступна — откройте адрес приложения в браузере на компьютере.</p>
+      <button class="btn btn--secondary" id="labels-save">Сохранить картинками</button>
+      <p class="hint">Печать из браузера подходит принтерам с AirPrint или обычным
+      драйвером: выберите принтер и поставьте масштаб 100%, иначе размеры уедут.
+      Дешёвые принтеры этикеток с Bluetooth (Niimbot, Phomemo) из браузера печатать
+      не умеют вообще — для них сохраните картинками и напечатайте из приложения
+      принтера.</p>
+      <p class="hint">И печать, и сохранение файлов Telegram внутри себя блокирует.
+      На телефоне откройте адрес приложения в Safari, а не в Telegram.</p>
       <div class="section-title">Как будет выглядеть</div>
       <div id="labels-preview"></div>`;
 
@@ -125,6 +130,7 @@ const LabelsScreen = (() => {
       recount();
     });
     document.getElementById("labels-print").addEventListener("click", print);
+    document.getElementById("labels-save").addEventListener("click", saveImages);
 
     recount();
   }
@@ -229,6 +235,107 @@ const LabelsScreen = (() => {
     // Даём браузеру отрисовать canvas до вызова печати, иначе на страницу
     // может уйти пустой квадрат вместо кода.
     setTimeout(() => window.print(), 250);
+  }
+
+  // --- Сохранение этикеток картинками ---
+  //
+  // Для Bluetooth-принтеров этикеток (Niimbot, Phomemo и прочие дешёвые) это
+  // единственный путь: Bluetooth у них закрыт под собственное приложение, и
+  // напечатать из браузера нельзя в принципе — только импортировать картинку.
+  //
+  // Рисуем сразу в разрешении принтера: 203 dpi это ровно 8 точек на миллиметр,
+  // поэтому картинка 30×20 мм — это 240×160 точек. Так приложение принтера не
+  // пересчитывает размер и края не замываются.
+  const DOTS_PER_MM = 8;
+  const MAX_AT_ONCE = 30;
+
+  function mm(value) {
+    return Math.round(value * DOTS_PER_MM);
+  }
+
+  function labelCanvas(item, size) {
+    const canvas = document.createElement("canvas");
+    canvas.width = mm(size.w);
+    canvas.height = mm(size.h);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const pad = mm(1.5);
+    const gap = mm(1.5);
+    const qrSide = mm(size.qr);
+
+    // QR рисуем отдельно и переносим без сглаживания: сглаженный модуль на
+    // термопечати расплывается, и код перестаёт читаться.
+    const qrCanvas = document.createElement("canvas");
+    QR.render(qrCanvas, item.item_id, 8);
+    ctx.imageSmoothingEnabled = false;
+    const qrTop = Math.round((canvas.height - qrSide) / 2);
+    ctx.drawImage(qrCanvas, pad, qrTop, qrSide, qrSide);
+
+    const textLeft = pad + qrSide + gap;
+    const textWidth = canvas.width - textLeft - pad;
+    ctx.fillStyle = "#000000";
+    ctx.textBaseline = "top";
+
+    const lines = [];
+    lines.push({ text: item.item_id, size: mm(3.2), font: "bold {px}px monospace" });
+    if (size.name && item.name) lines.push({ text: item.name, size: mm(2.4), font: "{px}px sans-serif" });
+    if (size.caption) lines.push({ text: caption(), size: mm(2.2), font: "{px}px sans-serif" });
+
+    // Высоту блока считаем заранее, чтобы текст стоял по центру этикетки, а не
+    // прижимался к верхнему краю.
+    const lineGap = mm(0.8);
+    const wrapped = lines.map((line) => {
+      ctx.font = line.font.replace("{px}", line.size);
+      return { line: line, rows: wrapText(ctx, line.text, textWidth) };
+    });
+    const totalHeight = wrapped.reduce(
+      (sum, w) => sum + w.rows.length * (w.line.size * 1.15) + lineGap, -lineGap);
+
+    let y = Math.max(pad, Math.round((canvas.height - totalHeight) / 2));
+    wrapped.forEach((w) => {
+      ctx.font = w.line.font.replace("{px}", w.line.size);
+      w.rows.forEach((row) => {
+        ctx.fillText(row, textLeft, y);
+        y += w.line.size * 1.15;
+      });
+      y += lineGap;
+    });
+    return canvas;
+  }
+
+  function wrapText(ctx, text, maxWidth) {
+    const words = String(text).split(/\s+/);
+    const rows = [];
+    let current = "";
+    words.forEach((word) => {
+      const candidate = current ? current + " " + word : word;
+      if (ctx.measureText(candidate).width <= maxWidth || !current) current = candidate;
+      else { rows.push(current); current = word; }
+    });
+    if (current) rows.push(current);
+    return rows.slice(0, 3);   // больше трёх строк на этикетку не влезает
+  }
+
+  function saveImages() {
+    if (!items.length) {
+      TG.showAlert("Нечего сохранять: под фильтры ничего не попало");
+      return;
+    }
+    if (items.length > MAX_AT_ONCE) {
+      TG.showAlert("Сразу столько файлов браузер не отдаст. Сузьте фильтры до " +
+        MAX_AT_ONCE + " позиций — или печатайте кнопкой «Печать».");
+      return;
+    }
+    const size = SIZES[sizeKey];
+    // По одному файлу с паузой: браузеры глушат пачку скачиваний подряд.
+    items.forEach((item, index) => {
+      setTimeout(() => {
+        QR.downloadCanvas(labelCanvas(item, size),
+          "mifs-" + item.item_id + "-" + size.w + "x" + size.h + "mm.png");
+      }, index * 300);
+    });
   }
 
   function init() {
