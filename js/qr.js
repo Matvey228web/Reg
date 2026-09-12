@@ -37,10 +37,35 @@ const QR = (() => {
     }, "image/png");
   }
 
+  // QR во весь экран. На iPhone внутри Telegram скачивание файла из
+  // мини-приложения часто блокируется вебвью, поэтому единственный надёжный
+  // способ получить код «в руки» — показать его крупно и снять другим
+  // телефоном. Заодно так удобно проверять сканер на своей же технике.
+  function showFullscreen(text, caption) {
+    const overlay = document.createElement("div");
+    overlay.className = "qr-overlay";
+    overlay.innerHTML = `
+      <div class="qr-overlay-inner">
+        <canvas id="qr-overlay-canvas"></canvas>
+        <div class="qr-overlay-id">${escapeHtml(text)}</div>
+        ${caption ? `<div class="qr-overlay-caption">${escapeHtml(caption)}</div>` : ""}
+        <button class="btn" id="qr-overlay-close">Закрыть</button>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    // Размер под ширину экрана, но кратно модулям — иначекрая размываются
+    const side = Math.min(window.innerWidth - 48, 420);
+    render(document.getElementById("qr-overlay-canvas"), text, Math.max(4, Math.floor(side / 29)));
+
+    const close = () => overlay.remove();
+    document.getElementById("qr-overlay-close").addEventListener("click", close);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  }
+
   // scan(onResult): onResult(code | null, error | null)
   function scan(onResult) {
     TG.scanQr("Наведите камеру на QR-код оборудования", onResult);
   }
 
-  return { render, downloadCanvas, scan };
+  return { render, downloadCanvas, showFullscreen, scan };
 })();

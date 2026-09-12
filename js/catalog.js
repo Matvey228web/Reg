@@ -259,6 +259,8 @@ const CatalogScreen = (() => {
       form.style.display = opening ? "block" : "none";
       if (opening) loadModels();
     });
+    document.getElementById("catalog-labels-btn")
+      .addEventListener("click", () => Router.navigate("labels"));
     document.getElementById("new-item-category").addEventListener("change", loadModels);
     document.getElementById("new-item-model").addEventListener("change", toggleNewModel);
     document.getElementById("new-item-submit").addEventListener("click", submitNewItem);

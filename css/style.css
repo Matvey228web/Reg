@@ -285,3 +285,75 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
   cursor: pointer;
 }
 .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* QR во весь экран: единственный надёжный способ передать код с iPhone —
+   скачивание из мини-приложения Telegram часто блокируется вебвью. */
+.qr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.qr-overlay-inner { text-align: center; max-width: 460px; width: 100%; }
+.qr-overlay canvas { background: #fff; padding: 12px; border-radius: var(--radius); max-width: 100%; }
+.qr-overlay-id {
+  font-family: monospace; font-size: 22px; letter-spacing: 2px;
+  color: #fff; margin: 14px 0 4px;
+}
+.qr-overlay-caption { color: #bbb; font-size: 14px; margin-bottom: 16px; }
+
+/* --- Этикетки ---
+   Размеры в миллиметрах: этикетка печатается на термопринтере, где страница и
+   есть этикетка. Всё, что задано в px, на печати уехало бы. */
+.label {
+  display: flex;
+  align-items: center;
+  gap: 1.5mm;
+  padding: 1.5mm;
+  background: #fff;
+  color: #000;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px dashed var(--tg-hint-color);   /* только на экране, при печати снимается */
+  border-radius: 2px;
+  margin-bottom: 8px;
+}
+.label--small { width: 30mm; height: 20mm; }
+.label--medium { width: 40mm; height: 30mm; }
+.label--large { width: 58mm; height: 40mm; }
+.label-qr { flex: none; image-rendering: pixelated; }
+.label-text { min-width: 0; line-height: 1.15; }
+.label-id { font-family: monospace; font-weight: 700; font-size: 3.2mm; letter-spacing: 0.2mm; }
+.label-name {
+  font-size: 2.4mm;
+  margin-top: 0.8mm;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.label-caption { font-size: 2.2mm; margin-top: 0.8mm; color: #333; }
+
+#labels-print-area { display: none; }
+
+@media print {
+  /* Печатаем только этикетки: панель разделов, кнопки и экраны в печать
+     попадать не должны. Размер страницы задаётся из js/labels.js под
+     выбранный формат этикетки. */
+  body.printing #app > *:not(#labels-print-area) { display: none !important; }
+  body.printing #labels-print-area { display: block !important; }
+  body.printing #app { padding: 0 !important; }
+
+  .label {
+    border: none;
+    margin: 0;
+    /* одна этикетка на страницу — так работает термопринтер этикеток */
+    page-break-after: always;
+    break-after: page;
+  }
+  .label:last-child { page-break-after: auto; break-after: auto; }
+}

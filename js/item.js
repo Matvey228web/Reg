@@ -68,6 +68,19 @@ const ItemScreen = (() => {
       </div>
 
       <div class="section">
+        <div class="section-title">QR-код предмета</div>
+        <div class="qr-wrap">
+          <canvas id="item-qr-canvas"></canvas>
+          <div class="qr-id">${escapeHtml(item.item_id)}</div>
+        </div>
+        <button class="btn btn--secondary" id="item-qr-big">Во весь экран</button>
+        <button class="btn btn--secondary" id="item-qr-download">Скачать PNG</button>
+        <button class="btn btn--secondary" id="item-qr-label">Печать этикетки</button>
+        <p class="hint">Внутри Telegram скачивание файла часто блокируется вебвью —
+        тогда откройте QR во весь экран и отсканируйте его вторым телефоном.</p>
+      </div>
+
+      <div class="section">
         <div class="section-title">История выдач</div>
         ${txRows}
       </div>
@@ -96,6 +109,20 @@ const ItemScreen = (() => {
         </div>
       </div>
     `;
+
+    // QR у импортированных позиций раньше получить было нельзя: генерация
+    // жила только на экране создания новой позиции.
+    const qrCanvas = document.getElementById("item-qr-canvas");
+    QR.render(qrCanvas, item.item_id, 8);
+    document.getElementById("item-qr-download").addEventListener("click", () => {
+      QR.downloadCanvas(qrCanvas, `${item.item_id}.png`);
+    });
+    document.getElementById("item-qr-big").addEventListener("click", () => {
+      QR.showFullscreen(item.item_id, item.name);
+    });
+    document.getElementById("item-qr-label").addEventListener("click", () => {
+      Router.navigate("labels", { itemId: item.item_id });
+    });
 
     document.getElementById("item-report-defect-toggle").addEventListener("click", () => {
       const form = document.getElementById("item-defect-form");

@@ -50,6 +50,17 @@ function categoryLabel(code) {
   return c ? c.label : code;
 }
 
+// Русское склонение по числу: 1 этикетка, 2 этикетки, 5 этикеток.
+// Без этого получалось «2 этикеток».
+function plural(n, one, few, many) {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (last > 1 && last < 5) return few;
+  if (last === 1) return one;
+  return many;
+}
+
 function showBoxError(elementId, message) {
   const el = document.getElementById(elementId);
   if (!el) return;

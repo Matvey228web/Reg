@@ -32,6 +32,7 @@
   StaffScreen.init();
   PinScreen.init();
   SettingsScreen.init();
+  LabelsScreen.init();
 
   const session = Auth.requireAuth();
   if (session) Router.reset("home");
