@@ -48,6 +48,9 @@
       <div class="card" data-nav="staff" id="home-staff-card" style="display:none;">
         <div class="card-title">🗝 Сотрудники</div>
       </div>
+      <div class="card" data-nav="settings" id="home-settings-card" style="display:none;">
+        <div class="card-title">⚙️ Настройки</div>
+      </div>
     </div>
     <button class="btn btn--secondary" id="pin-change-btn" style="margin-top:20px;">Сменить свой PIN</button>
     <button class="btn btn--secondary" id="logout-btn" style="margin-top:8px;">Выйти</button>
@@ -193,6 +196,13 @@
     </div>
   </div>
 
+  <!-- Экран: настройки системы (только администратор) -->
+  <div class="screen" id="screen-settings">
+    <h1>Настройки</h1>
+    <div id="settings-error"></div>
+    <div id="settings-content"></div>
+  </div>
+
   <!-- Экран: смена своего PIN (доступен любой роли) -->
   <div class="screen" id="screen-pin">
     <h1>Смена PIN</h1>
@@ -240,6 +250,7 @@
 <script src="js/repair.js"></script>
 <script src="js/clients.js"></script>
 <script src="js/staff.js"></script>
+<script src="js/settings.js"></script>
 <script src="js/pin.js"></script>
 <script src="js/app.js"></script>
 </body>

@@ -50,8 +50,9 @@ const CatalogScreen = (() => {
     const statusSel = document.getElementById("catalog-filter-status");
     const newItemCat = document.getElementById("new-item-category");
 
+    const cats = categoryList();
     catSel.innerHTML = `<option value="all">Все категории</option>` +
-      CONFIG.CATEGORIES.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join("");
+      cats.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join("");
 
     statusSel.innerHTML = `
       <option value="all">Все статусы</option>
@@ -60,7 +61,7 @@ const CatalogScreen = (() => {
       <option value="In Repair">В ремонте</option>
       <option value="Retired">Списано</option>`;
 
-    newItemCat.innerHTML = CONFIG.CATEGORIES.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join("");
+    newItemCat.innerHTML = cats.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join("");
   }
 
   // Справочник моделей выбранной категории: из него собирается номер XXYYZZ.

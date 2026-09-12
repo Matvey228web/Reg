@@ -249,7 +249,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 7 вкладок', spreadsheet.getSheets().length === 7, spreadsheet.getSheets().map(s => s.name));
+check('создано 8 вкладок', spreadsheet.getSheets().length === 8, spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -259,7 +259,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 7', spreadsheet.getSheets().length === 7);
+check('вкладок по-прежнему 8', spreadsheet.getSheets().length === 8);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -635,6 +635,75 @@ check('когда блокировка истекла, вход снова ра�
 check('счётчик промахов обнулён удачным входом', Number(petrRow().failed_attempts || 0) === 0,
   petrRow().failed_attempts);
 
+console.log('\n== справочник категорий живёт в таблице ==');
+const catSheet = getSheet(SHEETS.CATEGORIES);
+check('лист категорий засеян умолчаниями', readRows(catSheet).length === 7,
+  readRows(catSheet).map(c => c.code));
+check('номера категорий двузначные строки',
+  readRows(catSheet).every(c => /^\d{2}$/.test(String(c.num))),
+  readRows(catSheet).map(c => c.num));
+check('камера по-прежнему 01', categoryNum('CAM') === '01', categoryNum('CAM'));
+
+// Побитый справочник не должен ломать номера предметов: два одинаковых номера
+// означали бы два предмета с одним item_id.
+const catBackup = catSheet.data.map(r => r.slice());
+updateRow(catSheet, 2, { num: '02' });   // теперь у CAM и LEN одинаковый номер
+check('дубль номера отбрасывается, а не собирает битый номер',
+  categories().every((c, i, all) => all.filter(x => x.num === c.num).length === 1),
+  categories().map(c => c.code + ':' + c.num));
+catSheet.data = catBackup.map(r => r.slice());
+check('справочник восстановлен', categoryNum('CAM') === '01');
+
+console.log('\n== настройки: чтение, проверка, сохранение ==');
+let cfg = call('/settings/get', {}, token);
+check('настройки отдаются вошедшему', cfg.ok === true, cfg);
+check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
+  cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
+check('категории приходят вместе с настройками', cfg.data.categories.length === 7);
+// Отдельная учётка: повторный вход аннулирует прежний токен, и войди мы здесь
+// под администратором — сломали бы сессию, которой пользуются проверки ниже.
+call('/staff/create', { full_name: 'Проба', login: 'probe', pin: '9876', role: 'Warehouse Staff' }, token);
+const probeLogin = call('/auth/login', { login: 'probe', pin: '9876' });
+check('настройки и категории приезжают уже при входе',
+  !!probeLogin.data.settings && !!probeLogin.data.categories, probeLogin.data);
+const probeToken = probeLogin.data.token;
+check('повторный вход выкидывает прежнюю сессию',
+  !!call('/auth/login', { login: 'probe', pin: '9876' }).data.token &&
+  call('/equipment/list', {}, probeToken).status === 401);
+
+r = call('/settings/set', { settings: { max_login_attempts: 0 } }, token);
+check('недопустимое значение отклонено с объяснением',
+  r.ok === false && r.status === 400 && /от 3 до 20/.test(r.error), r);
+check('...и не сохранилось', call('/settings/get', {}, token).data.settings.max_login_attempts === 5);
+r = call('/settings/set', { settings: { session_ttl_hours: 24, max_login_attempts: 7 } }, token);
+check('допустимые значения сохранены', r.ok === true && r.data.settings.session_ttl_hours === 24, r);
+check('неизвестная настройка отклонена',
+  call('/settings/set', { settings: { hack: 1 } }, token).status === 400);
+check('сотрудник склада настройки менять не может',
+  call('/settings/set', { settings: { session_ttl_hours: 2 } }, ivanToken).status === 403);
+
+console.log('\n== категории: добавление и защита номера ==');
+r = call('/category/create', { code: 'BAT', label: 'Аккумуляторы' }, token);
+check('категория добавлена', r.ok === true, r);
+check('номер выдан следующий свободный (08)', r.ok && r.data.num === '08', r.data);
+check('дубль кода отклонён',
+  call('/category/create', { code: 'BAT', label: 'Ещё раз' }, token).status === 409);
+check('кривой код отклонён',
+  call('/category/create', { code: 'X', label: 'Короткий' }, token).status === 400);
+r = call('/category/update', { code: 'BAT', label: 'Аккумуляторы и зарядки' }, token);
+check('название меняется свободно', r.ok === true, r);
+r = call('/category/update', { code: 'BAT', num: 15 }, token);
+check('номер у пустой категории сменить можно', r.ok === true, r);
+
+// А вот у занятой — нельзя: номер вшит в item_id и напечатан на этикетках
+check('в камерах есть позиции', categoryUsage('CAM') > 0, categoryUsage('CAM'));
+r = call('/category/update', { code: 'CAM', num: 20 }, token);
+check('номер занятой категории сменить нельзя', r.ok === false && r.status === 409, r);
+check('в отказе объяснено почему', /этикетк/.test(String(r.error)), r.error);
+check('номер камеры не изменился', categoryNum('CAM') === '01');
+check('существующие номера предметов целы',
+  readRows(getSheet(SHEETS.EQUIPMENT)).every(i => /^\d{6}$/.test(String(i.item_id))));
+
 console.log('\n== удаление сотрудника ==');
 // Удаляем полностью, но история не должна обезличиться: в журнале рядом с
 // номером лежит имя, иначе после удаления строки было бы не прочитать, кто
@@ -697,6 +766,17 @@ check('устранённые дефекты удалены',
   readRows(getSheet(SHEETS.DEFECTS)).every(d => d.status !== 'Resolved'));
 r = trimJournal();
 check('повторная подрезка снова требует выгрузки', /отменена/.test(r), r);
+
+console.log('\n== обслуживание из приложения ==');
+check('сотрудник склада обслуживание не запускает',
+  call('/maintenance', { action: 'archive' }, ivanToken).status === 403);
+check('неизвестное действие отклонено',
+  call('/maintenance', { action: 'drop-everything' }, token).status === 400);
+r = call('/maintenance', { action: 'trim' }, token);
+check('подрезка через эндпоинт так же требует выгрузки',
+  r.ok === true && /отменена/.test(r.data.message), r);
+r = call('/maintenance', { action: 'archive' }, token);
+check('выгрузка через эндпоинт работает', r.ok === true && /выгружен|пуст/.test(r.data.message), r);
 
 console.log('\n== самозагрузка первого администратора закрыта навсегда ==');
 // Раньше защита держалась на «в Staff есть строки»: почистив лист, кто угодно

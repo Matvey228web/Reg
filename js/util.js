@@ -31,8 +31,22 @@ function statusBadge(status) {
   return `<span class="badge ${statusBadgeClass(status)}">${escapeHtml(STATUS_LABELS[status] || status)}</span>`;
 }
 
+// Действующий справочник категорий: с бэкенда, если он уже приходил, иначе
+// запасной из CONFIG. Обёртка нужна, чтобы экраны не знали, откуда он взялся.
+function categoryList() {
+  try {
+    const session = Auth.getSession();
+    if (session && Array.isArray(session.categories) && session.categories.length) {
+      return session.categories;
+    }
+  } catch {
+    // до входа справочника ещё нет — это нормально
+  }
+  return CONFIG.CATEGORIES;
+}
+
 function categoryLabel(code) {
-  const c = CONFIG.CATEGORIES.find((c) => c.code === code);
+  const c = categoryList().find((c) => c.code === code);
   return c ? c.label : code;
 }
 

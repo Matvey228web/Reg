@@ -7,6 +7,23 @@
 
 // Правило серьёзности — такое же, как в бэкенде (defectBlocksRental в Code.gs):
 // царапина выдачу не блокирует, «серьёзный» и «не работает» блокируют.
+// Настройки и справочник категорий: в настоящем бэкенде живут в таблице
+// (лист Categories и ключи setting_* в Meta), здесь — в памяти.
+const mockSettings = {
+  session_ttl_hours: 12,
+  max_login_attempts: 5,
+  login_lock_minutes: 15,
+  import_source_id: "",
+};
+const MOCK_SETTINGS_SPEC = {
+  session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },
+  max_login_attempts: { min: 3, max: 20, hint: "от 3 до 20 попыток" },
+  login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
+  import_source_id: { text: true, hint: "идентификатор таблицы Google или пусто" },
+};
+let mockCats = CONFIG.CATEGORIES.map((c) => ({ ...c }));
+function mockCategories() { return mockCats; }
+
 function mockDefectBlocksRental(severity) {
   return severity === "Major" || severity === "Out of Service";
 }
@@ -153,7 +170,7 @@ const MockStore = (() => {
     models,
     // Номер вида XXYYZZ: категория, модель, порядковый номер экземпляра.
     nextItemId(category, modelCode) {
-      const cat = (CONFIG.CATEGORIES.find((c) => c.code === category) || { num: "06" }).num;
+      const cat = (mockCategories().find((c) => c.code === category) || { num: "06" }).num;
       const yy = String(modelCode).padStart(2, "0");
       unitCounters[cat + yy] = (unitCounters[cat + yy] || 0) + 1;
       return cat + yy + String(unitCounters[cat + yy]).padStart(2, "0");
@@ -197,7 +214,7 @@ const MockAPI = {
         }
         const tok = "mock-token-" + s.staff_id + "-" + Date.now();
         MockStore.tokens.set(tok, s.staff_id);
-        return { token: tok, ...MockStore.staffPublic(s) };
+        return { token: tok, ...MockStore.staffPublic(s), settings: { ...mockSettings }, categories: mockCategories() };
       }
 
       case "/item/lookup": {
@@ -404,6 +421,86 @@ const MockAPI = {
           active: true,
         });
         return { staff_id };
+      }
+
+      case "/settings/get": {
+        MockStore.requireToken(token);
+        const hints = {};
+        Object.keys(MOCK_SETTINGS_SPEC).forEach((k) => { hints[k] = MOCK_SETTINGS_SPEC[k].hint; });
+        return {
+          settings: { ...mockSettings },
+          categories: mockCategories(),
+          limits: hints,
+          maintenance: { journal_archived_at: "", journal_trimmed_at: "" },
+        };
+      }
+
+      case "/settings/set": {
+        MockStore.requireAdmin(token);
+        const incoming = body.settings || {};
+        const rejected = [];
+        Object.keys(incoming).forEach((k) => {
+          const spec = MOCK_SETTINGS_SPEC[k];
+          if (!spec) { rejected.push(k + ": неизвестная настройка"); return; }
+          if (spec.text) { mockSettings[k] = String(incoming[k]).trim(); return; }
+          const v = Number(incoming[k]);
+          if (!isFinite(v) || v < spec.min || v > spec.max) { rejected.push(k + ": " + spec.hint); return; }
+          mockSettings[k] = v;
+        });
+        if (rejected.length) {
+          const e = new Error("Не сохранено — " + rejected.join("; ")); e.status = 400; throw e;
+        }
+        return { settings: { ...mockSettings } };
+      }
+
+      case "/category/create": {
+        MockStore.requireAdmin(token);
+        const code = String(body.code || "").trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(code)) {
+          const e = new Error("Код категории — три латинские буквы, например BAT"); e.status = 400; throw e;
+        }
+        if (!String(body.label || "").trim()) {
+          const e = new Error("Укажите название категории"); e.status = 400; throw e;
+        }
+        if (mockCats.some((c) => c.code === code)) {
+          const e = new Error("Категория с таким кодом уже есть"); e.status = 409; throw e;
+        }
+        const maxNum = mockCats.reduce((m, c) => Math.max(m, Number(c.num)), 0);
+        const num = String(maxNum + 1).padStart(2, "0");
+        const created = { code, num, label: String(body.label).trim() };
+        mockCats.push(created);
+        return created;
+      }
+
+      case "/category/update": {
+        MockStore.requireAdmin(token);
+        const code = String(body.code || "").trim().toUpperCase();
+        const cat = mockCats.find((c) => c.code === code);
+        if (!cat) { const e = new Error("Категория не найдена"); e.status = 404; throw e; }
+        if (body.label !== undefined) {
+          const label = String(body.label).trim();
+          if (!label) { const e = new Error("Название не может быть пустым"); e.status = 400; throw e; }
+          cat.label = label;
+        }
+        if (body.num !== undefined && String(body.num).padStart(2, "0") !== cat.num) {
+          const used = MockStore.equipment.filter((i) => i.category === code).length;
+          if (used) {
+            const e = new Error("В категории уже " + used + " позиций. Номер вшит в их номера " +
+              "и напечатан на этикетках — сменить его нельзя. Название менять можно.");
+            e.status = 409; throw e;
+          }
+          cat.num = String(body.num).padStart(2, "0");
+        }
+        return { code, changed: true };
+      }
+
+      case "/maintenance": {
+        MockStore.requireAdmin(token);
+        if (body.action === "archive") return { message: "Журнал выгружен (демо-режим)." };
+        if (body.action === "trim") {
+          return { message: "Подрезка отменена: журнал ни разу не выгружался." };
+        }
+        const e = new Error("Неизвестное действие обслуживания"); e.status = 400; throw e;
       }
 
       case "/staff/delete": {

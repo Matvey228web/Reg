@@ -16,11 +16,16 @@ var SHEETS = {
   CLIENTS: "Clients",
   TRANSACTIONS: "Transactions",
   DEFECTS: "Defects",
+  CATEGORIES: "Categories",
   META: "Meta",
 };
 
-// Числовые коды категорий — первые две цифры номера предмета.
-// Порядок менять нельзя: коды уже напечатаны на этикетках.
+// Значения по умолчанию для листа Categories. Сам справочник живёт в таблице
+// (лист Categories) — оттуда его читает код и правит админка. Эти константы
+// нужны при первом запуске и как запас, если лист опустел или побит.
+//
+// Числовой код — первые две цифры номера предмета. Менять его у категории, в
+// которой уже есть техника, нельзя: номера напечатаны на этикетках.
 var CATEGORY_CODES = {
   CAM: "01",   // камеры
   LEN: "02",   // объективы
@@ -34,6 +39,18 @@ var CATEGORY_CODES = {
   CNS: "07",
 };
 
+// Названия для людей. Живут рядом с кодами только как умолчания для засева:
+// после засева название правится в таблице и в админке.
+var CATEGORY_LABELS = {
+  CAM: "Камера",
+  LEN: "Объектив",
+  LGT: "Свет",
+  AUD: "Звук",
+  GRP: "Грип",
+  OTH: "Другое",
+  CNS: "Расходники (штучно/навес)",
+};
+
 // Единственное описание структуры таблицы: используется и при создании
 // вкладок в setupSheets(), и как источник порядка колонок при записи строк.
 var SCHEMA = {
@@ -43,6 +60,7 @@ var SCHEMA = {
   Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
   Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
   Defects: ["defect_id", "item_id", "reported_by", "reported_by_name", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
+  Categories: ["code", "num", "label", "created_at"],
   Meta: ["key", "value"],
 };
 
@@ -52,12 +70,15 @@ var SCHEMA = {
 // выдачах и дефектах — по той же причине: иначе история не сходится с каталогом.
 var TEXT_COLUMNS = {
   Equipment: ["item_id", "model_code", "serial_number", "inventory_number"],
+  Categories: ["num"],
   Models: ["model_code"],
   Transactions: ["item_id"],
   Defects: ["item_id"],
 };
 
-var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 часов, как в js/config.js
+// Умолчания. Действующие значения живут в листе Meta и правятся в админке
+// (см. SETTINGS_SPEC и getSettings) — здесь только то, с чего система стартует.
+var SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 // PIN — всего 4 цифры, это 10 000 вариантов: без ограничения попыток его
 // подобрали бы скриптом за минуты, а адрес бэкенда открыт всем.
@@ -130,6 +151,30 @@ function setupSheets() {
     prepareRows(target, 1, target.getMaxRows ? target.getMaxRows() : 1000);
   }
 
+  // Справочник категорий засеваем умолчаниями при первом запуске. Существующие
+  // номера предметов от этого не меняются: засеваем ровно те коды, по которым
+  // они собраны.
+  var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  if (catSheet && readRows(catSheet).length === 0) {
+    var now = new Date().toISOString();
+    var seeded = [];
+    for (var code in CATEGORY_CODES) {
+      seeded.push({
+        code: code,
+        num: CATEGORY_CODES[code],
+        label: CATEGORY_LABELS[code] || code,
+        created_at: now,
+      });
+    }
+    var catHeaders = sheetHeaders(catSheet);
+    prepareRows(catSheet, 2, seeded.length);
+    catSheet.getRange(2, 1, seeded.length, catHeaders.length).setValues(
+      seeded.map(function (row) {
+        return catHeaders.map(function (h) { return row[h] !== undefined ? row[h] : ""; });
+      }));
+    filled.push(SHEETS.CATEGORIES + " (" + seeded.length + ")");
+  }
+
   // Таблицы, где администратор был создан до появления отметки, закрываем
   // здесь: иначе достаточно очистить лист Staff, чтобы снова стать админом
   // без пароля.
@@ -190,7 +235,7 @@ function importInventory() {
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var source = SpreadsheetApp.openById(IMPORT_SOURCE_ID);
+    var source = SpreadsheetApp.openById(importSourceId());
     var eqSheet = getSheet(SHEETS.EQUIPMENT);
 
     // Что уже импортировано. Метка источника («вкладка#строка») — единственный
@@ -293,7 +338,7 @@ function importInventory() {
 
         // Номер экземпляра внутри модели. Счётчики держим в памяти: 600+
         // обращений к вкладке Meta по одному не уложились бы в лимит времени.
-        var unitKey = "unit_" + CATEGORY_CODES[category] + pad2(modelCode);
+        var unitKey = "unit_" + categoryNum(category) + pad2(modelCode);
         counters[unitKey] = (counters[unitKey] || 0) + 1;
         if (counters[unitKey] > 99) {
           overflow.push(name + " (больше 99 экземпляров)");
@@ -640,6 +685,11 @@ function doPost(e) {
       case "/staff/set-active": data = handleStaffSetActive(payload, token); break;
       case "/staff/set-pin": data = handleStaffSetPin(payload, token); break;
       case "/staff/delete": data = handleStaffDelete(payload, token); break;
+      case "/settings/get": data = handleSettingsGet(payload, token); break;
+      case "/settings/set": data = handleSettingsSet(payload, token); break;
+      case "/category/create": data = handleCategoryCreate(payload, token); break;
+      case "/category/update": data = handleCategoryUpdate(payload, token); break;
+      case "/maintenance": data = handleMaintenance(payload, token); break;
       default:
         throw apiError(404, "Неизвестный эндпоинт: " + endpoint);
     }
@@ -687,11 +737,12 @@ function handleAuthLogin(payload) {
   var pinOk = staffRow && String(staffRow.pin_hash) === pinHash && isTruthyCell(staffRow.active);
   if (!pinOk) {
     if (staffRow) {
+      var limits = getSettings();
       var attempts = Number(staffRow.failed_attempts || 0) + 1;
-      if (attempts >= MAX_LOGIN_ATTEMPTS) {
+      if (attempts >= limits.max_login_attempts) {
         updateRow(sheet, staffRow.__row, {
           failed_attempts: 0,
-          locked_until: new Date(Date.now() + LOGIN_LOCK_MS).toISOString(),
+          locked_until: new Date(Date.now() + limits.login_lock_minutes * 60 * 1000).toISOString(),
         });
       } else {
         updateRow(sheet, staffRow.__row, { failed_attempts: attempts });
@@ -707,7 +758,16 @@ function handleAuthLogin(payload) {
     failed_attempts: 0,
     locked_until: "",
   });
-  return { token: token, staff_id: staffRow.staff_id, full_name: staffRow.full_name, role: staffRow.role };
+  // Настройки и категории отдаём сразу здесь: бэкенд отвечает 5–8 секунд, и
+  // отдельный запрос за ними на каждом экране стоил бы этих секунд заново.
+  return {
+    token: token,
+    staff_id: staffRow.staff_id,
+    full_name: staffRow.full_name,
+    role: staffRow.role,
+    settings: getSettings(),
+    categories: categories(),
+  };
 }
 
 function handleItemLookup(payload) {
@@ -1099,6 +1159,131 @@ function handleStaffSetActive(payload, token) {
   return {};
 }
 
+// ---------------------------------------------------------------------
+// Настройки, категории и обслуживание — экран админки
+// ---------------------------------------------------------------------
+
+function handleSettingsGet(payload, token) {
+  checkAuth(token);
+  // Категории нужны любому вошедшему: без них не нарисовать ни каталог, ни
+  // фильтры. Правка — отдельным эндпоинтом и только администратору.
+  return {
+    settings: getSettings(),
+    categories: categories(),
+    limits: settingsHints(),
+    maintenance: {
+      journal_archived_at: metaGet("journal_archived_at") || "",
+      journal_trimmed_at: metaGet("journal_trimmed_at") || "",
+    },
+  };
+}
+
+function settingsHints() {
+  var out = {};
+  for (var key in SETTINGS_SPEC) out[key] = SETTINGS_SPEC[key].hint;
+  return out;
+}
+
+function handleSettingsSet(payload, token) {
+  requireAdmin(token);
+  var incoming = payload.settings || {};
+  var saved = {}, rejected = [];
+  for (var key in incoming) {
+    var spec = SETTINGS_SPEC[key];
+    if (!spec) { rejected.push(key + ": неизвестная настройка"); continue; }
+    var value = spec.text ? String(incoming[key]).trim() : Number(incoming[key]);
+    if (!spec.text && !isFinite(value)) { rejected.push(key + ": нужно число"); continue; }
+    if (!spec.check(value)) { rejected.push(key + ": " + spec.hint); continue; }
+    metaSet("setting_" + key, value);
+    saved[key] = value;
+  }
+  // Отказ не тихий: иначе человек поменял бы значение, увидел «сохранено» и
+  // получил старое поведение.
+  if (rejected.length) throw apiError(400, "Не сохранено — " + rejected.join("; "));
+  return { settings: getSettings(), saved: saved };
+}
+
+// Сколько позиций уже собрано по этой категории. От этого зависит, можно ли
+// менять её номер: номер вшит в номер предмета и уехал на этикетки.
+function categoryUsage(code) {
+  var num = categoryNum(code);
+  return readRows(getSheet(SHEETS.EQUIPMENT)).filter(function (r) {
+    return r.category === code || String(r.item_id).slice(0, 2) === num;
+  }).length;
+}
+
+function handleCategoryCreate(payload, token) {
+  requireAdmin(token);
+  var code = String(payload.code || "").trim().toUpperCase();
+  var label = String(payload.label || "").trim();
+  if (!/^[A-Z]{3}$/.test(code)) throw apiError(400, "Код категории — три латинские буквы, например BAT");
+  if (!label) throw apiError(400, "Укажите название категории");
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var existing = categories();
+    if (existing.some(function (c) { return c.code === code; })) {
+      throw apiError(409, "Категория с таким кодом уже есть");
+    }
+    // Номер выдаём сами, следующий свободный: заданный руками номер рано или
+    // поздно совпал бы с чужим, а это два предмета с одинаковым номером.
+    var maxNum = existing.reduce(function (m, c) { return Math.max(m, Number(c.num)); }, 0);
+    if (maxNum >= 99) throw apiError(409, "Свободных номеров категорий больше нет (предел 99)");
+    var num = pad2(maxNum + 1);
+
+    appendRow(getSheet(SHEETS.CATEGORIES), {
+      code: code, num: num, label: label, created_at: new Date().toISOString(),
+    });
+    return { code: code, num: num, label: label };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleCategoryUpdate(payload, token) {
+  requireAdmin(token);
+  var code = String(payload.code || "").trim().toUpperCase();
+  var sheet = getSheet(SHEETS.CATEGORIES);
+  var row = findRowByValue(sheet, "code", code);
+  if (!row) throw apiError(404, "Категория не найдена");
+
+  var patch = {};
+  if (payload.label !== undefined) {
+    var label = String(payload.label).trim();
+    if (!label) throw apiError(400, "Название не может быть пустым");
+    patch.label = label;   // название только для людей, меняется свободно
+  }
+
+  if (payload.num !== undefined && pad2(Number(payload.num)) !== pad2(Number(row.num))) {
+    var used = categoryUsage(code);
+    if (used) {
+      throw apiError(409, "В категории уже " + used + " позиций. Номер вшит в их " +
+        "номера и напечатан на этикетках — сменить его нельзя. Название менять можно.");
+    }
+    var wanted = pad2(Number(payload.num));
+    if (!/^\d{2}$/.test(wanted) || Number(wanted) < 1) throw apiError(400, "Номер категории — две цифры от 01 до 99");
+    if (categories().some(function (c) { return c.code !== code && c.num === wanted; })) {
+      throw apiError(409, "Этот номер уже занят другой категорией");
+    }
+    patch.num = wanted;
+  }
+
+  if (!Object.keys(patch).length) return { code: code, changed: false };
+  updateRow(sheet, row.__row, patch);
+  return { code: code, changed: true };
+}
+
+// Обслуживание из приложения: те же функции, что в редакторе Apps Script.
+// Нужны потому, что с телефона открывать редактор и жать «Run» мучительно.
+function handleMaintenance(payload, token) {
+  requireAdmin(token);
+  var action = String(payload.action || "");
+  if (action === "archive") return { message: archiveJournal() };
+  if (action === "trim") return { message: trimJournal() };
+  throw apiError(400, "Неизвестное действие обслуживания");
+}
+
 // Полное удаление сотрудника. История при этом не страдает: в журнале рядом с
 // номером лежит имя, поэтому «кто выдавал» читается и после удаления строки.
 function handleStaffDelete(payload, token) {
@@ -1282,6 +1467,93 @@ function maxIdIn(sheet, column) {
   }, 0);
 }
 
+// ---------------------------------------------------------------------
+// Справочник категорий и настройки
+// ---------------------------------------------------------------------
+
+// Категории читаем из листа Categories. Если лист пуст или побит — берём
+// умолчания из константы: собрать номер предмета по сломанному справочнику
+// хуже, чем собрать его по заведомо верному умолчанию.
+function categories() {
+  var rows = [];
+  try {
+    rows = readRows(getSheet(SHEETS.CATEGORIES));
+  } catch (e) {
+    rows = [];
+  }
+  var seen = {}, nums = {}, clean = [];
+  rows.forEach(function (r) {
+    var code = String(r.code || "").trim();
+    var num = pad2(Number(r.num));
+    if (!code || !/^\d{2}$/.test(num)) return;
+    // Дубли кода или номера — это сломанный справочник: два предмета получили
+    // бы один номер. Такую строку пропускаем.
+    if (seen[code] || nums[num]) return;
+    seen[code] = true;
+    nums[num] = true;
+    clean.push({ code: code, num: num, label: String(r.label || code).trim() || code });
+  });
+  if (clean.length) return clean;
+
+  var fallback = [];
+  for (var code in CATEGORY_CODES) {
+    fallback.push({ code: code, num: CATEGORY_CODES[code], label: CATEGORY_LABELS[code] || code });
+  }
+  return fallback;
+}
+
+function categoryNum(code) {
+  var found = categories().filter(function (c) { return c.code === code; })[0];
+  if (found) return found.num;
+  var other = categories().filter(function (c) { return c.code === "OTH"; })[0];
+  return other ? other.num : "06";
+}
+
+// Настройки: описаны в одном месте — имя, умолчание и проверка. Живут в Meta,
+// правятся из админки. Проверка нужна, чтобы «0 попыток до блокировки» или
+// отрицательный срок сессии нельзя было сохранить и запереть себя снаружи.
+var SETTINGS_SPEC = {
+  session_ttl_hours: {
+    def: SESSION_TTL_MS / 3600000,
+    check: function (v) { return v >= 1 && v <= 720; },
+    hint: "от 1 часа до 30 суток",
+  },
+  max_login_attempts: {
+    def: MAX_LOGIN_ATTEMPTS,
+    check: function (v) { return v >= 3 && v <= 20; },
+    hint: "от 3 до 20 попыток",
+  },
+  login_lock_minutes: {
+    def: LOGIN_LOCK_MS / 60000,
+    check: function (v) { return v >= 1 && v <= 1440; },
+    hint: "от 1 минуты до суток",
+  },
+  import_source_id: {
+    def: IMPORT_SOURCE_ID,
+    text: true,
+    check: function (v) { return v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v); },
+    hint: "идентификатор таблицы Google (из её адреса) или пусто",
+  },
+};
+
+function getSettings() {
+  var out = {};
+  for (var key in SETTINGS_SPEC) {
+    var spec = SETTINGS_SPEC[key];
+    var raw = metaGet("setting_" + key);
+    if (raw === "" || raw === null || raw === undefined) {
+      out[key] = spec.def;
+      continue;
+    }
+    out[key] = spec.text ? String(raw) : Number(raw);
+    if (!spec.text && !isFinite(out[key])) out[key] = spec.def;
+  }
+  return out;
+}
+
+function sessionTtlMs() { return getSettings().session_ttl_hours * 60 * 60 * 1000; }
+function importSourceId() { return getSettings().import_source_id || IMPORT_SOURCE_ID; }
+
 // Лист Meta — хранилище «ключ: значение» для счётчиков и отметок.
 function metaGet(key) {
   var row = findRowByValue(getSheet(SHEETS.META), "key", key);
@@ -1315,7 +1587,7 @@ function nextId(key, minimum) {
 //   ZZ — порядковый номер экземпляра этой модели.
 // Например 010201 = камера (01), модель Canon C70 (02), экземпляр первый (01).
 function buildItemId(category, modelCode, unitNumber) {
-  var cat = CATEGORY_CODES[category] || CATEGORY_CODES.OTH;
+  var cat = categoryNum(category);
   return cat + pad2(modelCode) + pad2(unitNumber);
 }
 
@@ -1360,7 +1632,7 @@ function nextModelCode(category) {
 // списанная единица не отдаёт свой номер следующей, иначе старая этикетка
 // однажды указала бы на другую вещь.
 function nextUnitNumber(category, modelCode) {
-  var key = "unit_" + CATEGORY_CODES[category] + pad2(modelCode);
+  var key = "unit_" + categoryNum(category) + pad2(modelCode);
   var value = nextId(key);
   if (value > 99) {
     throw apiError(409, "У этой модели исчерпаны номера экземпляров (99). Заведите её как отдельную модель.");
@@ -1414,7 +1686,7 @@ function checkAuth(token) {
   var staffRow = findRowByValue(getSheet(SHEETS.STAFF), "session_token", token);
   if (!staffRow || !staffRow.session_token) throw apiError(401, "Сессия недействительна, войдите заново");
   var issuedAt = new Date(staffRow.token_issued_at).getTime();
-  if (!issuedAt || Date.now() - issuedAt > SESSION_TTL_MS) {
+  if (!issuedAt || Date.now() - issuedAt > sessionTtlMs()) {
     throw apiError(401, "Сессия истекла, войдите заново");
   }
   return staffRow;

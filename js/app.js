@@ -10,8 +10,9 @@
       document.getElementById("home-user").textContent = session
         ? `${session.full_name} · ${session.role === "Admin" ? "Администратор" : "Сотрудник склада"}`
         : "";
-      document.getElementById("home-staff-card").style.display =
-        session && session.role === "Admin" ? "block" : "none";
+      const isAdmin = !!session && session.role === "Admin";
+      document.getElementById("home-staff-card").style.display = isAdmin ? "block" : "none";
+      document.getElementById("home-settings-card").style.display = isAdmin ? "block" : "none";
     },
   });
 
@@ -30,6 +31,7 @@
   ClientsScreen.init();
   StaffScreen.init();
   PinScreen.init();
+  SettingsScreen.init();
 
   const session = Auth.requireAuth();
   if (session) Router.reset("home");
