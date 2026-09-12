@@ -112,6 +112,7 @@ class FakeSheet {
     this.maxRows = Math.max(this.maxRows, afterRow + howMany);
     for (let r = afterRow + 1; r <= afterRow + howMany; r++) this._dropFormats(r);
   }
+  deleteRow(row) { this.deleteRows(row, 1); }
   deleteRows(start, howMany) {
     // Настоящий Sheets отказывается оставить лист без незакреплённых строк
     if (this.maxRows - howMany < this.frozen + 1) {
@@ -193,6 +194,33 @@ global.ContentService = {
     return { _text: text, setMimeType() { return this; }, getContent() { return this._text; } };
   },
 };
+
+// Диск: папки и файлы держим в памяти — проверяем, что выгрузка реально
+// создаёт файл с нужным числом строк, а не только рапортует об успехе.
+const drive = { folders: {} };
+function fakeFolder(name) {
+  if (!drive.folders[name]) drive.folders[name] = { name, files: [] };
+  const folder = drive.folders[name];
+  return {
+    createFile(fileName, content) {
+      const file = { name: fileName, content, id: 'file-' + (folder.files.length + 1) };
+      folder.files.push(file);
+      return { getId: () => file.id, getName: () => file.name };
+    },
+  };
+}
+global.DriveApp = {
+  getFoldersByName(name) {
+    const exists = !!drive.folders[name];
+    let taken = false;
+    return {
+      hasNext: () => exists && !taken,
+      next: () => { taken = true; return fakeFolder(name); },
+    };
+  },
+  createFolder: (name) => fakeFolder(name),
+};
+global.MimeType = { CSV: 'text/csv' };
 
 // Загружаем настоящий Code.gs в глобальную область
 const code = fs.readFileSync(require('path').join(__dirname, 'Code.gs'), 'utf8');
@@ -606,6 +634,69 @@ r = call('/auth/login', { login: 'petr', pin: '7777' });
 check('когда блокировка истекла, вход снова работает', r.ok === true, r);
 check('счётчик промахов обнулён удачным входом', Number(petrRow().failed_attempts || 0) === 0,
   petrRow().failed_attempts);
+
+console.log('\n== удаление сотрудника ==');
+// Удаляем полностью, но история не должна обезличиться: в журнале рядом с
+// номером лежит имя, иначе после удаления строки было бы не прочитать, кто
+// выдавал технику.
+const delItem = call('/item/create', { name: 'Aputure 300x', category: 'LGT' }, token).data.item_id;
+const victim = call('/staff/create',
+  { full_name: 'Игорь Уволенный', login: 'igor', pin: '1212', role: 'Warehouse Staff' }, token).data;
+const victimToken = call('/auth/login', { login: 'igor', pin: '1212' }).data.token;
+call('/transaction/checkout', { item_id: delItem, client_id: clientId }, victimToken);
+call('/transaction/checkin', { item_id: delItem, has_defect: true,
+  defect_description: 'Скол на корпусе', defect_severity: 'Minor' }, victimToken);
+
+check('в журнале выдач сохранилось имя сотрудника',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).some(t => t.staff_out_name === 'Игорь Уволенный'),
+  readRows(getSheet(SHEETS.TRANSACTIONS)).map(t => t.staff_out_name));
+check('в журнале дефектов сохранилось имя сотрудника',
+  readRows(getSheet(SHEETS.DEFECTS)).some(d => d.reported_by_name === 'Игорь Уволенный'));
+
+check('сотрудник склада не может удалять сотрудников',
+  call('/staff/delete', { staff_id: victim.staff_id }, victimToken).status === 403);
+check('себя удалить нельзя', call('/staff/delete', { staff_id: 1 }, token).status === 409,
+  call('/staff/delete', { staff_id: 1 }, token));
+r = call('/staff/delete', { staff_id: victim.staff_id }, token);
+check('администратор удалил сотрудника', r.ok === true, r);
+check('сотрудник исчез из списка',
+  call('/staff/list', {}, token).data.every(x => x.staff_id !== victim.staff_id));
+check('войти под удалённым нельзя', call('/auth/login', { login: 'igor', pin: '1212' }).status === 401);
+check('история после удаления по-прежнему называет имя, а не номер',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).some(t => t.staff_out_name === 'Игорь Уволенный'));
+
+console.log('\n== выгрузка журнала и подрезка ==');
+// Подрезать таблицу без выгрузки нельзя: данные потерялись бы безвозвратно.
+r = trimJournal();
+check('подрезка без выгрузки отклонена', /отменена/.test(r), r);
+const txBefore = readRows(getSheet(SHEETS.TRANSACTIONS)).length;
+check('в журнале есть записи для выгрузки', txBefore > 0, txBefore);
+
+r = archiveJournal();
+check('выгрузка прошла', /выгружен/.test(r), r);
+check('файл появился в папке архива',
+  (drive.folders['Mifs Rent — архив'] || { files: [] }).files.length > 0,
+  Object.keys(drive.folders));
+const csv = drive.folders['Mifs Rent — архив'].files[0].content;
+check('в файле есть заголовок и строки', csv.split('\n').length === txBefore + 1,
+  [csv.split('\n').length, txBefore + 1]);
+check('имя сотрудника попало в выгрузку', csv.indexOf('Игорь Уволенный') !== -1);
+
+// оставляем одну открытую выдачу — подрезка не должна её тронуть
+const keepItem = call('/item/create', { name: 'Godox VL300', category: 'LGT' }, token).data.item_id;
+call('/transaction/checkout', { item_id: keepItem, client_id: clientId }, token);
+const openBefore = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(t => t.status === 'Open').length;
+r = trimJournal();
+check('подрезка после выгрузки прошла', /подрезан/.test(r), r);
+const txAfter = readRows(getSheet(SHEETS.TRANSACTIONS));
+check('закрытые выдачи удалены', txAfter.every(t => t.status !== 'Closed'),
+  txAfter.map(t => t.status));
+check('открытая выдача осталась на месте',
+  txAfter.filter(t => t.status === 'Open').length === openBefore, txAfter.length);
+check('устранённые дефекты удалены',
+  readRows(getSheet(SHEETS.DEFECTS)).every(d => d.status !== 'Resolved'));
+r = trimJournal();
+check('повторная подрезка снова требует выгрузки', /отменена/.test(r), r);
 
 console.log('\n== самозагрузка первого администратора закрыта навсегда ==');
 // Раньше защита держалась на «в Staff есть строки»: почистив лист, кто угодно

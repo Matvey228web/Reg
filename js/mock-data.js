@@ -406,6 +406,22 @@ const MockAPI = {
         return { staff_id };
       }
 
+      case "/staff/delete": {
+        const me = MockStore.findStaffById(MockStore.requireAdmin(token).staff_id);
+        const target = MockStore.staff.find((x) => String(x.staff_id) === String(body.staff_id));
+        if (!target) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (String(target.staff_id) === String(me.staff_id)) {
+          const e = new Error("Нельзя удалить самого себя"); e.status = 409; throw e;
+        }
+        if (target.role === "Admin" &&
+            MockStore.staff.filter((x) => x.role === "Admin" && x.active).length <= 1) {
+          const e = new Error("Это последний администратор, удалить нельзя"); e.status = 409; throw e;
+        }
+        MockStore.rotateToken(target.staff_id, false);
+        MockStore.staff.splice(MockStore.staff.indexOf(target), 1);
+        return { staff_id: target.staff_id, full_name: target.full_name };
+      }
+
       case "/staff/set-pin": {
         const staff_id = MockStore.requireToken(token);
         const me = MockStore.staff.find((x) => x.staff_id === staff_id);

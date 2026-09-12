@@ -41,8 +41,8 @@ var SCHEMA = {
   Models: ["category", "model_code", "model_name", "created_at"],
   Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at", "failed_attempts", "locked_until"],
   Clients: ["client_id", "client_name", "project_name", "phone", "notes", "created_at"],
-  Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_in", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
-  Defects: ["defect_id", "item_id", "reported_by", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
+  Transactions: ["transaction_id", "item_id", "client_id", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes"],
+  Defects: ["defect_id", "item_id", "reported_by", "reported_by_name", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
   Meta: ["key", "value"],
 };
 
@@ -420,6 +420,106 @@ function reimportInventory() {
   return message;
 }
 
+// ---------------------------------------------------------------------
+// Архив журнала: выгрузка в файл и подрезка таблицы
+// ---------------------------------------------------------------------
+
+var ARCHIVE_FOLDER_NAME = "Mifs Rent — архив";
+
+/**
+ * Выгружает журнал (Transactions и Defects) в CSV-файлы на Google Диск.
+ * Запускать перед подрезкой таблицы: без выгрузки подрезка откажется работать.
+ * Ничего не удаляет — только сохраняет.
+ */
+function archiveJournal() {
+  var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  var folders = DriveApp.getFoldersByName(ARCHIVE_FOLDER_NAME);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(ARCHIVE_FOLDER_NAME);
+
+  var saved = [];
+  [SHEETS.TRANSACTIONS, SHEETS.DEFECTS].forEach(function (name) {
+    var sheet = getSheet(name);
+    var values = sheet.getDataRange().getValues();
+    if (values.length < 2) return; // только заголовок — выгружать нечего
+    var csv = values.map(function (row) {
+      return row.map(csvCell).join(",");
+    }).join("\n");
+    var file = folder.createFile(name + "-" + stamp + ".csv", csv, MimeType.CSV);
+    saved.push({ sheet: name, rows: values.length - 1, fileId: file.getId(), name: file.getName() });
+  });
+
+  // Отметку читает trimJournal: подрезать можно только то, что уже выгружено.
+  metaSet("journal_archived_at", new Date().toISOString());
+  metaSet("journal_archived_rows", saved.reduce(function (n, s) { return n + s.rows; }, 0));
+
+  var message = saved.length
+    ? "Журнал выгружен в папку «" + ARCHIVE_FOLDER_NAME + "»: " +
+      saved.map(function (s) { return s.name + " (" + s.rows + " строк)"; }).join(", ")
+    : "Журнал пуст, выгружать нечего.";
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
+function csvCell(value) {
+  var text = value === null || value === undefined ? "" : String(value);
+  // Кавычки, запятые и переводы строк ломают CSV, если не заэкранировать
+  return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+/**
+ * Подрезает журнал: удаляет завершённые записи, оставляя работу в процессе.
+ * Работает только после успешной выгрузки — иначе данные просто потерялись бы.
+ * Незакрытые выдачи и неустранённые дефекты не трогает никогда.
+ */
+function trimJournal() {
+  var archivedAt = metaGet("journal_archived_at");
+  if (!archivedAt) {
+    var refuse = "Подрезка отменена: журнал ни разу не выгружался. " +
+      "Сначала запустите archiveJournal(), иначе данные будут потеряны безвозвратно.";
+    Logger.log(refuse);
+    try { SpreadsheetApp.getActiveSpreadsheet().toast(refuse, "Mifs Rent", 15); } catch (ignored) {}
+    return refuse;
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  var removed = { Transactions: 0, Defects: 0 };
+  try {
+    // Транзакции: удаляем только закрытые. Открытая выдача — техника на руках.
+    removed.Transactions = trimSheetRows(getSheet(SHEETS.TRANSACTIONS), function (row) {
+      return row.status === "Closed";
+    });
+    // Дефекты: удаляем только устранённые.
+    removed.Defects = trimSheetRows(getSheet(SHEETS.DEFECTS), function (row) {
+      return row.status === "Resolved";
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  // Отметку снимаем: следующая подрезка потребует новой выгрузки.
+  metaSet("journal_archived_at", "");
+  metaSet("journal_trimmed_at", new Date().toISOString());
+
+  var message = "Журнал подрезан. Удалено: выдач " + removed.Transactions +
+    ", дефектов " + removed.Defects + ". Незакрытые записи оставлены на месте. " +
+    "Для следующей подрезки нужна новая выгрузка.";
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
+// Удаляет строки, подходящие под условие, снизу вверх — иначе номера строк
+// съезжают по ходу удаления и удаляется не то, что выбрали.
+function trimSheetRows(sheet, shouldRemove) {
+  var rows = readRows(sheet);
+  var doomed = rows.filter(shouldRemove).map(function (r) { return r.__row; });
+  doomed.sort(function (a, b) { return b - a; });
+  doomed.forEach(function (rowIndex) { sheet.deleteRow(rowIndex); });
+  return doomed.length;
+}
+
 function importTrim(v) {
   return v === null || v === undefined ? "" : String(v).trim();
 }
@@ -539,6 +639,7 @@ function doPost(e) {
       case "/staff/list": data = handleStaffList(payload, token); break;
       case "/staff/set-active": data = handleStaffSetActive(payload, token); break;
       case "/staff/set-pin": data = handleStaffSetPin(payload, token); break;
+      case "/staff/delete": data = handleStaffDelete(payload, token); break;
       default:
         throw apiError(404, "Неизвестный эндпоинт: " + endpoint);
     }
@@ -706,7 +807,9 @@ function handleTransactionCheckout(payload, token) {
       item_id: itemId,
       client_id: payload.client_id,
       staff_out: staffRow.staff_id,
+      staff_out_name: staffRow.full_name,
       staff_in: "",
+      staff_in_name: "",
       checked_out_at: new Date().toISOString(),
       expected_return_at: payload.expected_return_at || "",
       checked_in_at: "",
@@ -742,6 +845,7 @@ function handleTransactionCheckin(payload, token) {
       status: "Closed",
       checked_in_at: new Date().toISOString(),
       staff_in: staffRow.staff_id,
+      staff_in_name: staffRow.full_name,
     });
 
     var defectId = null;
@@ -752,6 +856,7 @@ function handleTransactionCheckin(payload, token) {
         defect_id: defectId,
         item_id: itemId,
         reported_by: staffRow.staff_id,
+        reported_by_name: staffRow.full_name,
         related_transaction_id: openTx.transaction_id,
         description: payload.defect_description || "",
         severity: payload.defect_severity || "Minor",
@@ -794,6 +899,7 @@ function handleDefectReport(payload, token) {
       defect_id: defectId,
       item_id: itemId,
       reported_by: staffRow.staff_id,
+      reported_by_name: staffRow.full_name,
       related_transaction_id: "",
       description: payload.description || "",
       severity: severity,
@@ -991,6 +1097,29 @@ function handleStaffSetActive(payload, token) {
   if (!staffRow) throw apiError(404, "Сотрудник не найден");
   updateRow(sheet, staffRow.__row, { active: !!payload.active });
   return {};
+}
+
+// Полное удаление сотрудника. История при этом не страдает: в журнале рядом с
+// номером лежит имя, поэтому «кто выдавал» читается и после удаления строки.
+function handleStaffDelete(payload, token) {
+  var me = requireAdmin(token);
+  var sheet = getSheet(SHEETS.STAFF);
+  var target = findRowByValue(sheet, "staff_id", payload.staff_id);
+  if (!target) throw apiError(404, "Сотрудник не найден");
+
+  if (String(target.staff_id) === String(me.staff_id)) {
+    throw apiError(409, "Нельзя удалить самого себя");
+  }
+  // Иначе в систему стало бы невозможно войти как администратор.
+  if (target.role === "Admin") {
+    var admins = readRows(sheet).filter(function (r) {
+      return r.role === "Admin" && isTruthyCell(r.active);
+    });
+    if (admins.length <= 1) throw apiError(409, "Это последний администратор, удалить нельзя");
+  }
+
+  sheet.deleteRow(target.__row);
+  return { staff_id: target.staff_id, full_name: target.full_name };
 }
 
 // Смена PIN. Себе — с подтверждением текущего PIN (чтобы чужой человек не сменил

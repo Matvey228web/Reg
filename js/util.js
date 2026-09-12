@@ -41,3 +41,11 @@ function showBoxError(elementId, message) {
   if (!el) return;
   el.innerHTML = message ? `<div class="error-box">${escapeHtml(message)}</div>` : "";
 }
+
+// Заглушки в форме будущих карточек вместо надписи «Загрузка…»: видно, что
+// именно грузится, и экран не прыгает, когда данные приходят.
+function skeleton(count = 4) {
+  return `<div class="skeleton">` +
+    `<div class="skeleton-card"></div>`.repeat(count) +
+    `</div>`;
+}

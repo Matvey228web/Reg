@@ -11,6 +11,13 @@
   --warning: #f08c00;
   --success: #2f9e44;
   --radius: 12px;
+
+  /* Запас сверху под шапку Telegram («Закрыть», стрелка, «…») — она висит НАД
+     содержимым, и без запаса заголовок экрана оказывается под ней. Значения
+     приходят из SDK (js/telegram.js), здесь — на случай, если их нет. */
+  --safe-top: 56px;
+  --safe-bottom: 0px;
+  --gutter: 18px;
 }
 
 * { box-sizing: border-box; }
@@ -24,9 +31,15 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-#app { min-height: 100%; padding-bottom: 80px; }
+/* Запас под шапку Telegram даём один раз здесь, а не на каждом экране: иначе
+   он складывался бы с отступом кнопки «назад» и содержимое уезжало бы вниз. */
+#app {
+  min-height: 100%;
+  padding-top: var(--safe-top);
+  padding-bottom: calc(80px + var(--safe-bottom));
+}
 
-.screen { display: none; padding: 16px; }
+.screen { display: none; padding: var(--gutter); }
 .screen--active { display: block; }
 
 h1 { font-size: 20px; margin: 4px 0 16px; }
@@ -138,7 +151,7 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
 
 
 /* Кнопка «назад» внутри страницы — не зависит от версии Telegram */
-.back-row { padding: 12px 16px 0; }
+.back-row { padding: 8px var(--gutter) 0; }
 .back-btn {
   border: none;
   background: var(--tg-secondary-bg-color);
@@ -177,3 +190,74 @@ p.hint { color: var(--tg-hint-color); font-size: 14px; margin: 4px 0 16px; }
 }
 .tab-ico { font-size: 20px; line-height: 1; }
 .tab--active { color: var(--tg-link-color); font-weight: 600; }
+
+/* Кнопка, которая не должна уезжать при прокрутке длинного списка */
+.btn--sticky {
+  position: sticky;
+  top: calc(var(--safe-top) + 4px);
+  z-index: 20;
+  margin-top: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+/* Скелетон загрузки: плашки в форме будущих карточек с бегущим блеском.
+   Без гифки — файл не нужен, и цвета сами следуют теме Telegram. */
+.skeleton { display: block; }
+.skeleton-card {
+  height: 64px;
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  background: linear-gradient(90deg,
+    var(--tg-secondary-bg-color) 25%,
+    rgba(128, 128, 128, 0.18) 37%,
+    var(--tg-secondary-bg-color) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shine 1.3s ease-in-out infinite;
+}
+@keyframes skeleton-shine {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-card { animation: none; }
+}
+
+/* Свайп влево по строке открывает действие под ней */
+.swipe {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+.swipe-body {
+  position: relative;
+  z-index: 2;
+  background: var(--tg-bg-color);
+  transition: transform 0.18s ease;
+  will-change: transform;
+  /* Вертикальные жесты остаются браузеру и Telegram (прокрутка списка и
+     закрытие приложения свайпом вниз), горизонтальные забираем себе. */
+  touch-action: pan-y;
+}
+.swipe-body .card { margin-bottom: 0; }
+.swipe--dragging .swipe-body { transition: none; }
+.swipe-action {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 88px;
+  z-index: 1;
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.swipe-action-ico { font-size: 20px; line-height: 1; }
+.pin-reset-form { margin-top: 10px; }

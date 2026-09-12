@@ -1,7 +1,49 @@
-// Экран "Каталог": список оборудования с фильтрами + форма добавления нового предмета с QR.
+// Экран "Каталог": список оборудования с фильтрами и поиском + форма добавления
+// нового предмета с QR.
+//
+// Про скорость. Бэкенд на Apps Script отвечает 5–8 секунд — это его потолок, а
+// не наш код (замерено). Поэтому каталог держится в localStorage: экран
+// рисуется мгновенно из кэша, свежие данные подтягиваются в фоне, а поиск и
+// фильтры работают локально и не ждут сервер вообще.
 
 const CatalogScreen = (() => {
+  const CACHE_KEY = "mifs_catalog_cache_v1";
+  const PAGE_SIZE = 50;
+
   let currentFilters = { category: "all", status: "all" };
+  let allItems = [];      // весь каталог, как пришёл с сервера
+  let shown = 0;          // сколько карточек уже отрисовано
+  let searchQuery = "";
+  let searchTimer = null;
+
+  function readCache() {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && Array.isArray(parsed.items) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeCache(items) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ items, saved_at: Date.now() }));
+    } catch {
+      // переполнение хранилища не должно ломать экран
+    }
+  }
+
+  // Точечное обновление кэша после выдачи, приёма или дефекта — чтобы не
+  // перезапрашивать весь каталог из-за одной изменившейся позиции.
+  function patchCached(itemId, patch) {
+    const cache = readCache();
+    if (!cache) return;
+    const idx = cache.items.findIndex((i) => String(i.item_id) === String(itemId));
+    if (idx === -1) return;
+    cache.items[idx] = { ...cache.items[idx], ...patch };
+    writeCache(cache.items);
+  }
 
   function populateSelects() {
     const catSel = document.getElementById("catalog-filter-category");
@@ -45,26 +87,88 @@ const CatalogScreen = (() => {
     document.getElementById("new-model-wrap").style.display = isNew ? "block" : "none";
   }
 
-  async function loadList() {
+  function matches(item) {
+    if (currentFilters.category !== "all" && item.category !== currentFilters.category) return false;
+    if (currentFilters.status !== "all" && item.status !== currentFilters.status) return false;
+    if (!searchQuery) return true;
+    const haystack = [item.name, item.item_id, item.serial_number, item.inventory_number]
+      .filter(Boolean).join(" ").toLowerCase();
+    return haystack.indexOf(searchQuery) !== -1;
+  }
+
+  function cardHtml(item) {
+    return `
+      <div class="card" data-item-id="${escapeHtml(item.item_id)}">
+        <div class="card-title">${escapeHtml(item.name)} ${statusBadge(item.status)}</div>
+        <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}${item.inventory_number ? " · инв. " + escapeHtml(item.inventory_number) : ""}</div>
+      </div>`;
+  }
+
+  function bindCards(container) {
+    container.querySelectorAll("[data-item-id]").forEach((el) => {
+      if (el.dataset.bound) return;
+      el.dataset.bound = "1";
+      el.addEventListener("click", () => Router.navigate("item", { itemId: el.dataset.itemId }));
+    });
+  }
+
+  // Рисуем порциями: 628 карточек разом создавать незачем, страница от этого
+  // только тормозит.
+  function render(reset = true) {
     const list = document.getElementById("catalog-list");
-    list.innerHTML = `<p class="empty">Загрузка…</p>`;
+    const more = document.getElementById("catalog-more");
+    const filtered = allItems.filter(matches);
+
+    if (reset) {
+      list.innerHTML = "";
+      shown = 0;
+    }
+    if (!filtered.length) {
+      list.innerHTML = `<p class="empty">Ничего не найдено</p>`;
+      more.innerHTML = "";
+      return;
+    }
+
+    const next = filtered.slice(shown, shown + PAGE_SIZE);
+    list.insertAdjacentHTML("beforeend", next.map(cardHtml).join(""));
+    shown += next.length;
+    bindCards(list);
+
+    more.innerHTML = shown < filtered.length
+      ? `<button class="btn btn--secondary" id="catalog-more-btn">Показать ещё (${filtered.length - shown})</button>`
+      : `<p class="hint">Показано ${filtered.length} из ${allItems.length}</p>`;
+    const btn = document.getElementById("catalog-more-btn");
+    if (btn) btn.addEventListener("click", () => render(false));
+  }
+
+  async function loadList({ useCache = true } = {}) {
+    const list = document.getElementById("catalog-list");
+    const cache = useCache ? readCache() : null;
+
+    if (cache && cache.items.length) {
+      allItems = cache.items;
+      render();
+    } else {
+      list.innerHTML = skeleton(5);
+      document.getElementById("catalog-more").innerHTML = "";
+    }
+
     try {
-      const items = await apiPost("/equipment/list", currentFilters);
-      if (!items.length) {
-        list.innerHTML = `<p class="empty">Ничего не найдено</p>`;
-        return;
-      }
-      list.innerHTML = items.map((item) => `
-        <div class="card" data-item-id="${escapeHtml(item.item_id)}">
-          <div class="card-title">${escapeHtml(item.name)} ${statusBadge(item.status)}</div>
-          <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}${item.inventory_number ? " · инв. " + escapeHtml(item.inventory_number) : ""}</div>
-        </div>
-      `).join("");
-      list.querySelectorAll("[data-item-id]").forEach((el) => {
-        el.addEventListener("click", () => Router.navigate("item", { itemId: el.dataset.itemId }));
-      });
+      // С сервера берём каталог целиком один раз, а фильтры применяем локально:
+      // при 5–8 с на запрос переспрашивать сервер на каждое переключение
+      // фильтра означало бы ждать по восемь секунд на каждый тап.
+      const items = await apiPost("/equipment/list", { category: "all", status: "all" });
+      allItems = items;
+      writeCache(items);
+      render();
     } catch (err) {
-      list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      if (!allItems.length) {
+        list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+        document.getElementById("catalog-more").innerHTML = "";
+      } else {
+        // кэш показан — не затираем его ошибкой, просто сообщаем
+        showBoxError("catalog-add-error", "Не удалось обновить список: " + err.message);
+      }
     }
   }
 
@@ -108,7 +212,7 @@ const CatalogScreen = (() => {
       renderQrResult(item_id, name);
       document.getElementById("catalog-add-form").style.display = "none";
       loadModels();
-      loadList();
+      loadList({ useCache: false });
     } catch (err) {
       TG.hapticError();
       showBoxError("catalog-add-error", err.message);
@@ -146,11 +250,20 @@ const CatalogScreen = (() => {
   function init() {
     document.getElementById("catalog-filter-category").addEventListener("change", (e) => {
       currentFilters.category = e.target.value;
-      loadList();
+      render();
     });
     document.getElementById("catalog-filter-status").addEventListener("change", (e) => {
       currentFilters.status = e.target.value;
-      loadList();
+      render();
+    });
+    document.getElementById("catalog-search").addEventListener("input", (e) => {
+      // небольшая пауза, чтобы не перерисовывать список на каждую букву
+      clearTimeout(searchTimer);
+      const value = e.target.value.trim().toLowerCase();
+      searchTimer = setTimeout(() => {
+        searchQuery = value;
+        render();
+      }, 120);
     });
     document.getElementById("catalog-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("catalog-add-form");
@@ -164,5 +277,5 @@ const CatalogScreen = (() => {
     Router.register("catalog", { onShow });
   }
 
-  return { init, loadList };
+  return { init, loadList, patchCached };
 })();

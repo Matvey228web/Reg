@@ -41,19 +41,10 @@
   <div class="screen" id="screen-home">
     <h1>Mifs Rent</h1>
     <div class="top-user" id="home-user"></div>
+
+    <!-- Разделы живут в нижней панели, дублировать их карточками здесь не нужно.
+         Главная — это кабинет: кто вошёл и что он может настроить. -->
     <div class="menu-grid">
-      <div class="card" data-nav="catalog">
-        <div class="card-title">📦 Каталог</div>
-      </div>
-      <div class="card" data-nav="scan">
-        <div class="card-title">📷 Сканировать</div>
-      </div>
-      <div class="card" data-nav="repair">
-        <div class="card-title">🛠 Ремонт</div>
-      </div>
-      <div class="card" data-nav="clients">
-        <div class="card-title">👥 Клиенты</div>
-      </div>
       <div class="card" data-nav="staff" id="home-staff-card" style="display:none;">
         <div class="card-title">🗝 Сотрудники</div>
       </div>
@@ -69,8 +60,13 @@
       <select id="catalog-filter-category"></select>
       <select id="catalog-filter-status"></select>
     </div>
-    <div id="catalog-list"></div>
-    <button class="btn btn--secondary" id="catalog-add-toggle" style="margin-top:6px;">+ Добавить оборудование</button>
+    <div class="field" id="catalog-search-wrap">
+      <input type="search" id="catalog-search" placeholder="Поиск по названию или номеру"
+             autocapitalize="off" autocorrect="off" spellcheck="false" />
+    </div>
+    <!-- Кнопка стоит ДО списка и липнет при прокрутке: раньше она была после
+         списка и на 628 карточках уезжала под них — найти её было невозможно. -->
+    <button class="btn btn--secondary btn--sticky" id="catalog-add-toggle">+ Добавить оборудование</button>
 
     <div id="catalog-add-form" style="display:none;" class="section">
       <h2>Новое оборудование</h2>
@@ -103,19 +99,21 @@
     </div>
 
     <div id="catalog-qr-result" class="section" style="display:none;"></div>
+    <div id="catalog-list"></div>
+    <div id="catalog-more"></div>
   </div>
 
   <!-- Экран: сканирование -->
   <div class="screen" id="screen-scan">
     <h1>Сканировать</h1>
-    <button class="btn" id="scan-start-btn">📷 Открыть сканер QR</button>
     <div id="scan-error"></div>
+    <div id="scan-result"></div>
+    <button class="btn btn--secondary" id="scan-start-btn">📷 Сканировать ещё раз</button>
     <div class="field" id="scan-manual-wrap">
-      <label for="scan-manual-input">Или введите ID вручную</label>
-      <input type="text" id="scan-manual-input" placeholder="100001" />
+      <label for="scan-manual-input">Или введите номер вручную</label>
+      <input type="text" id="scan-manual-input" inputmode="numeric" placeholder="010101" />
       <button class="btn btn--secondary" id="scan-manual-submit" style="margin-top:8px;">Найти</button>
     </div>
-    <div id="scan-result"></div>
   </div>
 
   <!-- Экран: карточка предмета -->
@@ -234,6 +232,7 @@
 <script src="js/telegram.js"></script>
 <script src="js/router.js"></script>
 <script src="js/qr.js"></script>
+<script src="js/swipe.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/catalog.js"></script>
 <script src="js/scan.js"></script>

@@ -6,11 +6,38 @@ const TG = (() => {
   const webApp = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 
   function init() {
-    if (!webApp) return;
+    if (!webApp) {
+      // Вне Telegram шапки нет — запас под неё только оставил бы пустую полосу
+      // сверху. Это же касается версии для компьютера.
+      document.documentElement.style.setProperty("--safe-top", "8px");
+      return;
+    }
     webApp.ready();
     webApp.expand();
     applyTheme();
+    applySafeArea();
     webApp.onEvent("themeChanged", applyTheme);
+    // Отступы меняются при развороте на весь экран и повороте устройства
+    ["safeAreaChanged", "contentSafeAreaChanged", "viewportChanged"].forEach(function (evt) {
+      try { webApp.onEvent(evt, applySafeArea); } catch (ignored) {}
+    });
+  }
+
+  // Шапка Telegram («Закрыть», стрелка, «…») висит НАД содержимым страницы.
+  // С Bot API 8.0 клиент сообщает безопасные отступы: contentSafeAreaInset —
+  // это как раз высота шапки, safeAreaInset — вырез и «шторка» устройства.
+  // Где клиент их не присылает, остаётся значение по умолчанию из CSS.
+  function applySafeArea() {
+    if (!webApp) return;
+    var root = document.documentElement.style;
+    var device = webApp.safeAreaInset || {};
+    var content = webApp.contentSafeAreaInset || {};
+    var top = Number(device.top || 0) + Number(content.top || 0);
+    var bottom = Number(device.bottom || 0) + Number(content.bottom || 0);
+    // Клиент присылает 0, пока не развернётся: тогда оставляем запас из CSS,
+    // иначе заголовок экрана снова окажется под шапкой.
+    if (top > 0) root.setProperty("--safe-top", top + 8 + "px");
+    root.setProperty("--safe-bottom", bottom + "px");
   }
 
   function applyTheme() {

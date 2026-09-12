@@ -1,27 +1,48 @@
 // Экран "Сотрудники" (только для Admin): список + переключатель активности + добавление.
 
 const StaffScreen = (() => {
+  // Свои данные нужны, чтобы не предлагать удалить самого себя.
+  function mySession() {
+    return Auth.getSession() || {};
+  }
+
   async function loadList() {
     const list = document.getElementById("staff-list");
-    list.innerHTML = `<p class="empty">Загрузка…</p>`;
+    list.innerHTML = skeleton(3);
     try {
       const staffList = await apiPost("/staff/list", {});
       if (!staffList.length) {
         list.innerHTML = `<p class="empty">Сотрудников пока нет</p>`;
         return;
       }
-      list.innerHTML = staffList.map((s) => `
-        <div class="card">
-          <div class="card-title">${escapeHtml(s.full_name)} ${s.active ? "" : '<span class="badge badge--retired">Отключён</span>'}</div>
-          <div class="card-sub">${escapeHtml(s.login)} · ${s.role === "Admin" ? "Администратор" : "Сотрудник склада"}</div>
-          <button class="btn btn--secondary" data-toggle-active="${s.staff_id}" data-active="${s.active}" style="margin-top:8px; width:auto;">
-            ${s.active ? "Отключить" : "Включить"}
-          </button>
-          <button class="btn btn--secondary" data-reset-pin="${s.staff_id}" data-name="${escapeHtml(s.full_name)}" style="margin-top:8px; width:auto;">
-            Сбросить PIN
-          </button>
-        </div>
-      `).join("");
+      list.innerHTML = "";
+      const me = mySession();
+      staffList.forEach((s) => {
+        const card = `
+          <div class="card">
+            <div class="card-title">${escapeHtml(s.full_name)} ${s.active ? "" : '<span class="badge badge--retired">Отключён</span>'}</div>
+            <div class="card-sub">${escapeHtml(s.login)} · ${s.role === "Admin" ? "Администратор" : "Сотрудник склада"}</div>
+            <button class="btn btn--secondary" data-toggle-active="${s.staff_id}" data-active="${s.active}" style="margin-top:8px; width:auto;">
+              ${s.active ? "Отключить" : "Включить"}
+            </button>
+            <button class="btn btn--secondary" data-reset-pin="${s.staff_id}" data-name="${escapeHtml(s.full_name)}" style="margin-top:8px; width:auto;">
+              Сбросить PIN
+            </button>
+          </div>`;
+
+        // Себя удалить нельзя — свайп для своей строки не навешиваем, чтобы не
+        // предлагать действие, которое сервер всё равно отклонит.
+        if (String(s.staff_id) === String(me.staff_id)) {
+          list.insertAdjacentHTML("beforeend", `<div class="swipe"><div class="swipe-body">${card}</div></div>`);
+        } else {
+          list.appendChild(Swipe.row(card, {
+            actionLabel: "Удалить",
+            actionIcon: "🗑",
+            onAction: ({ close }) => confirmDelete(s, close),
+          }));
+        }
+      });
+
       list.querySelectorAll("[data-toggle-active]").forEach((btn) => {
         btn.addEventListener("click", () => toggleActive(btn.dataset.toggleActive, btn.dataset.active !== "true"));
       });
@@ -31,6 +52,26 @@ const StaffScreen = (() => {
     } catch (err) {
       list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
     }
+  }
+
+  // Удаление необратимо, поэтому спрашиваем. История при этом не пострадает:
+  // в журнале рядом с номером сотрудника хранится его имя.
+  function confirmDelete(staff, closeSwipe) {
+    TG.showConfirm(
+      `Удалить ${staff.full_name}? Войти он больше не сможет. ` +
+      `Записи в журнале выдач останутся — там сохранено его имя.`,
+      async (yes) => {
+        if (!yes) { closeSwipe(); return; }
+        try {
+          await apiPost("/staff/delete", { staff_id: Number(staff.staff_id) });
+          TG.hapticSuccess();
+          loadList();
+        } catch (err) {
+          TG.hapticError();
+          closeSwipe();
+          TG.showAlert(err.message);
+        }
+      });
   }
 
   async function toggleActive(staffId, nextActive) {

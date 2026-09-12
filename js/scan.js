@@ -14,11 +14,14 @@ const ScanScreen = (() => {
     TG.mainButton.hide();
   }
 
-  async function startScan() {
+  // silent: при автозапуске не показываем ошибку «сканера нет» — в обычном
+  // браузере его и не должно быть, там работают ручной ввод и кнопка.
+  async function startScan(silent) {
     showBoxError("scan-error", "");
+    if (silent && !TG.hasScanQr()) return;
     QR.scan(async (code, error) => {
       if (error) {
-        showBoxError("scan-error", error);
+        if (!silent) showBoxError("scan-error", error);
         return;
       }
       if (!code) return;
@@ -28,10 +31,15 @@ const ScanScreen = (() => {
 
   async function lookup(itemId) {
     const result = document.getElementById("scan-result");
-    result.innerHTML = `<p class="empty">Ищем предмет…</p>`;
+    result.innerHTML = skeleton(2);
     try {
       const item = await apiPost("/item/lookup", { item_id: itemId });
       currentItem = item;
+      // Статус мог измениться — поправим его в кэше каталога, чтобы список не
+      // показывал устаревшее «Доступно» до следующего обновления.
+      if (typeof CatalogScreen !== "undefined" && CatalogScreen.patchCached) {
+        CatalogScreen.patchCached(item.item_id, { status: item.status });
+      }
       mode = item.status === "Available" ? "checkout" : item.status === "Rented" ? "checkin" : null;
       if (mode === "checkout") await loadClients();
       renderItem();
@@ -221,10 +229,13 @@ const ScanScreen = (() => {
 
   function onShow() {
     reset();
+    // Камера открывается сразу: на складе это главное действие, и лишний тап
+    // по кнопке здесь только мешал.
+    startScan(true);
   }
 
   function init() {
-    document.getElementById("scan-start-btn").addEventListener("click", startScan);
+    document.getElementById("scan-start-btn").addEventListener("click", () => startScan(false));
     document.getElementById("scan-manual-submit").addEventListener("click", async () => {
       const val = document.getElementById("scan-manual-input").value.trim();
       if (!val) return;
