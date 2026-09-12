@@ -393,9 +393,11 @@ check('строка-заголовок из одинаковых ячеек пр
 const cat = n => (byName(n)[0] || {}).category;
 check('категория камеры → CAM', cat('Canon C70') === 'CAM', cat('Canon C70'));
 check('категория объектива → LEN', cat('ЛОМО 35mm') === 'LEN', cat('ЛОМО 35mm'));
-check('категория штатива → GRP', cat('GreenBean HDV') === 'GRP', cat('GreenBean HDV'));
+check('категория штатива → SUP (поддержка, а не грип)', cat('GreenBean HDV') === 'SUP', cat('GreenBean HDV'));
 check('категория звука → AUD', cat('HOLLYLAND LARK MAX') === 'AUD', cat('HOLLYLAND LARK MAX'));
-check('категория света → LGT', cat('Чайнаболл') === 'LGT', cat('Чайнаболл'));
+// Чайнаболл — модификатор, а не осветитель: раньше он лежал в одной куче
+// со светом, и «Свет» разрастался до 203 позиций.
+check('чайнаболл → MOD, а не в общую кучу света', cat('Чайнаболл') === 'MOD', cat('Чайнаболл'));
 
 const st = s => imported.filter(r => r.status === s).length;
 check('«Не работает» / «Сломан» / «Разбит» → In Repair', st('In Repair') === 3, st('In Repair'));
@@ -412,7 +414,7 @@ check('item_id уникальны', new Set(imported.map(r => r.item_id)).size =
 check('все ID шестизначные', imported.every(r => /^\d{6}$/.test(String(r.item_id))),
   imported.map(r => r.item_id).slice(0, 5));
 check('одинаковые единицы делят код модели, различаясь хвостом',
-  byName('Чайнаболл').map(r => r.item_id).sort().join(',') === '030201,030202,030203',
+  byName('Чайнаболл').map(r => r.item_id).sort().join(',') === '090101,090102,090103',
   byName('Чайнаболл').map(r => r.item_id));
 // 3 модели завели тесты выше + 6 новых принёс импорт (Canon C70 переиспользован)
 check('импорт пополнил справочник моделей, не задвоив Canon C70',
@@ -637,7 +639,7 @@ check('счётчик промахов обнулён удачным входо�
 
 console.log('\n== справочник категорий живёт в таблице ==');
 const catSheet = getSheet(SHEETS.CATEGORIES);
-check('лист категорий засеян умолчаниями', readRows(catSheet).length === 7,
+check('лист категорий засеян умолчаниями', readRows(catSheet).length === 14,
   readRows(catSheet).map(c => c.code));
 check('номера категорий двузначные строки',
   readRows(catSheet).every(c => /^\d{2}$/.test(String(c.num))),
@@ -654,12 +656,41 @@ check('дубль номера отбрасывается, а не собира�
 catSheet.data = catBackup.map(r => r.slice());
 check('справочник восстановлен', categoryNum('CAM') === '01');
 
+// Справочник на живой таблице: раньше засев работал только на пустом листе,
+// поэтому новые категории на работающей таблице не появлялись вообще.
+const catRowsBefore = readRows(catSheet).length;
+const camNumBefore = categoryNum('CAM');
+trimSheetRows(catSheet, function (row) { return String(row.code) === 'MED'; });
+check('категория удалена из листа вручную', readRows(catSheet).length === catRowsBefore - 1);
+setupSheets();
+check('недостающая категория дописана миграцией',
+  readRows(catSheet).length === catRowsBefore &&
+  readRows(catSheet).some(function (c) { return String(c.code) === 'MED'; }),
+  readRows(catSheet).map(function (c) { return c.code; }));
+check('номера существующих категорий миграция не трогает', categoryNum('CAM') === camNumBefore);
+check('повторный запуск ничего не дублирует',
+  (setupSheets(), readRows(catSheet).length) === catRowsBefore, readRows(catSheet).length);
+
+// Категория берётся по названию. В примечаниях складские пишут «нужна клетка» и
+// «аккумулятор в комплекте» — по ним камера уезжала в обвес, а объектив в питание.
+check('камера остаётся камерой, даже если в примечании «нужна клетка»',
+  importCategory('', 'КИНО', 'Sony Burano 8k') === 'CAM');
+check('софтбокс Godox не считается осветителем',
+  importCategory('', 'СВЕТ', 'Godox SB-UFW120') === 'MOD', importCategory('', 'СВЕТ', 'Godox SB-UFW120'));
+check('радиосистема не уезжает в фильтры из-за букв «nd» в названии',
+  importCategory('', 'ЗВУК', 'HOLLYLAND LARK MAX') === 'AUD',
+  importCategory('', 'ЗВУК', 'HOLLYLAND LARK MAX'));
+check('монитор отделён от «прочего»',
+  importCategory('', 'КИНО', 'Tvlogic F-7HS') === 'MON');
+check('мешки и флаги попадают в грип',
+  importCategory('', '', 'SANDBAG BIG') === 'GRP' && importCategory('', '', 'ФЛАГ БОЛЬШОЙ') === 'GRP');
+
 console.log('\n== настройки: чтение, проверка, сохранение ==');
 let cfg = call('/settings/get', {}, token);
 check('настройки отдаются вошедшему', cfg.ok === true, cfg);
 check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
   cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
-check('категории приходят вместе с настройками', cfg.data.categories.length === 7);
+check('категории приходят вместе с настройками', cfg.data.categories.length === 14);
 // Отдельная учётка: повторный вход аннулирует прежний токен, и войди мы здесь
 // под администратором — сломали бы сессию, которой пользуются проверки ниже.
 call('/staff/create', { full_name: 'Проба', login: 'probe', pin: '9876', role: 'Warehouse Staff' }, token);
@@ -685,7 +716,7 @@ check('сотрудник склада настройки менять не мо
 console.log('\n== категории: добавление и защита номера ==');
 r = call('/category/create', { code: 'BAT', label: 'Аккумуляторы' }, token);
 check('категория добавлена', r.ok === true, r);
-check('номер выдан следующий свободный (08)', r.ok && r.data.num === '08', r.data);
+check('номер выдан следующий свободный (15)', r.ok && r.data.num === '15', r.data);
 check('дубль кода отклонён',
   call('/category/create', { code: 'BAT', label: 'Ещё раз' }, token).status === 409);
 check('кривой код отклонён',

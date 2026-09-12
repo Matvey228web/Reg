@@ -29,29 +29,48 @@ var SHEETS = {
 //
 // Числовой код — первые две цифры номера предмета. Менять его у категории, в
 // которой уже есть техника, нельзя: номера напечатаны на этикетках.
+// Состав справочника собран по тому, как каталог устроен у прокатных контор
+// (Cameras / Lenses / Camera Support / Lighting / Grip & Electric / Monitors /
+// Filters), и проверен на наших 628 позициях: при таком разборе «Другое»
+// остаётся пустым, а «Свет» перестаёт быть корзиной из 203 позиций, где
+// осветители лежат вперемешку с софтбоксами.
 var CATEGORY_CODES = {
   CAM: "01",   // камеры
   LEN: "02",   // объективы
-  LGT: "03",   // свет
+  LGT: "03",   // осветители (без модификаторов — они ниже)
   AUD: "04",   // звук
-  GRP: "05",   // грип и штативы
+  GRP: "05",   // грип: мешки, флаги, струбцины, стойки
   OTH: "06",   // прочее
   // Расходники и навес (мешки, скотч, гели) — учитываются количеством,
   // а не поштучно. Код занят заранее, чтобы он не сдвинулся, когда
   // этикетки уже напечатаны; правила учёта количества дорабатываются отдельно.
   CNS: "07",
+  SUP: "08",   // штативы, слайдеры, стедикамы
+  MOD: "09",   // софтбоксы, октобоксы, чайнаболы, соты
+  MON: "10",   // мониторы, беспроводное видео
+  RIG: "11",   // клетки, матбоксы, радиофокус
+  FLT: "12",   // фильтры
+  PWR: "13",   // аккумуляторы, зарядки
+  MED: "14",   // карты, ридеры, диски
 };
 
 // Названия для людей. Живут рядом с кодами только как умолчания для засева:
 // после засева название правится в таблице и в админке.
 var CATEGORY_LABELS = {
-  CAM: "Камера",
-  LEN: "Объектив",
-  LGT: "Свет",
+  CAM: "Камеры",
+  LEN: "Объективы",
+  LGT: "Осветители",
   AUD: "Звук",
-  GRP: "Грип",
+  GRP: "Грип: мешки, флаги, струбцины",
   OTH: "Другое",
   CNS: "Расходники (штучно/навес)",
+  SUP: "Штативы и поддержка",
+  MOD: "Модификаторы света",
+  MON: "Мониторы и видеотракт",
+  RIG: "Обвес камеры",
+  FLT: "Фильтры",
+  PWR: "Питание",
+  MED: "Носители",
 };
 
 // Единственное описание структуры таблицы: используется и при создании
@@ -192,24 +211,47 @@ function setupSheets() {
   // номера предметов от этого не меняются: засеваем ровно те коды, по которым
   // они собраны.
   var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);
-  if (catSheet && readRows(catSheet).length === 0) {
+  if (catSheet) {
     var now = new Date().toISOString();
+    var existingRows = readRows(catSheet);
+    var haveCode = {}, haveNum = {}, maxNum = 0;
+    existingRows.forEach(function (r) {
+      var c = String(r.code || "").trim();
+      if (c) haveCode[c] = true;
+      var n = Number(r.num);
+      if (n) { haveNum[pad2(n)] = true; maxNum = Math.max(maxNum, n); }
+    });
+
+    // Категории из умолчаний, которых в листе ещё нет, дописываем. Раньше засев
+    // работал только на пустом листе — то есть на уже работающей таблице новые
+    // категории не появлялись вовсе, и добавлять их пришлось бы руками.
+    // Номер берём свой, если он свободен: иначе он разошёлся бы с номерами
+    // предметов, которые по нему собраны.
     var seeded = [];
     for (var code in CATEGORY_CODES) {
-      seeded.push({
-        code: code,
-        num: CATEGORY_CODES[code],
-        label: CATEGORY_LABELS[code] || code,
-        created_at: now,
-      });
+      if (haveCode[code]) continue;
+      var num = CATEGORY_CODES[code];
+      if (haveNum[num]) {
+        maxNum += 1;
+        num = pad2(maxNum);
+      } else {
+        maxNum = Math.max(maxNum, Number(num));
+      }
+      haveNum[num] = true;
+      seeded.push({ code: code, num: num, label: CATEGORY_LABELS[code] || code, created_at: now });
     }
-    var catHeaders = sheetHeaders(catSheet);
-    prepareRows(catSheet, 2, seeded.length);
-    catSheet.getRange(2, 1, seeded.length, catHeaders.length).setValues(
-      seeded.map(function (row) {
-        return catHeaders.map(function (h) { return row[h] !== undefined ? row[h] : ""; });
-      }));
-    filled.push(SHEETS.CATEGORIES + " (" + seeded.length + ")");
+
+    if (seeded.length) {
+      var catHeaders = sheetHeaders(catSheet);
+      var catStart = catSheet.getLastRow() + 1;
+      if (catStart < 2) catStart = 2;
+      prepareRows(catSheet, catStart, seeded.length);
+      catSheet.getRange(catStart, 1, seeded.length, catHeaders.length).setValues(
+        seeded.map(function (row) {
+          return catHeaders.map(function (h) { return row[h] !== undefined ? row[h] : ""; });
+        }));
+      filled.push(SHEETS.CATEGORIES + " (+" + seeded.length + ")");
+    }
   }
 
   // Таблицы, где администратор был создан до появления отметки, закрываем
@@ -664,17 +706,50 @@ function importStatus(cell) {
   return { status: "Available", note: raw };   // свободный текст сохраняем в заметках
 }
 
+// Категория предмета при импорте — по НАЗВАНИЮ и вкладке исходной таблицы.
+//
+// Примечания сюда не входят намеренно, и это не мелочь: в них пишут «нужна
+// клетка», «аккумулятор в комплекте», «нужен фильтр» — по ним камера уезжала в
+// обвес, а объектив в питание. Проверено на живых данных: разбор по примечаниям
+// отправил 76 камер в «Другое».
+//
+// Порядок правил — от частного к общему: «Godox SB-UFW120» это софтбокс, а не
+// осветитель, хотя Godox делает и то и другое.
 function importCategory(tip, tab, name) {
-  var t = (tip + " " + name).toLowerCase();
-  if (tab === "ЗВУК") return "AUD";
-  if (t.indexOf("объектив") !== -1 || t.indexOf("обьектив") !== -1 || t.indexOf("светофильтр") !== -1) return "LEN";
-  if (t.indexOf("камера") !== -1 || t.indexOf("фотоаппарат") !== -1 || t.indexOf("фотоапарат") !== -1) return "CAM";
-  if (t.indexOf("штатив") !== -1 || t.indexOf("клэмп") !== -1 || t.indexOf("обвес") !== -1 || t.indexOf("органайзер") !== -1) return "GRP";
-  if (t.indexOf("монитор") !== -1 || t.indexOf("сендер") !== -1 || t.indexOf("радиофокус") !== -1) return "OTH";
-  if (tab === "СВЕТ") return "LGT";
-  var light = ["осветитель", "godox", "октобокс", "чайнабол", "nanlite", "модификатор", "софтбокс"];
-  for (var i = 0; i < light.length; i++) if (t.indexOf(light[i]) !== -1) return "LGT";
+  var t = String(name || "").toLowerCase();
+  var type = String(tip || "").toLowerCase();
+
+  if (has(t, ["фильтр", "b+w", "поляриз", "clear mrc"]) || has(type, ["светофильтр"])) return "FLT";
+  if (has(t, ["tvlogic", "swit", "accsoon", "cineview", "монитор", "сендер"])) return "MON";
+  if (has(t, ["nucleus", "tilta", "матбокс", "клетка", "cage", "follow focus", "радиофокус"])) return "RIG";
+  if (has(t, ["чайнабол", "октобокс", "софтбокс", "sb-ufw", "cs-85", "vsa-", "соты",
+              "зонт", "рассеиват", "шторки", "рефлектор"])) return "MOD";
+  if (has(t, ["штатив", "greenbean", "videomaster", "hdv elite", "слайдер", "стедикам",
+              "гимбал", "монопод", "easyrig"])) return "SUP";
+  if (has(t, ["аккумулятор", "зарядк", "np-f", "v-mount", "блок питания", "удлинител"])) return "PWR";
+  if (has(t, ["карта памяти", "cfexpress", "ридер", "card reader", "ssd", "накопител"])) return "MED";
+  if (has(t, ["мешок", "sandbag", "флаг", "струбцин", "clamp", "пена", "стойка", "журавл"])) return "GRP";
+
+  if (tab === "ЗВУК" || has(t, ["hollyland", "tascam", "тascam", "петличк", "рекордер",
+                                "микрофон", "радиосистем"])) return "AUD";
+  // «sony a7», а не просто «a7»: двух символов слишком мало, они найдутся в
+  // середине чужого названия и утащат в камеры что попало.
+  if (has(t, ["burano", "pyxis", "blackmagic", "ilce", "ilme", "fx-3", "fx3", "fx6", "xa-60",
+              "c70", "pmw", "red one", "komodo", "alexa", "sony a7", "sony а7",
+              "камера", "фотоаппарат", "фотоапарат"]) ||
+      has(type, ["камера", "фотоаппарат", "фотоапарат"])) return "CAM";
+  if (has(t, ["объектив", "обьектив", "zenit", "samyang", "dzofilm", "illumina", "sigma",
+              "tamron", "canon rf", "canon ef", "zenitar", "selena", "helios", "mm"]) ||
+      has(type, ["объектив", "обьектив"])) return "LEN";
+  if (tab === "СВЕТ" || has(t, ["godox", "nanlite", "forza", "осветител", "knowled", "aputure"])) return "LGT";
   return "OTH";
+}
+
+function has(haystack, needles) {
+  for (var i = 0; i < needles.length; i++) {
+    if (haystack.indexOf(needles[i]) !== -1) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------
