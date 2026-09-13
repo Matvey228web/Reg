@@ -13,21 +13,7 @@
 const OrdersScreen = (() => {
   const CACHE = "orders";
   let busy = false;
-  let expandedId = null;
   let draft = null;      // разобранный заказ, ждёт подтверждения
-  let itemsById = {};
-
-  // Названия предметов — из кэша каталога, как на других экранах: свой запрос
-  // сюда добавил бы ещё 5–8 секунд ожидания.
-  function itemName(itemId) {
-    const item = itemsById[String(itemId)];
-    return item ? item.name : String(itemId);
-  }
-
-  function loadItemsMap() {
-    const items = Cache.items("equipment") || [];
-    itemsById = Object.fromEntries(items.map((i) => [String(i.item_id), i]));
-  }
 
   function today() {
     return new Date().toISOString().substring(0, 10);
@@ -90,7 +76,6 @@ const OrdersScreen = (() => {
         </div>
         <div class="card-sub">${escapeHtml(order.student_name || "—")}${order.is_adult ? "" : " · с представителем"}</div>
         <div class="card-sub">${parts.join(" · ")}</div>
-        <div id="order-detail-${order.order_id}"></div>
       </div>`;
   }
 
@@ -111,7 +96,7 @@ const OrdersScreen = (() => {
     list.querySelectorAll("[data-order-id]").forEach((el) => {
       el.addEventListener("click", (e) => {
         if (e.target.closest("a, button, select, input")) return;
-        toggleDetail(el.dataset.orderId);
+        Router.navigate("order", { orderId: el.dataset.orderId });
       });
     });
   }
@@ -119,7 +104,6 @@ const OrdersScreen = (() => {
   async function loadList({ force = false } = {}) {
     const list = document.getElementById("orders-list");
     const cached = Cache.items(CACHE);
-    loadItemsMap();
 
     if (cached && cached.length) render(cached);
     drawRefreshRow();
@@ -141,88 +125,6 @@ const OrdersScreen = (() => {
       busy = false;
       drawRefreshRow();
     }
-  }
-
-  // ---- карточка заказа ----
-
-  async function toggleDetail(orderId) {
-    const box = document.getElementById(`order-detail-${orderId}`);
-    if (!box) return;
-    if (String(expandedId) === String(orderId)) {
-      box.innerHTML = "";
-      expandedId = null;
-      return;
-    }
-    expandedId = orderId;
-    box.innerHTML = `<p class="hint">Загрузка заказа…</p>`;
-    try {
-      const data = await apiPost("/order/card", { order_id: Number(orderId) });
-      box.innerHTML = detailHtml(data);
-    } catch (err) {
-      box.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-    }
-  }
-
-  function detailHtml(data) {
-    const o = data.order;
-    const lines = data.items.slice().sort((a, b) => a.line_no - b.line_no);
-    const open = data.transactions.filter((t) => t.status === "Open");
-    const closed = data.transactions.filter((t) => t.status !== "Open");
-
-    return `
-      <div class="section">
-        <div class="section-title">Арендатор</div>
-        <div class="card-sub">${escapeHtml(o.student_name || "—")}</div>
-        ${o.student_phone ? `<div class="card-sub"><a href="tel:${escapeHtml(o.student_phone)}">${escapeHtml(o.student_phone)}</a></div>` : ""}
-        ${o.student_tg ? `<div class="card-sub"><a href="https://t.me/${escapeHtml(String(o.student_tg).replace(/^@/, ""))}" target="_blank" rel="noopener">${escapeHtml(o.student_tg)}</a></div>` : ""}
-        ${o.is_adult ? "" : `
-          <div class="section-title" style="margin-top:10px;">Представитель (арендатор несовершеннолетний)</div>
-          <div class="card-sub">${escapeHtml(o.guardian_name || "—")}</div>
-          ${o.guardian_phone ? `<div class="card-sub"><a href="tel:${escapeHtml(o.guardian_phone)}">${escapeHtml(o.guardian_phone)}</a></div>` : ""}`}
-      </div>
-
-      <div class="section">
-        <div class="section-title">Состав заказа</div>
-        ${lines.length ? lines.map(lineHtml).join("") : `<p class="hint">Состав не заполнен — выдача пойдёт как «вне заказа».</p>`}
-        ${o.extra_input ? `<div class="order-extra">Дописано в заказе: ${escapeHtml(o.extra_input)}</div>` : ""}
-      </div>
-
-      ${open.length ? `
-      <div class="section">
-        <div class="section-title">На руках сейчас</div>
-        ${open.map((t) => `<div class="card-sub">${escapeHtml(itemName(t.item_id))} · ${escapeHtml(String(t.item_id))}${String(t.order_line) === "off-order" ? " · вне состава" : ""}</div>`).join("")}
-      </div>` : ""}
-
-      ${closed.length ? `
-      <div class="section">
-        <div class="section-title">Уже вернули</div>
-        ${closed.map((t) => `<div class="card-sub">${escapeHtml(itemName(t.item_id))} · ${formatDate(t.checked_in_at)}</div>`).join("")}
-      </div>` : ""}
-
-      <div class="section">
-        ${o.request_code ? `<div class="card-sub">Код заявки: ${escapeHtml(o.request_code)}</div>` : ""}
-        ${o.amount ? `<div class="card-sub">Сумма по заказу: ${escapeHtml(String(o.amount))} ${escapeHtml(o.currency || "")}</div>` : ""}
-        ${o.source_url ? `<div class="card-sub"><a href="${escapeHtml(o.source_url)}" target="_blank" rel="noopener">Заказ на сайте</a></div>` : ""}
-        <div class="card-sub">Оформил: ${escapeHtml(o.created_by_name || "—")} · ${formatDate(o.created_at)}</div>
-      </div>
-
-      ${o.raw_text ? `
-      <details class="order-raw">
-        <summary>Исходное сообщение о заказе</summary>
-        <pre>${escapeHtml(o.raw_text)}</pre>
-      </details>` : ""}`;
-  }
-
-  function lineHtml(line) {
-    const left = Math.max(0, line.qty - line.issued_qty);
-    return `
-      <div class="order-line">
-        <div class="order-line-name">${escapeHtml(line.raw_name)}</div>
-        <div class="order-line-qty">
-          выдано ${line.issued_qty} из ${line.qty}${left ? "" : " · закрыта"}
-          ${line.model_code ? "" : ` · <span class="order-line-warn">нет в каталоге</span>`}
-        </div>
-      </div>`;
   }
 
   // ---- ввод заказа ----
@@ -446,7 +348,6 @@ const OrdersScreen = (() => {
   // ---- жизненный цикл ----
 
   function onShow() {
-    expandedId = null;
     hideAdd();
     loadList();
   }

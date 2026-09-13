@@ -592,6 +592,32 @@ select {
   background-position: right 10px center;
 }
 
+/* Позиция на руках с кнопкой приёма: имя слева, кнопка справа — сама строка
+   при этом остаётся такой же, как в составе заказа. */
+.order-line-btn {
+  width: auto;
+  margin: var(--s2) 0 0;
+  padding: 8px var(--s4);
+  font-size: 14px;
+}
+
+/* Сколько по заказу уже отдано. Полоса нужна не ради украшения: «выдано 1 из
+   25» цифрами читается медленнее, чем видно глазом, что заказ едва начат. */
+.progress-line { font-size: 13px; font-weight: 600; margin-top: var(--s2); }
+.progress {
+  margin-top: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--tg-button-color);
+}
+
 /* Дописанное в заказ свободным полем: на складе это отдельная строка работы,
    поэтому и выглядеть должна отдельно, а не сливаться с составом. */
 .order-extra {

@@ -30,6 +30,7 @@
   CatalogScreen.init();
   ScanScreen.init();
   ItemScreen.init();
+  OrderScreen.init();
   RepairScreen.init();
   OrdersScreen.init();
   StaffScreen.init();

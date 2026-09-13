@@ -39,6 +39,22 @@ const ItemScreen = (() => {
     }
   }
 
+  // Выдать и принять можно прямо отсюда: карточка — то место, где человек уже
+  // стоит, а раньше за этим приходилось идти в «Скан» и вводить номер заново.
+  // Сама форма одна и та же, поэтому просто открываем её с уже найденным
+  // предметом, а не копируем сюда второй экземпляр логики.
+  function itemActions(item) {
+    const free = item.by_qty ? Number(item.qty_free || 0) > 0 : item.status === "Available";
+    const out = item.by_qty ? Number(item.qty_out || 0) > 0 : item.status === "Rented";
+    const blocked = item.status === "In Repair" || item.status === "Retired";
+    if (blocked || (!free && !out)) return "";
+    return `
+      <div class="btn-row">
+        ${free ? `<button class="btn" id="item-checkout">Выдать</button>` : ""}
+        ${out ? `<button class="btn ${free ? "btn--secondary" : ""}" id="item-checkin">Принять</button>` : ""}
+      </div>`;
+  }
+
   function render(item, history) {
     document.getElementById("item-title").textContent = item.name;
     const content = document.getElementById("item-content");
@@ -101,6 +117,7 @@ const ItemScreen = (() => {
       </div>
 
       <div class="section">
+        ${itemActions(item)}
         <button class="btn btn--secondary" id="item-report-defect-toggle">Сообщить о дефекте</button>
         <div id="item-defect-form" style="display:none;">
           <div class="field">
@@ -133,6 +150,12 @@ const ItemScreen = (() => {
     document.getElementById("item-qr-label").addEventListener("click", () => {
       Router.navigate("labels", { itemId: item.item_id });
     });
+
+    const goScan = (mode) => Router.navigate("scan", { itemId: item.item_id, mode });
+    const checkoutBtn = document.getElementById("item-checkout");
+    if (checkoutBtn) checkoutBtn.addEventListener("click", () => goScan("checkout"));
+    const checkinBtn = document.getElementById("item-checkin");
+    if (checkinBtn) checkinBtn.addEventListener("click", () => goScan("checkin"));
 
     document.getElementById("item-report-defect-toggle").addEventListener("click", () => {
       const form = document.getElementById("item-defect-form");

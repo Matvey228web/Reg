@@ -5,10 +5,17 @@ const ScanScreen = (() => {
   let currentItem = null;
   let orders = [];
   let mode = null; // "checkout" | "checkin" | "defect"
+  let preferredMode = null;   // с чем пришли с карточки предмета
+  let lockedOrder = null;     // выдача по одному заказу: {orderId, orderNo, returnDate, studentName}
+  let session = [];           // что уже выдано за этот заход
 
   function reset() {
     currentItem = null;
     mode = null;
+    preferredMode = null;
+    lockedOrder = null;
+    session = [];
+    document.getElementById("scan-order-bar").innerHTML = "";
     document.getElementById("scan-result").innerHTML = "";
     // Пока предмет не найден, сканирование — главное действие экрана. Как только
     // он найден и открыта форма выдачи, главным становится «Подтвердить», а
@@ -44,7 +51,12 @@ const ScanScreen = (() => {
       // Статус мог измениться — поправим его в кэше каталога, чтобы список не
       // показывал устаревшее «Доступно» до следующего обновления.
       Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
-      mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
+      // Если пришли с карточки с намерением («Выдать»/«Принять»), открываем
+      // сразу его — иначе человек жмёт ту же кнопку второй раз.
+      if (preferredMode === "checkout" && canCheckout(item)) mode = "checkout";
+      else if (preferredMode === "checkin" && canCheckin(item)) mode = "checkin";
+      else mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
+      preferredMode = null;
       if (mode === "checkout") await loadOrders();
       document.getElementById("scan-start-text").textContent = "Сканировать ещё раз";
       document.getElementById("scan-start-btn").classList.add("btn--secondary");
@@ -59,6 +71,8 @@ const ScanScreen = (() => {
   // 5–8 секунд здесь заметнее всего. Если кэша нет — запрашиваем один раз и
   // кладём туда же, откуда потом их прочитает вкладка «Заказы».
   async function loadOrders() {
+    // Заказ уже выбран на его карточке — выбирать не из чего и грузить нечего.
+    if (lockedOrder) { orders = []; return; }
     let all = Cache.items("orders");
     if (!all) {
       try {
@@ -70,6 +84,26 @@ const ScanScreen = (() => {
     }
     // Выдавать можно по заказу, который оформлен или уже частично выдан.
     orders = all.filter((o) => o.status === "New" || o.status === "Issued");
+  }
+
+  // Шапка режима «выдача по заказу»: по какому заказу идёт работа и что уже
+  // отсканировано за этот заход. Точного счётчика «выдано N из M» здесь нет
+  // намеренно — держать его свежим значит после каждой позиции ждать ещё один
+  // запрос к таблице. Счётчик живёт в карточке заказа, куда человек вернётся.
+  function renderOrderBar() {
+    const bar = document.getElementById("scan-order-bar");
+    if (!lockedOrder) { bar.innerHTML = ""; return; }
+    const who = String(lockedOrder.studentName || "").split(" ").slice(0, 2).join(" ");
+    bar.innerHTML = `
+      <div class="card">
+        <div class="card-title">
+          Выдача по заказу <span class="order-no"><span class="order-no-sign">№</span>${escapeHtml(lockedOrder.orderNo)}</span>
+        </div>
+        ${who ? `<div class="card-sub">${escapeHtml(who)}</div>` : ""}
+        ${session.length
+          ? `<div class="card-sub">В этот заход выдано: ${session.map(escapeHtml).join(", ")}</div>`
+          : `<div class="card-sub">Сканируйте позиции заказа одну за другой.</div>`}
+      </div>`;
   }
 
   function orderLabel(order) {
@@ -166,13 +200,19 @@ const ScanScreen = (() => {
         <div class="section">
           <div class="field">
             <label for="scan-order">Заказ</label>
+            ${lockedOrder ? `
+            <select id="scan-order">
+              <option value="${escapeHtml(String(lockedOrder.orderId))}" selected>${escapeHtml("№" + lockedOrder.orderNo)}</option>
+            </select>
+            <p class="hint">Выдача идёт по этому заказу. Чтобы выдать вне заказа,
+            откройте «Скан» с вкладки внизу.</p>` : `
             <select id="scan-order">
               <option value="">— выберите —</option>
               ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
               <option value="none">Без заказа (для склада)</option>
             </select>
             ${orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
-            или выдайте без заказа.</p>`}
+            или выдайте без заказа.</p>`}`}
           </div>
           ${currentItem.by_qty ? `
           <div class="field">
@@ -198,6 +238,11 @@ const ScanScreen = (() => {
         const date = picked ? picked.dataset.return : "";
         if (date) document.getElementById("scan-return-date").value = date;
       });
+      // В списке из одного пункта события change не будет, а срок возврата всё
+      // равно должен быть тем, что обещан студенту на сайте.
+      if (lockedOrder && lockedOrder.returnDate) {
+        document.getElementById("scan-return-date").value = lockedOrder.returnDate;
+      }
       confirmButton("Подтвердить выдачу", submitCheckout);
     } else if (mode === "checkin") {
       box.innerHTML = `
@@ -311,6 +356,19 @@ const ScanScreen = (() => {
         ? "Выдано. В составе заказа этой позиции нет — отмечено как «вне заказа»."
         : "Оборудование выдано");
       if (orderId) Cache.clear("orders");   // изменился статус и состав заказа
+      // Выдача по заказу — это подряд десяток позиций. Показывать после каждой
+      // ту же карточку и ждать, пока человек сам нажмёт «сканировать», значит
+      // добавить к каждой позиции лишний тап: сразу открываем сканер снова.
+      if (lockedOrder) {
+        const qtyText = qtyField && Number(qtyField.value) > 1 ? " ×" + Number(qtyField.value) : "";
+        session.push(currentItem.name + qtyText);
+        currentItem = null;
+        mode = null;
+        document.getElementById("scan-result").innerHTML = "";
+        renderOrderBar();
+        startScan(true);
+        return;
+      }
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
@@ -371,8 +429,27 @@ const ScanScreen = (() => {
     }
   }
 
-  function onShow() {
+  function onShow(params) {
     reset();
+    // Пришли с карточки заказа: заказ выбран, дальше только сканируем позиции.
+    if (params && params.orderId !== undefined && params.orderId !== null) {
+      lockedOrder = {
+        orderId: params.orderId,
+        orderNo: params.orderNo || String(params.orderId),
+        returnDate: params.returnDate || "",
+        studentName: params.studentName || "",
+      };
+      preferredMode = "checkout";
+      renderOrderBar();
+      startScan(true);
+      return;
+    }
+    // Пришли с карточки предмета: он уже выбран, сканировать нечего.
+    if (params && params.itemId) {
+      if (params.mode) preferredMode = params.mode;
+      lookup(String(params.itemId));
+      return;
+    }
     // Камера открывается сразу: на складе это главное действие, и лишний тап
     // по кнопке здесь только мешал.
     startScan(true);

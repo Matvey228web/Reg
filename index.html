@@ -121,6 +121,9 @@
 
   <!-- Экран: сканирование -->
   <div class="screen" id="screen-scan">
+    <!-- Виден только когда пришли с карточки заказа: по какому заказу идёт
+         выдача и что уже отсканировано за этот заход. -->
+    <div id="scan-order-bar"></div>
     <div id="scan-error"></div>
     <div id="scan-result"></div>
     <!-- Текст меняется на «ещё раз» после первого найденного предмета: при
@@ -175,6 +178,15 @@
     <div id="orders-add" class="section" style="display:none;"></div>
     <div class="refresh-row" id="orders-refresh"></div>
     <div id="orders-list"></div>
+  </div>
+
+  <!-- Экран: один заказ.
+       Раньше карточка раскрывалась внутри списка: из неё некуда было нажать
+       «назад», а обновление списка её схлопывало. Выдача и приём по заказу —
+       работа на несколько минут, ей нужен свой экран. -->
+  <div class="screen" id="screen-order">
+    <h1 id="order-title">Заказ</h1>
+    <div id="order-content"></div>
   </div>
 
   <!-- Экран: сотрудники (только для Admin) -->
@@ -273,6 +285,7 @@
 <script src="js/catalog.js"></script>
 <script src="js/scan.js"></script>
 <script src="js/item.js"></script>
+<script src="js/order.js"></script>
 <script src="js/repair.js"></script>
 <script src="js/orders.js"></script>
 <script src="js/staff.js"></script>
