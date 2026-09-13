@@ -118,6 +118,9 @@ const LabelsScreen = (() => {
         document.getElementById(id).addEventListener("change", recount);
       });
       document.getElementById("labels-search").addEventListener("input", recount);
+      // Поле пересоздаётся при каждой перерисовке экрана, поэтому привязываем
+      // подсказки здесь, а не один раз в init().
+      Suggest.attach("labels-search", (q) => Suggest.equipment(source(), q));
     }
 
     document.getElementById("labels-size").addEventListener("change", (e) => {

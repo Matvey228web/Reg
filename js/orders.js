@@ -358,6 +358,8 @@ const OrdersScreen = (() => {
       if (box.style.display === "block") hideAdd();
       else showAdd(pasteFormHtml());
     });
+    // Подсказывает и номер, и арендатора, и ник, и позицию из состава заказа.
+    Suggest.attach("orders-search", (q) => Suggest.orders(Cache.items(CACHE) || [], q));
     ["orders-filter-status", "orders-search"].forEach((id) => {
       const el = document.getElementById(id);
       const event = id === "orders-search" ? "input" : "change";

@@ -289,6 +289,8 @@ const CatalogScreen = (() => {
         render();
       }, 120);
     });
+    // Подсказки считаются по уже загруженному каталогу — без запросов.
+    Suggest.attach("catalog-search", (q) => Suggest.equipment(allItems, q));
     document.getElementById("catalog-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("catalog-add-form");
       const opening = form.style.display === "none";
