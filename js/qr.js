@@ -2,12 +2,17 @@
 // и обёртка над нативным сканером Telegram для единообразного вызова из экранов.
 
 const QR = (() => {
-  function render(canvas, text, moduleSize = 8) {
+  // quiet — пустое поле вокруг кода в модулях. По стандарту его нужно четыре с
+  // каждой стороны, иначе сканер не находит код на пёстром фоне. На экране и на
+  // белой этикетке поле обычно даёт сама подложка, поэтому по умолчанию ноль;
+  // там, где код кладут на готовую картинку, поле нужно рисовать самим.
+  function render(canvas, text, moduleSize = 8, quiet = 0) {
     const qr = qrcode(0, "M");
     qr.addData(text);
     qr.make();
     const count = qr.getModuleCount();
-    const size = count * moduleSize;
+    const total = count + quiet * 2;
+    const size = total * moduleSize;
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext("2d");
@@ -17,10 +22,11 @@ const QR = (() => {
     for (let row = 0; row < count; row++) {
       for (let col = 0; col < count; col++) {
         if (qr.isDark(row, col)) {
-          ctx.fillRect(col * moduleSize, row * moduleSize, moduleSize, moduleSize);
+          ctx.fillRect((col + quiet) * moduleSize, (row + quiet) * moduleSize, moduleSize, moduleSize);
         }
       }
     }
+    return { count, total, moduleSize, size };
   }
 
   function downloadCanvas(canvas, filename) {

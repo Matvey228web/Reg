@@ -16,16 +16,20 @@ const LabelsScreen = (() => {
   const SIZE_KEY = "mifs_label_size";
   const DEFAULT_CAPTION = "Киноколледж #40";
 
-  // Ходовые размеры термоленты. Значения правятся здесь же на экране:
-  // окончательные размеры зависят от принтера, который ещё не выбран.
+  // Вертикальная лента: название сверху, QR посередине, снизу номер плашкой и
+  // подпись колледжа. Размеры — ходовые у Niimbot и Phomemo. Кегли заданы в
+  // миллиметрах: этикетка печатается в физическом размере, и «пункты» здесь
+  // ничего не значат.
   const SIZES = {
-    small: { label: "Маленькая 30×20", w: 30, h: 20, qr: 14, name: false, caption: false },
-    medium: { label: "Средняя 40×30", w: 40, h: 30, qr: 18, name: false, caption: true },
-    large: { label: "Большая 58×40", w: 58, h: 40, qr: 25, name: true, caption: true },
+    v20x30: { label: "20×30", w: 20, h: 30, pad: 1.2, name: 1.9, num: 3.0, org: 1.7, caption: true, category: false },
+    v30x40: { label: "30×40", w: 30, h: 40, pad: 1.5, name: 2.5, num: 4.0, org: 2.0, caption: true, category: false },
+    v30x50: { label: "30×50", w: 30, h: 50, pad: 1.5, name: 2.8, num: 4.6, org: 2.2, caption: true, category: true },
+    v40x60: { label: "40×60", w: 40, h: 60, pad: 2.0, name: 3.4, num: 5.6, org: 2.6, caption: true, category: true },
   };
+  const DEFAULT_SIZE = "v30x40";
 
   let items = [];          // что печатаем
-  let sizeKey = "medium";
+  let sizeKey = DEFAULT_SIZE;
   let singleItemId = null; // пришли из карточки предмета
 
   function caption() {
@@ -40,8 +44,13 @@ const LabelsScreen = (() => {
     try { localStorage.setItem(CAPTION_KEY, text); } catch { /* не критично */ }
   }
 
+  // Раньше размеры звались small/medium/large и были горизонтальными. У тех,
+  // кто уже открывал экран, в памяти браузера лежит старое имя — молча
+  // подставляем текущее, а не падаем на неизвестном ключе.
   function savedSize() {
-    try { return localStorage.getItem(SIZE_KEY) || "medium"; } catch { return "medium"; }
+    let stored = null;
+    try { stored = localStorage.getItem(SIZE_KEY); } catch { stored = null; }
+    return SIZES[stored] ? stored : DEFAULT_SIZE;
   }
 
   function onShow(params) {
@@ -78,8 +87,8 @@ const LabelsScreen = (() => {
       <div class="field">
         <label for="labels-caption">Подпись на этикетке</label>
         <input type="text" id="labels-caption" value="${escapeHtml(caption())}" />
-        <p class="hint">Печатается на средней и большой. На маленькой не помещается —
-        там только QR и номер.</p>
+        <p class="hint">Печатается на всех размерах мелкой строкой под номером.
+        На 30×50 и 40×60 рядом с ней помещается ещё и категория.</p>
       </div>
       ${singleItemId ? "" : `
       <div class="filters">
@@ -160,41 +169,30 @@ const LabelsScreen = (() => {
     const size = SIZES[sizeKey];
     document.getElementById("labels-count").textContent =
       `К печати: ${items.length} ${plural(items.length, "этикетка", "этикетки", "этикеток")}` +
-      ` · ${size.w}×${size.h} мм, QR ${size.qr} мм`;
+      ` · ${size.w}×${size.h} мм`;
     drawPreview(items.slice(0, 3));
   }
 
-  function labelHtml(item, size) {
-    return `
-      <div class="label label--${sizeKey}">
-        <canvas class="label-qr" data-code="${escapeHtml(item.item_id)}"></canvas>
-        <div class="label-text">
-          <div class="label-id">${escapeHtml(item.item_id)}</div>
-          ${size.name && item.name ? `<div class="label-name">${escapeHtml(item.name)}</div>` : ""}
-          ${size.caption ? `<div class="label-caption">${escapeHtml(caption())}</div>` : ""}
-        </div>
-      </div>`;
-  }
-
-  function paintCanvases(container, size) {
-    container.querySelectorAll(".label-qr").forEach((canvas) => {
-      // Рисуем с запасом по разрешению и сжимаем стилями до физических
-      // миллиметров: так на печати края остаются резкими.
-      QR.render(canvas, canvas.dataset.code, 8);
-      canvas.style.width = size.qr + "mm";
-      canvas.style.height = size.qr + "mm";
-    });
+  // Предпросмотр показываем той же картинкой, которая уйдёт в печать и в файл:
+  // отдельная вёрстка для экрана рано или поздно разъезжается с тем, что
+  // печатается, и проверить это на бумаге дорого.
+  function labelNode(item, size, scale) {
+    const canvas = labelCanvas(item, size, caption(), scale);
+    canvas.className = "label";
+    canvas.style.width = size.w + "mm";
+    canvas.style.height = size.h + "mm";
+    return canvas;
   }
 
   function drawPreview(list) {
     const box = document.getElementById("labels-preview");
     const size = SIZES[sizeKey];
+    box.innerHTML = "";
     if (!list.length) {
       box.innerHTML = `<p class="empty">Ничего не найдено</p>`;
       return;
     }
-    box.innerHTML = list.map((i) => labelHtml(i, size)).join("");
-    paintCanvases(box, size);
+    list.forEach((item) => box.appendChild(labelNode(item, size, PREVIEW_SCALE)));
   }
 
   function print() {
@@ -215,8 +213,11 @@ const LabelsScreen = (() => {
     style.textContent = `@media print { @page { size: ${size.w}mm ${size.h}mm; margin: 0; } }`;
 
     const sheet = document.getElementById("labels-print-area");
-    sheet.innerHTML = items.map((i) => labelHtml(i, size)).join("");
-    paintCanvases(sheet, size);
+    sheet.innerHTML = "";
+    // В печать уходит тот же холст, но нарисованный втрое подробнее: лазерный
+    // принтер с AirPrint печатает мельче термопринтера, и разрешение ленты на
+    // нём выглядело бы крупными ступеньками.
+    items.forEach((i) => sheet.appendChild(labelNode(i, size, PRINT_SCALE)));
 
     document.body.classList.add("printing");
 
@@ -240,72 +241,165 @@ const LabelsScreen = (() => {
     setTimeout(() => window.print(), 250);
   }
 
-  // --- Сохранение этикеток картинками ---
+  // --- Отрисовка этикетки ---
   //
-  // Для Bluetooth-принтеров этикеток (Niimbot, Phomemo и прочие дешёвые) это
-  // единственный путь: Bluetooth у них закрыт под собственное приложение, и
-  // напечатать из браузера нельзя в принципе — только импортировать картинку.
+  // Одна функция и для экрана, и для печати, и для файла: отдельная вёрстка
+  // для предпросмотра рано или поздно разъезжается с тем, что печатается, а
+  // заметно это только на бумаге.
   //
-  // Рисуем сразу в разрешении принтера: 203 dpi это ровно 8 точек на миллиметр,
-  // поэтому картинка 30×20 мм — это 240×160 точек. Так приложение принтера не
-  // пересчитывает размер и края не замываются.
+  // Рисуем в разрешении принтера: 203 dpi — это ровно 8 точек на миллиметр,
+  // поэтому 30×40 мм превращаются в 240×320 точек. Приложение принтера ничего
+  // не пересчитывает, и края не замываются. Для печати из браузера тот же
+  // рисунок делается втрое подробнее: лазерный принтер печатает мельче ленты.
   const DOTS_PER_MM = 8;
+  const PREVIEW_SCALE = 2;   // экран: чтобы не рябило на плотных дисплеях
+  const PRINT_SCALE = 3;     // ~609 dpi, кратно 203 — модули остаются целыми
+  const QUIET = 4;           // пустое поле вокруг кода, в модулях
   const MAX_AT_ONCE = 30;
 
-  function mm(value) {
-    return Math.round(value * DOTS_PER_MM);
+  function mm(value, scale) {
+    return Math.round(value * DOTS_PER_MM * scale);
   }
 
-  function labelCanvas(item, size) {
+  // Номер разбит по смыслу: XX — категория, YY — модель, ZZ — экземпляр.
+  // Так его и диктуют по телефону, и набирают руками, и сверяют глазами.
+  function groupedId(itemId) {
+    const digits = String(itemId).replace(/\D/g, "");
+    if (digits.length !== 6) return String(itemId);
+    return digits.slice(0, 2) + " " + digits.slice(2, 4) + " " + digits.slice(4, 6);
+  }
+
+  // Подбираем кегль так, чтобы название влезло в отведённые строки целиком.
+  // Обрезать его многоточием хуже: у моделей одной серии различается как раз
+  // хвост — «SIRIUS 100CM» и «SIRIUS 60CM».
+  function fitText(ctx, text, maxWidth, startPx, maxLines, weight) {
+    let px = startPx;
+    while (px > startPx * 0.6) {
+      ctx.font = weight + " " + Math.round(px) + "px " + FONT_SANS;
+      const rows = wrapText(ctx, text, maxWidth);
+      if (rows.length <= maxLines) return { px: Math.round(px), rows };
+      px -= Math.max(1, startPx * 0.06);
+    }
+    ctx.font = weight + " " + Math.round(px) + "px " + FONT_SANS;
+    return { px: Math.round(px), rows: wrapText(ctx, text, maxWidth).slice(0, maxLines) };
+  }
+
+  const FONT_SANS = '"Helvetica Neue", Arial, sans-serif';
+  const FONT_MONO = 'Menlo, Consolas, "Courier New", monospace';
+
+  function labelCanvas(item, size, captionText, scale) {
+    const k = scale || 1;
     const canvas = document.createElement("canvas");
-    canvas.width = mm(size.w);
-    canvas.height = mm(size.h);
+    canvas.width = mm(size.w, k);
+    canvas.height = mm(size.h, k);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const pad = mm(1.5);
-    const gap = mm(1.5);
-    const qrSide = mm(size.qr);
-
-    // QR рисуем отдельно и переносим без сглаживания: сглаженный модуль на
-    // термопечати расплывается, и код перестаёт читаться.
-    const qrCanvas = document.createElement("canvas");
-    QR.render(qrCanvas, item.item_id, 8);
-    ctx.imageSmoothingEnabled = false;
-    const qrTop = Math.round((canvas.height - qrSide) / 2);
-    ctx.drawImage(qrCanvas, pad, qrTop, qrSide, qrSide);
-
-    const textLeft = pad + qrSide + gap;
-    const textWidth = canvas.width - textLeft - pad;
     ctx.fillStyle = "#000000";
     ctx.textBaseline = "top";
 
-    const lines = [];
-    lines.push({ text: item.item_id, size: mm(3.2), font: "bold {px}px monospace" });
-    if (size.name && item.name) lines.push({ text: item.name, size: mm(2.4), font: "{px}px sans-serif" });
-    if (size.caption) lines.push({ text: caption(), size: mm(2.2), font: "{px}px sans-serif" });
+    const pad = mm(size.pad, k);
+    const gap = mm(size.pad * 0.5, k);
+    const inner = canvas.width - pad * 2;
 
-    // Высоту блока считаем заранее, чтобы текст стоял по центру этикетки, а не
-    // прижимался к верхнему краю.
-    const lineGap = mm(0.8);
-    const wrapped = lines.map((line) => {
-      ctx.font = line.font.replace("{px}", line.size);
-      return { line: line, rows: wrapText(ctx, line.text, textWidth) };
+    // 1. Название сверху. Занимает столько, сколько нужно, но не больше двух
+    //    строк — остальное место принадлежит коду.
+    const name = String(item.name || "").toUpperCase();
+    const fitted = name ? fitText(ctx, name, inner, mm(size.name, k), 2, "bold") : { px: 0, rows: [] };
+    const nameLine = Math.round(fitted.px * 1.06);
+    const nameHeight = fitted.rows.length * nameLine;
+
+    // 2. Низ: плашка с номером и подписи под ней. Считаем заранее, чтобы знать,
+    //    сколько высоты остаётся коду.
+    const numPx = mm(size.num, k);
+    const chipPadY = Math.round(numPx * 0.22);
+    const chipH = Math.round(numPx * 1.2) + chipPadY * 2;
+    const orgPx = mm(size.org, k);
+    const orgLine = Math.round(orgPx * 1.25);
+    const bottomLines = [];
+    if (size.category) bottomLines.push(categoryLabel(item.category));
+    if (size.caption && captionText) bottomLines.push(String(captionText));
+
+    // 3. Бюджет высоты. Код не может быть меньше четырёх точек на модуль —
+    //    ниже этого края замываются и телефон читает через раз. Если всё сразу
+    //    не помещается, жертвуем подписями снизу, а не кодом: подпись читают
+    //    глазами и она одинакова на всех этикетках, а код — рабочий инструмент.
+    const modules = 21 + QUIET * 2;
+    const minDot = 4 * k;
+    const innerH = canvas.height - pad * 2;
+    const bottomH = () => chipH + bottomLines.length * orgLine + (bottomLines.length ? Math.round(gap * 0.5) : 0);
+    // Первой уходит категория: она и так закодирована первыми двумя цифрами
+    // номера. Подпись колледжа ниоткуда не выводится, поэтому держится дольше.
+    while (bottomLines.length && nameHeight + bottomH() + gap * 2 + modules * minDot > innerH) {
+      bottomLines.shift();
+    }
+
+    const free = innerH - nameHeight - bottomH() - gap * 2;
+    const dot = Math.max(1, Math.floor(Math.min(inner, free) / modules));
+    const qrSide = dot * modules;
+
+    const qrCanvas = document.createElement("canvas");
+    QR.render(qrCanvas, item.item_id, dot, QUIET);
+    ctx.imageSmoothingEnabled = false;
+
+    // Раскладываем сверху вниз, а свободный остаток отдаём воздуху вокруг кода.
+    let y = pad;
+    ctx.fillStyle = "#000000";
+    fitted.rows.forEach((row) => {
+      ctx.font = "bold " + fitted.px + "px " + FONT_SANS;
+      ctx.textAlign = "center";
+      ctx.fillText(row, canvas.width / 2, y);
+      y += nameLine;
     });
-    const totalHeight = wrapped.reduce(
-      (sum, w) => sum + w.rows.length * (w.line.size * 1.15) + lineGap, -lineGap);
 
-    let y = Math.max(pad, Math.round((canvas.height - totalHeight) / 2));
-    wrapped.forEach((w) => {
-      ctx.font = w.line.font.replace("{px}", w.line.size);
-      w.rows.forEach((row) => {
-        ctx.fillText(row, textLeft, y);
-        y += w.line.size * 1.15;
+    const spare = Math.max(0, free - qrSide);
+    y += gap + Math.round(spare / 2);
+    ctx.drawImage(qrCanvas, Math.round((canvas.width - qrSide) / 2), y, qrSide, qrSide);
+    // Низ отсчитываем от нижнего края, а не накопленной суммой: округления по
+    // дороге сдвигали бы подпись на пиксель-другой и на мелкой ленте её
+    // срезало краем.
+    y = canvas.height - pad - bottomH();
+
+    // Плашка с номером: выворотка читается на полке быстрее всего.
+    const text = groupedId(item.item_id);
+    ctx.font = "bold " + numPx + "px " + FONT_MONO;
+    const textW = ctx.measureText(text).width;
+    const chipW = Math.min(inner, Math.round(textW + numPx * 1.1));
+    const chipX = Math.round((canvas.width - chipW) / 2);
+    roundRect(ctx, chipX, y, chipW, chipH, Math.round(chipH * 0.28));
+    ctx.fillStyle = "#000000";
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.fillText(text, canvas.width / 2, y + chipPadY);
+    y += chipH;
+
+    ctx.fillStyle = "#000000";
+    if (bottomLines.length) {
+      y += Math.round(gap * 0.5);
+      ctx.font = orgPx + "px " + FONT_SANS;
+      bottomLines.forEach((line) => {
+        ctx.fillText(line, canvas.width / 2, y);
+        y += Math.round(orgPx * 1.25);
       });
-      y += lineGap;
-    });
+    }
+    ctx.textAlign = "left";
+    // Отдаём измеренную геометрию: так о ней можно спросить, а не вычислять её
+    // обратно из картинки.
+    canvas.dataset.qrMm = (qrSide / (DOTS_PER_MM * k)).toFixed(2);
+    canvas.dataset.dot = String(Math.round(dot / k));
+    canvas.dataset.bottomLines = String(bottomLines.length);
     return canvas;
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
   }
 
   function wrapText(ctx, text, maxWidth) {
@@ -318,7 +412,7 @@ const LabelsScreen = (() => {
       else { rows.push(current); current = word; }
     });
     if (current) rows.push(current);
-    return rows.slice(0, 3);   // больше трёх строк на этикетку не влезает
+    return rows;
   }
 
   function saveImages() {
@@ -335,7 +429,7 @@ const LabelsScreen = (() => {
     // По одному файлу с паузой: браузеры глушат пачку скачиваний подряд.
     items.forEach((item, index) => {
       setTimeout(() => {
-        QR.downloadCanvas(labelCanvas(item, size),
+        QR.downloadCanvas(labelCanvas(item, size, caption(), 1),
           "mifs-" + item.item_id + "-" + size.w + "x" + size.h + "mm.png");
       }, index * 300);
     });
@@ -345,5 +439,7 @@ const LabelsScreen = (() => {
     Router.register("labels", { onShow });
   }
 
-  return { init };
+  // Отрисовщик наружу: демо-лист с образцами печатается тем же кодом, что и
+  // склад. Иначе «на демо было так» и «печатается вот так» однажды разойдутся.
+  return { init, SIZES, labelCanvas };
 })();

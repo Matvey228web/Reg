@@ -476,7 +476,10 @@ const ScanScreen = (() => {
 
   function init() {
     document.getElementById("scan-manual-submit").addEventListener("click", async () => {
-      const val = document.getElementById("scan-manual-input").value.trim();
+      // На этикетке номер напечатан группами — «01 01 01»: так его диктуют и
+      // набирают. Пробелы и дефисы при вводе поэтому просто выкидываем, иначе
+      // человек вводит ровно то, что видит, и получает «предмет не найден».
+      const val = document.getElementById("scan-manual-input").value.replace(/[\s\-]/g, "");
       if (!val) return;
       showBoxError("scan-error", "");
       await lookup(val);

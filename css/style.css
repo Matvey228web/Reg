@@ -828,36 +828,20 @@ select {
 }
 
 /* --- Этикетки ---
-   Размеры в миллиметрах: этикетка печатается на термопринтере, где страница и
-   есть этикетка. Всё, что задано в px, на печати уехало бы. */
+   Этикетка целиком рисуется на canvas в разрешении принтера: одна и та же
+   картинка идёт и в предпросмотр, и в печать, и в файл. Размер задаётся в
+   миллиметрах — на печати это физический размер ленты, и всё, что в px,
+   уехало бы. Вся раскладка живёт в js/labels.js, здесь только рамка. */
 .label {
-  display: flex;
-  align-items: center;
-  gap: 1.5mm;
-  padding: 1.5mm;
+  display: block;
   background: #fff;
-  color: #000;
-  overflow: hidden;
   box-sizing: border-box;
   border: 1px dashed var(--muted);   /* только на экране, при печати снимается */
   border-radius: 2px;
-  margin-bottom: var(--s2);
+  margin: 0 var(--s2) var(--s2) 0;
+  image-rendering: pixelated;        /* модули кода — квадраты, не пятна */
 }
-.label--small { width: 30mm; height: 20mm; }
-.label--medium { width: 40mm; height: 30mm; }
-.label--large { width: 58mm; height: 40mm; }
-.label-qr { flex: none; image-rendering: pixelated; }
-.label-text { min-width: 0; line-height: 1.15; }
-.label-id { font-family: monospace; font-weight: 700; font-size: 3.2mm; letter-spacing: 0.2mm; }
-.label-name {
-  font-size: 2.4mm;
-  margin-top: 0.8mm;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.label-caption { font-size: 2.2mm; margin-top: 0.8mm; color: #333; }
+#labels-preview { display: flex; flex-wrap: wrap; align-items: flex-start; }
 
 #labels-print-area { display: none; }
 
