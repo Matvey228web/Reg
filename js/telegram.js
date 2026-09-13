@@ -55,6 +55,29 @@ const TG = (() => {
     for (const [key, value] of Object.entries(map)) {
       if (value) root.setProperty(key, value);
     }
+    markScheme(webApp.themeParams.bg_color);
+  }
+
+  // Светлая тема или тёмная — нам нужно знать это самим, а не только через
+  // переменные. Полупрозрачный серый, которым заданы все наши поверхности,
+  // на белом фоне даёт заметную подложку, а на тёмном (#18222d) почти не
+  // виден: карточки сливались с фоном. Telegram признака темы не присылает,
+  // поэтому считаем яркость фона и ставим её на корень документа.
+  function markScheme(bgColor) {
+    const dark = isDarkColor(bgColor);
+    if (dark === null) return;
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }
+
+  function isDarkColor(value) {
+    const hex = String(value || "").trim().replace("#", "");
+    if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    // Воспринимаемая яркость: глаз считает зелёный ярче синего, и простое
+    // среднее по каналам путало бы синеватый тёмный фон Telegram со светлым.
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.5;
   }
 
   function getUser() {

@@ -60,6 +60,27 @@
   --tabbar-h: calc(var(--tap) + 18px);
 }
 
+/* Тёмная тема. Признак ставит js/telegram.js, посчитав яркость фона: сам
+   Telegram его не присылает. Полупрозрачный серый одинаково уместен на любом
+   фоне, но на тёмном он почти не виден — карточки сливались с фоном. Поэтому
+   на тёмной теме поверхности задаются белым с прозрачностью: оно поднимает
+   плашку над фоном, а не гасит её. */
+:root[data-theme="dark"] {
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-strong: rgba(255, 255, 255, 0.14);
+  --hairline: rgba(255, 255, 255, 0.15);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.6);
+}
+/* Вне Telegram признака нет — идём за системной темой браузера. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: rgba(255, 255, 255, 0.07);
+    --surface-strong: rgba(255, 255, 255, 0.14);
+    --hairline: rgba(255, 255, 255, 0.15);
+  }
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -73,6 +94,10 @@ html, body {
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Табличные цифры: номера, количества и суммы получают одинаковую ширину
+     знака. Без этого «010101» и «020202» занимают разную ширину, и колонка
+     номеров в списке дёргается при каждой перерисовке. */
+  font-variant-numeric: tabular-nums;
 }
 
 /* Запас под шапку Telegram даём один раз здесь, а не на каждом экране: иначе
@@ -84,7 +109,14 @@ html, body {
 }
 
 .screen { display: none; padding: var(--s3) var(--gutter) 0; }
-.screen--active { display: block; }
+.screen--active { display: block; animation: screen-in 0.18s ease-out; }
+
+/* Экран не подменяется мгновенно, а появляется: подмена без перехода читается
+   как рывок, особенно когда содержимое приходит из кэша и рисуется сразу. */
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
 
 /* Обводка по Tab — приложение открывают и в браузере на компьютере, там без
    неё не видно, где находишься. */
@@ -94,8 +126,11 @@ html, body {
   border-radius: var(--r-sm);
 }
 
-h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.2px; margin: var(--s1) 0 var(--s4); }
-h2 { font-size: 17px; font-weight: 600; margin: 0 0 var(--s3); }
+/* Иерархия задаётся размером и трекингом, а не жирностью: когда полужирным
+   набрано всё — заголовок, строка списка и бейдж, — глазу не за что зацепиться.
+   Крупному кеглю трекинг поджимаем, мелкому — нет. */
+h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; margin: var(--s1) 0 var(--s4); }
+h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; margin: 0 0 var(--s3); }
 p.hint { color: var(--muted); font-size: 13px; line-height: 1.45; margin: var(--s1) 0 var(--s4); }
 a { color: var(--tg-link-color); }
 
@@ -210,13 +245,49 @@ select {
 
 /* Заголовок строки — название слева, состояние справа. Раньше бейдж стоял
    сразу за текстом, и в списке они прыгали по строке вслед за длиной названия. */
+/* Длинные списки — не стопка плашек, а сгруппированные строки с волосяными
+   разделителями, как список чатов в самом Telegram. На 628 позициях стопка
+   серых блоков не имеет ритма: все строки одинаково заметны, и глаз не за что
+   не цепляется. Разделители идут от края до края экрана — за это отвечают
+   отрицательные поля, а отступ содержимого возвращается изнутри строки. */
+.list { margin: 0 calc(var(--gutter) * -1); }
+.list > .card {
+  background: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  min-height: 56px;
+  padding: 10px var(--gutter);
+  border-top: 1px solid var(--hairline);
+}
+.list > .card:first-child { border-top: none; }
+.list > .card:active { background: var(--surface); transform: none; }
+/* Строка списка ведёт на свой экран — говорим об этом так же, как разделы на
+   главной: уголком справа. */
+.list > .card[data-item-id]::after,
+.list > .card[data-order-id]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--gutter);
+  width: 7px;
+  height: 7px;
+  margin-top: -4px;
+  border-right: 2px solid var(--muted);
+  border-top: 2px solid var(--muted);
+  transform: rotate(45deg);
+  opacity: 0.5;
+}
+.list > .card[data-item-id],
+.list > .card[data-order-id] { position: relative; padding-right: calc(var(--gutter) + 16px); }
+
 .card-title {
   display: flex;
   align-items: center;
   gap: var(--s2);
   min-width: 0;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.1px;
   line-height: 1.3;
 }
 .card-title .badge { flex: none; }
@@ -263,20 +334,25 @@ select {
 
 /* Сводка по складу в панели: числа крупно, подпись мелко. Читается взглядом,
    а не чтением — в этом весь смысл панели. */
+/* Два столбца, а не «сколько влезет»: на трёх подписи переносились на две
+   строки и плитки выходили разной высоты. */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--s2);
   margin: var(--s3) 0;
 }
 .tile {
-  padding: var(--s3) var(--s2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 68px;
+  padding: var(--s3) var(--s4);
   border-radius: var(--r-md);
   background: var(--surface);
-  text-align: center;
 }
 .tile--warn { background: rgba(201, 42, 42, 0.12); }
-.tile-value { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.tile-value { font-size: 26px; font-weight: 700; line-height: 1.05; letter-spacing: -0.5px; }
 .tile--warn .tile-value { color: var(--danger-line); }
 .tile-label { margin-top: 4px; font-size: 11px; color: var(--muted); }
 
@@ -365,6 +441,35 @@ select {
   transform: rotate(45deg);
   opacity: 0.7;
 }
+
+/* Ручной ввод на «Скане». Раньше это была приписка под кнопкой «Сканировать»
+   («Или введите номер вручную»), то есть запасной путь мелким шрифтом. Кнопка
+   ушла — дублировала повторный тап по вкладке, — и ввод занял её место: это
+   второй по частоте способ найти предмет, когда наклейка стёрлась. */
+.scan-manual {
+  max-width: 320px;
+  margin: var(--s6) auto 0;
+  text-align: center;
+}
+.scan-manual .field { text-align: left; }
+.scan-manual .field input { text-align: center; font-family: var(--font-mono); font-size: 22px; letter-spacing: 3px; }
+.scan-manual .hint { text-align: center; }
+.scan-manual-ico {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto var(--s4);
+  color: var(--muted);
+  opacity: 0.55;
+}
+.scan-manual-ico svg {
+  width: 100%; height: 100%;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round;
+}
+/* Когда предмет найден, форма ввода уходит на второй план: главное теперь —
+   подтвердить действие, а не искать следующий. */
+.scan-manual--tucked { margin-top: var(--s5); opacity: 0.75; }
+.scan-manual--tucked .scan-manual-ico { display: none; }
 
 .qr-wrap { display: flex; flex-direction: column; align-items: center; padding: var(--s5) 0; }
 .qr-wrap canvas { background: #fff; padding: var(--s3); border-radius: var(--r-md); box-shadow: var(--shadow-1); }

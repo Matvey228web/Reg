@@ -17,18 +17,34 @@ const ScanScreen = (() => {
     session = [];
     document.getElementById("scan-order-bar").innerHTML = "";
     document.getElementById("scan-result").innerHTML = "";
-    // Пока предмет не найден, сканирование — главное действие экрана. Как только
-    // он найден и открыта форма выдачи, главным становится «Подтвердить», а
-    // сканирование уходит на второй план.
-    const startBtn = document.getElementById("scan-start-btn");
-    document.getElementById("scan-start-text").textContent = "Сканировать";
-    startBtn.classList.remove("btn--secondary");
     showBoxError("scan-error", "");
+    // Форма ввода снова главная: предмета на экране нет.
+    document.getElementById("scan-manual-wrap").classList.remove("scan-manual--tucked");
     TG.mainButton.hide();
   }
 
+  // Кнопки «Сканировать» на экране нет: камера открывается при входе, а
+  // повторный тап по вкладке «Скан» открывает её снова. Но там, где сканера
+  // нет вовсе — старый клиент Telegram или обычный браузер, — молчание
+  // выглядело бы поломкой, поэтому говорим об этом прямо.
+  function renderCameraState() {
+    const box = document.getElementById("scan-no-camera");
+    const hint = document.getElementById("scan-manual-hint");
+    if (TG.hasScanQr()) {
+      box.innerHTML = "";
+      hint.textContent = "Наведите камеру на QR — она открылась сама. " +
+        "Чтобы открыть её снова, нажмите «Скан» в панели внизу.";
+      return;
+    }
+    box.innerHTML = `<p class="hint">Сканер здесь недоступен: в обычном браузере
+      его нет, а в Telegram он появляется начиная с версии 6.4. Введите номер
+      с наклейки руками — он написан под QR.</p>`;
+    hint.textContent = "";
+  }
+
   // silent: при автозапуске не показываем ошибку «сканера нет» — в обычном
-  // браузере его и не должно быть, там работают ручной ввод и кнопка.
+  // браузере его и не должно быть, там остаётся ручной ввод, и о его
+  // отсутствии сказано отдельной строкой над полем.
   async function startScan(silent) {
     showBoxError("scan-error", "");
     if (silent && !TG.hasScanQr()) return;
@@ -58,8 +74,6 @@ const ScanScreen = (() => {
       else mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
       preferredMode = null;
       if (mode === "checkout") await loadOrders();
-      document.getElementById("scan-start-text").textContent = "Сканировать ещё раз";
-      document.getElementById("scan-start-btn").classList.add("btn--secondary");
       renderItem();
     } catch (err) {
       currentItem = null;
@@ -164,6 +178,9 @@ const ScanScreen = (() => {
   }
 
   function renderItem() {
+    // Предмет найден — главным стало подтверждение действия, а не поиск
+    // следующего: убираем поле ввода на второй план, но не прячем совсем.
+    document.getElementById("scan-manual-wrap").classList.add("scan-manual--tucked");
     const result = document.getElementById("scan-result");
     const item = currentItem;
     const defectsHtml = item.open_defects && item.open_defects.length
@@ -431,6 +448,7 @@ const ScanScreen = (() => {
 
   function onShow(params) {
     reset();
+    renderCameraState();
     // Пришли с карточки заказа: заказ выбран, дальше только сканируем позиции.
     if (params && params.orderId !== undefined && params.orderId !== null) {
       lockedOrder = {
@@ -450,13 +468,13 @@ const ScanScreen = (() => {
       lookup(String(params.itemId));
       return;
     }
-    // Камера открывается сразу: на складе это главное действие, и лишний тап
-    // по кнопке здесь только мешал.
+    // Камера открывается сразу: на складе это главное действие. Повторный тап
+    // по вкладке «Скан» снова приводит сюда же и открывает её заново — отдельная
+    // кнопка для этого не нужна.
     startScan(true);
   }
 
   function init() {
-    document.getElementById("scan-start-btn").addEventListener("click", () => startScan(false));
     document.getElementById("scan-manual-submit").addEventListener("click", async () => {
       const val = document.getElementById("scan-manual-input").value.trim();
       if (!val) return;

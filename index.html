@@ -115,7 +115,7 @@
 
     <div id="catalog-qr-result" class="section" style="display:none;"></div>
     <div class="refresh-row" id="catalog-refresh"></div>
-    <div id="catalog-list"></div>
+    <div class="list" id="catalog-list"></div>
     <div id="catalog-more"></div>
   </div>
 
@@ -126,16 +126,23 @@
     <div id="scan-order-bar"></div>
     <div id="scan-error"></div>
     <div id="scan-result"></div>
-    <!-- Текст меняется на «ещё раз» после первого найденного предмета: при
-         входе на экран сканировать ещё нечего было. -->
-    <button class="btn" id="scan-start-btn">
-      <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>
-      <span id="scan-start-text">Сканировать</span>
-    </button>
-    <div class="field" id="scan-manual-wrap">
-      <label for="scan-manual-input">Или введите номер вручную</label>
-      <input type="text" id="scan-manual-input" inputmode="numeric" placeholder="010101" />
-      <button class="btn btn--secondary" id="scan-manual-submit" style="margin-top:8px;">Найти</button>
+    <!-- Кнопки «Сканировать» здесь нет намеренно: камера открывается при входе
+         на экран, а повторный тап по вкладке «Скан» открывает её снова. Кнопка
+         дублировала этот жест и занимала место главного действия. Освободившееся
+         место отдано ручному вводу — он нужен, когда наклейка стёрлась или
+         сканер в этой версии Telegram недоступен. -->
+    <div class="scan-manual" id="scan-manual-wrap">
+      <div class="scan-manual-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>
+      </div>
+      <div id="scan-no-camera"></div>
+      <div class="field">
+        <label for="scan-manual-input">Номер предмета</label>
+        <input type="text" id="scan-manual-input" inputmode="numeric" placeholder="010101" />
+      </div>
+      <button class="btn btn--secondary" id="scan-manual-submit">Найти</button>
+      <p class="hint" id="scan-manual-hint">Наведите камеру на QR — она открылась сама.
+      Чтобы открыть её снова, нажмите «Скан» в панели внизу.</p>
     </div>
   </div>
 
@@ -156,7 +163,7 @@
       </select>
     </div>
     <div class="refresh-row" id="repair-refresh"></div>
-    <div id="repair-list"></div>
+    <div class="list" id="repair-list"></div>
   </div>
 
   <!-- Экран: заказы с сайта брони (раньше здесь были «Клиенты») -->
@@ -177,7 +184,7 @@
     <div class="sticky-bar"><button class="btn" id="orders-add-toggle">+ Новый заказ</button></div>
     <div id="orders-add" class="section" style="display:none;"></div>
     <div class="refresh-row" id="orders-refresh"></div>
-    <div id="orders-list"></div>
+    <div class="list" id="orders-list"></div>
   </div>
 
   <!-- Экран: один заказ.

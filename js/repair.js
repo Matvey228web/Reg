@@ -46,7 +46,7 @@ const RepairScreen = (() => {
           </div>` : "";
         return `
           <div class="card">
-            <div class="card-title">${escapeHtml(item ? item.name : d.item_id)} ${statusBadge(d.status)}</div>
+            <div class="card-title">${escapeHtml(item ? item.name : d.item_id)} ${statusChip(d.status)}</div>
             <div class="card-sub">${escapeHtml(d.item_id)} · ${escapeHtml(STATUS_LABELS[d.severity] || d.severity)}</div>
             <div class="card-sub">${escapeHtml(d.description || "")}</div>
             <div class="card-sub">Заявлен: ${formatDate(d.reported_at)}</div>

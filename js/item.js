@@ -64,7 +64,7 @@ const ItemScreen = (() => {
       .sort((a, b) => new Date(b.checked_out_at) - new Date(a.checked_out_at))
       .map((t) => `
         <div class="card">
-          <div class="card-title">${escapeHtml(txLabel(t))} ${statusBadge(t.status)}</div>
+          <div class="card-title">${escapeHtml(txLabel(t))} ${statusChip(t.status)}</div>
           <div class="card-sub">Выдано: ${formatDate(t.checked_out_at)}${t.checked_in_at ? " · Принято: " + formatDate(t.checked_in_at) : ""}</div>
         </div>`).join("") || `<p class="empty">Пока не было выдач</p>`;
 
@@ -73,7 +73,7 @@ const ItemScreen = (() => {
       .sort((a, b) => new Date(b.reported_at) - new Date(a.reported_at))
       .map((d) => `
         <div class="card">
-          <div class="card-title">${escapeHtml(STATUS_LABELS[d.severity] || d.severity)} ${statusBadge(d.status)}</div>
+          <div class="card-title">${escapeHtml(STATUS_LABELS[d.severity] || d.severity)} ${statusChip(d.status)}</div>
           <div class="card-sub">${escapeHtml(d.description || "")}</div>
           <div class="card-sub">Заявлен: ${formatDate(d.reported_at)}</div>
         </div>`).join("") || `<p class="empty">Дефектов не было</p>`;

@@ -99,7 +99,7 @@ const CatalogScreen = (() => {
     else if (item.inventory_number) meta.push("инв. " + item.inventory_number);
     return `
       <div class="card" data-item-id="${escapeHtml(item.item_id)}">
-        <div class="card-title">${escapeHtml(item.name)} ${statusBadge(item.status)}</div>
+        <div class="card-title">${escapeHtml(item.name)} ${statusChip(item.status)}</div>
         <div class="card-sub">${escapeHtml(meta.join(" · "))}</div>
       </div>`;
   }

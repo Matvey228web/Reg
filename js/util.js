@@ -34,6 +34,18 @@ function statusBadge(status) {
   return `<span class="badge ${statusBadgeClass(status)}">${escapeHtml(STATUS_LABELS[status] || status)}</span>`;
 }
 
+// Обычные состояния, которые в списке помечать незачем: ими описана почти
+// каждая строка. Зелёное «ДОСТУПНО» на 628 позициях кричало о норме, и
+// исключение — «в ремонте», «просрочен» — терялось среди этого крика.
+const QUIET_STATUSES = ["Available", "Resolved", "Closed", "Returned"];
+
+// Бейдж для длинного списка: у нормы его нет, у исключения он тот же самый.
+// На экранах, где статус и есть ответ на вопрос («можно ли выдать?»), по
+// -прежнему используется statusBadge() — там терять его нельзя.
+function statusChip(status) {
+  return QUIET_STATUSES.indexOf(status) === -1 ? statusBadge(status) : "";
+}
+
 // Действующий справочник категорий: с бэкенда, если он уже приходил, иначе
 // запасной из CONFIG. Обёртка нужна, чтобы экраны не знали, откуда он взялся.
 function categoryList() {

@@ -71,7 +71,7 @@ const OrdersScreen = (() => {
       <div class="card" data-order-id="${order.order_id}">
         <div class="card-title">
           <span class="order-no"><span class="order-no-sign">№</span>${escapeHtml(order.order_no)}</span>
-          ${statusBadge(order.status)}
+          ${statusChip(order.status)}
           ${overdue ? `<span class="badge badge--open">Просрочен</span>` : ""}
         </div>
         <div class="card-sub">${escapeHtml(order.student_name || "—")}${order.is_adult ? "" : " · с представителем"}</div>
