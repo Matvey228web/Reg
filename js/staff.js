@@ -6,6 +6,8 @@ const StaffScreen = (() => {
     return Auth.getSession() || {};
   }
 
+  let iAmOwner = false;
+
   async function loadList() {
     const list = document.getElementById("staff-list");
     list.innerHTML = skeleton(3);
@@ -15,32 +17,21 @@ const StaffScreen = (() => {
         list.innerHTML = `<p class="empty">Сотрудников пока нет</p>`;
         return;
       }
-      list.innerHTML = "";
       const me = mySession();
-      staffList.forEach((s) => {
-        const card = `
-          <div class="card">
-            <div class="card-title">${escapeHtml(s.full_name)} ${s.active ? "" : '<span class="badge badge--retired">Отключён</span>'}</div>
-            <div class="card-sub">${escapeHtml(s.login)} · ${s.role === "Admin" ? "Администратор" : "Сотрудник склада"}</div>
-            <button class="btn btn--secondary" data-toggle-active="${s.staff_id}" data-active="${s.active}" style="margin-top:8px; width:auto;">
-              ${s.active ? "Отключить" : "Включить"}
-            </button>
-            <button class="btn btn--secondary" data-reset-pin="${s.staff_id}" data-name="${escapeHtml(s.full_name)}" style="margin-top:8px; width:auto;">
-              Сбросить PIN
-            </button>
-          </div>`;
+      // Кто главный, решает сервер. Старый бэкенд этого поля не отдаёт — тогда
+      // считаем, что главных нет, и лишних кнопок не рисуем.
+      iAmOwner = staffList.some((s) => s.is_owner && String(s.staff_id) === String(me.staff_id));
+      document.getElementById("staff-add-toggle").style.display = iAmOwner ? "" : "none";
+      document.getElementById("staff-owner-hint").innerHTML = iAmOwner
+        ? `<p class="hint">Вы главный администратор: только вы заводите и удаляете
+           сотрудников. Эту роль нельзя удалить — её можно только передать другому
+           администратору.</p>`
+        : `<p class="hint">Заводить и удалять сотрудников может только главный
+           администратор.</p>`;
 
-        // Себя удалить нельзя — свайп для своей строки не навешиваем, чтобы не
-        // предлагать действие, которое сервер всё равно отклонит.
-        if (String(s.staff_id) === String(me.staff_id)) {
-          list.insertAdjacentHTML("beforeend", `<div class="swipe"><div class="swipe-body">${card}</div></div>`);
-        } else {
-          list.appendChild(Swipe.row(card, {
-            actionLabel: "Удалить",
-            actionIcon: "🗑",
-            onAction: ({ close }) => confirmDelete(s, close),
-          }));
-        }
+      list.innerHTML = "";
+      staffList.forEach((s) => {
+        list.insertAdjacentHTML("beforeend", cardHtml(s, me));
       });
 
       list.querySelectorAll("[data-toggle-active]").forEach((btn) => {
@@ -49,26 +40,109 @@ const StaffScreen = (() => {
       list.querySelectorAll("[data-reset-pin]").forEach((btn) => {
         btn.addEventListener("click", () => resetPin(btn.dataset.resetPin, btn.dataset.name));
       });
+      list.querySelectorAll("[data-delete]").forEach((btn) => {
+        btn.addEventListener("click", () => confirmDelete(JSON.parse(btn.dataset.person)));
+      });
+      list.querySelectorAll("[data-set-role]").forEach((btn) => {
+        btn.addEventListener("click", () => setRole(JSON.parse(btn.dataset.person), btn.dataset.setRole));
+      });
+      list.querySelectorAll("[data-transfer]").forEach((btn) => {
+        btn.addEventListener("click", () => confirmTransfer(JSON.parse(btn.dataset.person)));
+      });
     } catch (err) {
       list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
     }
   }
 
+  // Удаление — обычная кнопка, а не свайп. Свайп на складе не находят: жест
+  // ничем не подписан, и снаружи система выглядела как «умеет только
+  // отключать».
+  function cardHtml(person, me) {
+    const isMe = String(person.staff_id) === String(me.staff_id);
+    const json = escapeHtml(JSON.stringify({
+      staff_id: person.staff_id, full_name: person.full_name, role: person.role,
+    }));
+    const buttons = [];
+
+    if (!person.is_owner) {
+      buttons.push(`<button class="btn btn--secondary" data-toggle-active="${person.staff_id}"
+        data-active="${person.active}">${person.active ? "Отключить" : "Включить"}</button>`);
+    }
+    if (!person.is_owner || isMe) {
+      buttons.push(`<button class="btn btn--secondary" data-reset-pin="${person.staff_id}"
+        data-name="${escapeHtml(person.full_name)}">Сбросить PIN</button>`);
+    }
+    if (iAmOwner && !person.is_owner) {
+      buttons.push(`<button class="btn btn--secondary" data-set-role="${person.role === "Admin" ? "Warehouse Staff" : "Admin"}"
+        data-person="${json}">${person.role === "Admin" ? "Снять администратора" : "Сделать администратором"}</button>`);
+      if (person.role === "Admin" && person.active) {
+        buttons.push(`<button class="btn btn--secondary" data-transfer data-person="${json}">Передать главные права</button>`);
+      }
+      buttons.push(`<button class="btn btn--danger" data-delete data-person="${json}">Удалить</button>`);
+    }
+
+    return `
+      <div class="card">
+        <div class="card-title">
+          ${escapeHtml(person.full_name)}
+          ${person.is_owner ? `<span class="badge badge--owner">Главный</span>` : ""}
+          ${person.active ? "" : `<span class="badge badge--retired">Отключён</span>`}
+        </div>
+        <div class="card-sub">${escapeHtml(person.login)} · ${escapeHtml(roleLabel(person))}${isMe ? " · это вы" : ""}</div>
+        ${buttons.length ? `<div class="staff-actions">${buttons.join("")}</div>` : ""}
+      </div>`;
+  }
+
   // Удаление необратимо, поэтому спрашиваем. История при этом не пострадает:
   // в журнале рядом с номером сотрудника хранится его имя.
-  function confirmDelete(staff, closeSwipe) {
+  function confirmDelete(person) {
     TG.showConfirm(
-      `Удалить ${staff.full_name}? Войти он больше не сможет. ` +
+      `Удалить ${person.full_name}? Войти он больше не сможет. ` +
       `Записи в журнале выдач останутся — там сохранено его имя.`,
       async (yes) => {
-        if (!yes) { closeSwipe(); return; }
+        if (!yes) return;
         try {
-          await apiPost("/staff/delete", { staff_id: Number(staff.staff_id) });
+          const res = await apiPost("/staff/delete", { staff_id: Number(person.staff_id) });
           TG.hapticSuccess();
+          // Называем того, кого удалили, по имени: это единственный способ
+          // заметить, если удалился не тот.
+          TG.showAlert("Удалён: " + ((res && res.full_name) || person.full_name));
           loadList();
         } catch (err) {
           TG.hapticError();
-          closeSwipe();
+          TG.showAlert(err.message);
+        }
+      });
+  }
+
+  async function setRole(person, role) {
+    try {
+      await apiPost("/staff/set-role", { staff_id: Number(person.staff_id), role });
+      TG.hapticSuccess();
+      loadList();
+    } catch (err) {
+      TG.hapticError();
+      TG.showAlert(err.message);
+    }
+  }
+
+  // Передача главных прав — единственный способ перестать быть главным, и
+  // отменить её сможет только тот, кому передали. Поэтому спрашиваем прямо.
+  function confirmTransfer(person) {
+    TG.showConfirm(
+      `Передать главные права: ${person.full_name}? После этого заводить и ` +
+      `удалять сотрудников будет он, а не вы. Вернуть права сможет только он.`,
+      async (yes) => {
+        if (!yes) return;
+        try {
+          await apiPost("/staff/transfer-owner", { staff_id: Number(person.staff_id) });
+          TG.hapticSuccess();
+          TG.showAlert("Главный администратор теперь " + person.full_name);
+          const session = Auth.getSession();
+          if (session) Auth.setSession({ ...session, is_owner: false });
+          loadList();
+        } catch (err) {
+          TG.hapticError();
           TG.showAlert(err.message);
         }
       });

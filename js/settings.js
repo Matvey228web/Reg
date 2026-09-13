@@ -55,6 +55,8 @@ const SettingsScreen = (() => {
     const hints = data.limits || {};
 
     box.innerHTML = `
+      ${panelHtml()}
+
       <div class="section">
         <h2>Категории</h2>
         <p class="hint">Номер категории — первые две цифры номера предмета. У категории,
@@ -118,6 +120,46 @@ const SettingsScreen = (() => {
 
     renderCategories();
     bind();
+  }
+
+  // Панель главного администратора. Смысл не в красоте, а в том, чтобы одним
+  // взглядом видеть состояние склада: что на руках, что просрочено, что
+  // сломано. Раньше за каждым числом надо было идти на свой экран и ждать
+  // ответа таблицы.
+  function panelHtml() {
+    const me = data.me || {};
+    const owner = data.owner;
+    const s = data.summary;
+    if (!s && !owner) return "";   // старый бэкенд — панели просто нет
+
+    const tile = (value, label, warn) =>
+      `<div class="tile${warn ? " tile--warn" : ""}">
+         <div class="tile-value">${escapeHtml(String(value))}</div>
+         <div class="tile-label">${escapeHtml(label)}</div>
+       </div>`;
+
+    return `
+      <div class="section">
+        <h2>${me.is_owner ? "Панель главного администратора" : "Панель администратора"}</h2>
+        ${owner
+          ? `<p class="hint">Главный администратор — ${escapeHtml(owner.full_name)}${me.is_owner ? " (это вы)" : ""}.
+             ${me.is_owner
+               ? "Только вы заводите и удаляете сотрудников. Эту роль нельзя удалить — её можно только передать на экране «Сотрудники»."
+               : "Заводить и удалять сотрудников может только он."}</p>`
+          : ""}
+        ${s ? `
+        <div class="tiles">
+          ${tile(s.items, "позиций в каталоге")}
+          ${tile(s.open_transactions, "на руках")}
+          ${tile(s.overdue_transactions, "просрочено", s.overdue_transactions > 0)}
+          ${tile(s.open_defects, "открытых дефектов", s.open_defects > 0)}
+          ${tile(s.orders_issued, "заказов выдано")}
+          ${tile(s.orders_new, "заказов ждут выдачи")}
+          ${tile(s.in_repair, "в ремонте", s.in_repair > 0)}
+          ${tile(s.staff_active, "сотрудников в строю")}
+        </div>` : ""}
+        <button class="btn btn--secondary" id="settings-go-staff">Сотрудники и права</button>
+      </div>`;
   }
 
   function renderCategories() {
@@ -232,6 +274,8 @@ const SettingsScreen = (() => {
   }
 
   function bind() {
+    const staffBtn = document.getElementById("settings-go-staff");
+    if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
     document.getElementById("settings-cat-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("settings-cat-form");
       form.style.display = form.style.display === "none" ? "block" : "none";

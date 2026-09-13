@@ -163,14 +163,20 @@ const MockStore = (() => {
   let nextClientId = 3;
   let nextTransactionId = 4;
   let nextDefectId = 2;
-  let nextStaffId = 3;
+  let nextStaffId = 4;   // 1–3 заняты демо-сотрудниками
   let nextStudentId = 2;
   let nextOrderId = 3;
 
   const staff = [
     { staff_id: 1, full_name: "Иван Петров", login: "ivan", pin: "1234", role: "Warehouse Staff", active: true },
     { staff_id: 2, full_name: "Мария Сидорова", login: "maria", pin: "0000", role: "Admin", active: true },
+    { staff_id: 3, full_name: "Олег Второв", login: "oleg", pin: "2222", role: "Admin", active: true },
   ];
+
+  // Главный администратор: в настоящем бэкенде это ключ owner_staff_id в Meta.
+  // Здесь — та же одна ссылка, чтобы правила «нельзя удалить, можно передать»
+  // проверялись тем же путём, что и на складе.
+  let ownerStaffId = 2;
 
   const equipment = [
     {
@@ -398,6 +404,17 @@ const MockStore = (() => {
     staff, equipment, clients, transactions, defects, tokens,
     students, orders, orderItems,
     findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin, rotateToken,
+    ownerId: () => ownerStaffId,
+    setOwnerId: (id) => { ownerStaffId = id; },
+    requireOwner(token) {
+      const staff_id = requireToken(token);
+      if (String(staff_id) !== String(ownerStaffId)) {
+        const e = new Error("Действие доступно только главному администратору");
+        e.status = 403;
+        throw e;
+      }
+      return findStaffById(staff_id);
+    },
     models,
     nextStudentId: () => nextStudentId++,
     nextOrderId: () => nextOrderId++,
@@ -447,7 +464,8 @@ const MockAPI = {
         }
         const tok = "mock-token-" + s.staff_id + "-" + Date.now();
         MockStore.tokens.set(tok, s.staff_id);
-        return { token: tok, ...MockStore.staffPublic(s), settings: { ...mockSettings }, categories: mockCategories() };
+        return { token: tok, ...MockStore.staffPublic(s), is_owner: String(s.staff_id) === String(MockStore.ownerId()),
+                 settings: { ...mockSettings }, categories: mockCategories() };
       }
 
       case "/item/lookup": {
@@ -890,7 +908,7 @@ const MockAPI = {
             e.status = 403;
             throw e;
           }
-          MockStore.requireAdmin(token);
+          MockStore.requireOwner(token);
         }
         const loginTaken = MockStore.staff.some((s) => s.login.toLowerCase() === login.toLowerCase());
         if (loginTaken) {
@@ -907,13 +925,39 @@ const MockAPI = {
       }
 
       case "/settings/get": {
-        MockStore.requireToken(token);
+        const meId = MockStore.requireToken(token);
+        const me = MockStore.findStaffById(meId);
+        const owner = MockStore.findStaffById(MockStore.ownerId());
         const hints = {};
         Object.keys(MOCK_SETTINGS_SPEC).forEach((k) => { hints[k] = MOCK_SETTINGS_SPEC[k].hint; });
+        const today = new Date().toISOString().substring(0, 10);
+        const openTx = MockStore.transactions.filter((t) => t.status === "Open");
         return {
           settings: { ...mockSettings },
           categories: mockCategories(),
           limits: hints,
+          me: { staff_id: me.staff_id, full_name: me.full_name, role: me.role,
+                is_owner: String(me.staff_id) === String(MockStore.ownerId()) },
+          owner: owner ? { staff_id: owner.staff_id, full_name: owner.full_name } : null,
+          summary: {
+            items: MockStore.equipment.length,
+            available: MockStore.equipment.filter((i) => i.status === "Available").length,
+            rented: MockStore.equipment.filter((i) => i.status === "Rented").length,
+            in_repair: MockStore.equipment.filter((i) => i.status === "In Repair").length,
+            retired: MockStore.equipment.filter((i) => i.status === "Retired").length,
+            open_transactions: openTx.length,
+            overdue_transactions: openTx.filter((t) =>
+              String(t.expected_return_at || "").substring(0, 10) < today &&
+              t.expected_return_at).length,
+            open_defects: MockStore.defects.filter((d) => d.status === "Open").length,
+            orders: MockStore.orders.length,
+            orders_new: MockStore.orders.filter((o) => o.status === "New").length,
+            orders_issued: MockStore.orders.filter((o) => o.status === "Issued").length,
+            orders_overdue: 0,
+            staff: MockStore.staff.length,
+            staff_active: MockStore.staff.filter((x) => x.active).length,
+            admins: MockStore.staff.filter((x) => x.role === "Admin").length,
+          },
           maintenance: { journal_archived_at: "", journal_trimmed_at: "" },
         };
       }
@@ -1038,15 +1082,89 @@ const MockAPI = {
 
       case "/staff/list": {
         MockStore.requireAdmin(token);
-        return MockStore.staff.map(({ staff_id, full_name, login, role, active }) => ({ staff_id, full_name, login, role, active }));
+        return MockStore.staff.map(({ staff_id, full_name, login, role, active }) => ({
+          staff_id, full_name, login, role, active,
+          is_owner: String(staff_id) === String(MockStore.ownerId()),
+        }));
       }
 
       case "/staff/set-active": {
         MockStore.requireAdmin(token);
         const s = MockStore.findStaffById(body.staff_id);
         if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (String(s.staff_id) === String(MockStore.ownerId())) {
+          const e = new Error("Главного администратора отключить нельзя — права можно только передать");
+          e.status = 409; throw e;
+        }
         s.active = !!body.active;
-        return {};
+        return { staff_id: s.staff_id, full_name: s.full_name, active: s.active };
+      }
+
+      case "/staff/delete": {
+        const me = MockStore.requireOwner(token);
+        const s = MockStore.findStaffById(body.staff_id);
+        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (String(s.staff_id) === String(me.staff_id)) {
+          const e = new Error("Нельзя удалить самого себя"); e.status = 409; throw e;
+        }
+        if (String(s.staff_id) === String(MockStore.ownerId())) {
+          const e = new Error("Главного администратора удалить нельзя — права можно только передать");
+          e.status = 409; throw e;
+        }
+        MockStore.staff.splice(MockStore.staff.indexOf(s), 1);
+        return { staff_id: s.staff_id, full_name: s.full_name };
+      }
+
+      case "/staff/set-role": {
+        MockStore.requireOwner(token);
+        const s = MockStore.findStaffById(body.staff_id);
+        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (String(s.staff_id) === String(MockStore.ownerId())) {
+          const e = new Error("Роль главного администратора не меняется — права можно только передать");
+          e.status = 409; throw e;
+        }
+        s.role = body.role;
+        return { staff_id: s.staff_id, full_name: s.full_name, role: s.role };
+      }
+
+      case "/staff/transfer-owner": {
+        const me = MockStore.requireOwner(token);
+        const s = MockStore.findStaffById(body.staff_id);
+        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (String(s.staff_id) === String(me.staff_id)) {
+          const e = new Error("Вы и так главный администратор"); e.status = 409; throw e;
+        }
+        if (!s.active) {
+          const e = new Error("Передать права можно только действующему сотруднику"); e.status = 409; throw e;
+        }
+        s.role = "Admin";
+        MockStore.setOwnerId(s.staff_id);
+        return { staff_id: s.staff_id, full_name: s.full_name };
+      }
+
+      case "/staff/set-pin": {
+        const meId = MockStore.requireToken(token);
+        const me = MockStore.findStaffById(meId);
+        const targetId = body.staff_id === undefined || body.staff_id === null || body.staff_id === ""
+          ? meId : body.staff_id;
+        const s = MockStore.findStaffById(targetId);
+        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
+        if (!/^\d{4,6}$/.test(String(body.pin || ""))) {
+          const e = new Error("PIN — от 4 до 6 цифр"); e.status = 400; throw e;
+        }
+        if (String(targetId) === String(meId)) {
+          if (String(body.current_pin || "") !== s.pin) {
+            const e = new Error("Текущий PIN указан неверно"); e.status = 403; throw e;
+          }
+        } else if (me.role !== "Admin") {
+          const e = new Error("Менять PIN другому сотруднику может только администратор");
+          e.status = 403; throw e;
+        } else if (String(targetId) === String(MockStore.ownerId())) {
+          const e = new Error("PIN главного администратора меняет только он сам");
+          e.status = 409; throw e;
+        }
+        s.pin = String(body.pin);
+        return { staff_id: s.staff_id };
       }
 
       default: {

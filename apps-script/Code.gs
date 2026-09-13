@@ -827,6 +827,8 @@ function doPost(e) {
       case "/staff/set-active": data = handleStaffSetActive(payload, token); break;
       case "/staff/set-pin": data = handleStaffSetPin(payload, token); break;
       case "/staff/delete": data = handleStaffDelete(payload, token); break;
+      case "/staff/set-role": data = handleStaffSetRole(payload, token); break;
+      case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
       case "/settings/get": data = handleSettingsGet(payload, token); break;
       case "/settings/set": data = handleSettingsSet(payload, token); break;
       case "/category/create": data = handleCategoryCreate(payload, token); break;
@@ -907,6 +909,7 @@ function handleAuthLogin(payload) {
     staff_id: staffRow.staff_id,
     full_name: staffRow.full_name,
     role: staffRow.role,
+    is_owner: isOwnerId(staffRow.staff_id),
     settings: getSettings(),
     categories: categories(),
   };
@@ -1988,7 +1991,10 @@ function handleStaffCreate(payload, token) {
           : "Первый администратор уже создавался. Чтобы завести его заново, " +
             "удалите строку bootstrap_done на листе Meta.");
       }
-      requireAdmin(token);
+      // Заводит сотрудников только главный администратор: учётная запись — это
+      // доступ к складу, и раздавать его должен один человек, а не каждый, кому
+      // однажды дали роль администратора.
+      requireOwner(token);
     }
 
     var loginLower = login.toLowerCase();
@@ -1996,7 +2002,10 @@ function handleStaffCreate(payload, token) {
     if (taken) throw apiError(409, "Такой логин уже используется");
 
     var staffId = nextId("staff_id", maxIdIn(sheet, "staff_id"));
-    if (isBootstrap) metaSet("bootstrap_done", new Date().toISOString());
+    if (isBootstrap) {
+      metaSet("bootstrap_done", new Date().toISOString());
+      metaSet("owner_staff_id", staffId);   // первый администратор и есть главный
+    }
     appendRow(sheet, {
       staff_id: staffId,
       full_name: payload.full_name || login,
@@ -2016,8 +2025,13 @@ function handleStaffCreate(payload, token) {
 
 function handleStaffList(payload, token) {
   requireAdmin(token);
+  var owner = ownerId();
   return readRows(getSheet(SHEETS.STAFF)).map(function (r) {
-    return { staff_id: r.staff_id, full_name: r.full_name, login: r.login, role: r.role, active: isTruthyCell(r.active) };
+    return {
+      staff_id: r.staff_id, full_name: r.full_name, login: r.login, role: r.role,
+      active: isTruthyCell(r.active),
+      is_owner: !!owner && String(r.staff_id) === owner,
+    };
   });
 }
 
@@ -2026,8 +2040,55 @@ function handleStaffSetActive(payload, token) {
   var sheet = getSheet(SHEETS.STAFF);
   var staffRow = findRowByValue(sheet, "staff_id", payload.staff_id);
   if (!staffRow) throw apiError(404, "Сотрудник не найден");
-  updateRow(sheet, staffRow.__row, { active: !!payload.active });
-  return {};
+  if (isOwnerId(staffRow.staff_id)) {
+    throw apiError(409, "Главного администратора отключить нельзя — права можно только передать");
+  }
+  var patch = { active: !!payload.active };
+  // Отключение должно действовать сразу. Сессия живёт токеном в строке, и без
+  // его сброса отключённый продолжал бы работать до конца срока сессии.
+  if (!payload.active) {
+    patch.session_token = "";
+    patch.token_issued_at = "";
+  }
+  updateRow(sheet, staffRow.__row, patch);
+  return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, active: !!payload.active };
+}
+
+// Смена роли: повысить складского сотрудника до администратора и обратно.
+function handleStaffSetRole(payload, token) {
+  requireOwner(token);
+  var role = String(payload.role || "");
+  if (role !== "Admin" && role !== "Warehouse Staff") {
+    throw apiError(400, "Роль — «Admin» или «Warehouse Staff»");
+  }
+  var sheet = getSheet(SHEETS.STAFF);
+  var staffRow = findRowByValue(sheet, "staff_id", payload.staff_id);
+  if (!staffRow) throw apiError(404, "Сотрудник не найден");
+  if (isOwnerId(staffRow.staff_id)) {
+    throw apiError(409, "Роль главного администратора не меняется — права можно только передать");
+  }
+  updateRow(sheet, staffRow.__row, { role: role });
+  return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, role: role };
+}
+
+// Передача главных прав. Единственный способ перестать быть главным
+// администратором: удалить эту роль нельзя ни у себя, ни у другого.
+function handleStaffTransferOwner(payload, token) {
+  var me = requireOwner(token);
+  var sheet = getSheet(SHEETS.STAFF);
+  var target = findRowByValue(sheet, "staff_id", payload.staff_id);
+  if (!target) throw apiError(404, "Сотрудник не найден");
+  if (String(target.staff_id) === String(me.staff_id)) {
+    throw apiError(409, "Вы и так главный администратор");
+  }
+  if (!isTruthyCell(target.active)) {
+    throw apiError(409, "Передать права можно только действующему сотруднику");
+  }
+  // Главный администратор без прав администратора — противоречие, поэтому роль
+  // поднимаем здесь же, а не оставляем это отдельным шагом, о котором забудут.
+  if (target.role !== "Admin") updateRow(sheet, target.__row, { role: "Admin" });
+  metaSet("owner_staff_id", target.staff_id);
+  return { staff_id: target.staff_id, full_name: target.full_name };
 }
 
 // ---------------------------------------------------------------------
@@ -2035,18 +2096,83 @@ function handleStaffSetActive(payload, token) {
 // ---------------------------------------------------------------------
 
 function handleSettingsGet(payload, token) {
-  checkAuth(token);
+  var me = checkAuth(token);
+  var owner = ownerId();
+  var ownerRow = owner ? findRowByValue(getSheet(SHEETS.STAFF), "staff_id", owner) : null;
   // Категории нужны любому вошедшему: без них не нарисовать ни каталог, ни
   // фильтры. Правка — отдельным эндпоинтом и только администратору.
   return {
     settings: getSettings(),
     categories: categories(),
     limits: settingsHints(),
+    me: {
+      staff_id: me.staff_id,
+      full_name: me.full_name,
+      role: me.role,
+      is_owner: isOwnerId(me.staff_id),
+    },
+    owner: ownerRow ? { staff_id: ownerRow.staff_id, full_name: ownerRow.full_name } : null,
+    // Сводка отдаётся здесь же, а не отдельным запросом: таблица отвечает
+    // 5–8 секунд, и второй запрос ради пяти чисел стоил бы этих секунд заново.
+    summary: warehouseSummary(),
     maintenance: {
       journal_archived_at: metaGet("journal_archived_at") || "",
       journal_trimmed_at: metaGet("journal_trimmed_at") || "",
     },
   };
+}
+
+// Что творится на складе одним взглядом: из чего состоит каталог, сколько на
+// руках, что просрочено и что сломано. Считается по тем же листам, которые всё
+// равно читаются — отдельного хранилища для этого заводить незачем.
+function warehouseSummary() {
+  var today = new Date().toISOString().substring(0, 10);
+  var out = {
+    items: 0, available: 0, rented: 0, in_repair: 0, retired: 0,
+    open_transactions: 0, overdue_transactions: 0,
+    open_defects: 0,
+    orders: 0, orders_new: 0, orders_issued: 0, orders_overdue: 0,
+    staff: 0, staff_active: 0, admins: 0,
+  };
+
+  readRows(getSheet(SHEETS.EQUIPMENT)).forEach(function (r) {
+    out.items += 1;
+    if (r.status === "Available") out.available += 1;
+    else if (r.status === "Rented") out.rented += 1;
+    else if (r.status === "In Repair") out.in_repair += 1;
+    else if (r.status === "Retired") out.retired += 1;
+  });
+
+  var txRows = readRows(getSheet(SHEETS.TRANSACTIONS));
+  txRows.forEach(function (t) {
+    if (t.status !== "Open") return;
+    out.open_transactions += 1;
+    var due = String(t.expected_return_at || "").substring(0, 10);
+    if (due && due < today) out.overdue_transactions += 1;
+  });
+
+  readRows(getSheet(SHEETS.DEFECTS)).forEach(function (d) {
+    if (d.status === "Open") out.open_defects += 1;
+  });
+
+  var counts = orderCounts(txRows);
+  readRows(getSheet(SHEETS.ORDERS)).forEach(function (o) {
+    out.orders += 1;
+    var status = orderStatus(o, counts[String(o.order_id)]);
+    if (status === "New") out.orders_new += 1;
+    if (status === "Issued") {
+      out.orders_issued += 1;
+      if (o.return_date && String(o.return_date).substring(0, 10) < today) out.orders_overdue += 1;
+    }
+  });
+
+  readRows(getSheet(SHEETS.STAFF)).forEach(function (r) {
+    out.staff += 1;
+    if (isTruthyCell(r.active)) out.staff_active += 1;
+    if (r.role === "Admin") out.admins += 1;
+  });
+
+  return out;
 }
 
 function settingsHints() {
@@ -2173,7 +2299,7 @@ function handleMaintenance(payload, token) {
 // Полное удаление сотрудника. История при этом не страдает: в журнале рядом с
 // номером лежит имя, поэтому «кто выдавал» читается и после удаления строки.
 function handleStaffDelete(payload, token) {
-  var me = requireAdmin(token);
+  var me = requireOwner(token);
   var sheet = getSheet(SHEETS.STAFF);
   var target = findRowByValue(sheet, "staff_id", payload.staff_id);
   if (!target) throw apiError(404, "Сотрудник не найден");
@@ -2181,16 +2307,28 @@ function handleStaffDelete(payload, token) {
   if (String(target.staff_id) === String(me.staff_id)) {
     throw apiError(409, "Нельзя удалить самого себя");
   }
-  // Иначе в систему стало бы невозможно войти как администратор.
-  if (target.role === "Admin") {
-    var admins = readRows(sheet).filter(function (r) {
-      return r.role === "Admin" && isTruthyCell(r.active);
-    });
-    if (admins.length <= 1) throw apiError(409, "Это последний администратор, удалить нельзя");
+  // Отдельным сообщением: это не «нельзя удалить админа», а «эту роль не
+  // удаляют вовсе». Спрашивают об этом именно так.
+  if (isOwnerId(target.staff_id)) {
+    throw apiError(409, "Главного администратора удалить нельзя — права можно только передать");
   }
 
-  sheet.deleteRow(target.__row);
-  return { staff_id: target.staff_id, full_name: target.full_name };
+  // Читаем строку заново прямо перед удалением. __row — это номер строки на
+  // момент чтения листа; если между чтением и удалением лист сдвинулся, по
+  // старому номеру удалился бы СОСЕД — например, тот, кто удаляет.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var fresh = findRowByValue(sheet, "staff_id", payload.staff_id);
+    if (!fresh) throw apiError(404, "Сотрудник не найден");
+    if (String(fresh.staff_id) !== String(target.staff_id)) {
+      throw apiError(409, "Список сотрудников изменился, откройте его заново");
+    }
+    sheet.deleteRow(fresh.__row);
+    return { staff_id: fresh.staff_id, full_name: fresh.full_name };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Смена PIN. Себе — с подтверждением текущего PIN (чтобы чужой человек не сменил
@@ -2220,6 +2358,10 @@ function handleStaffSetPin(payload, token) {
     }
   } else if (me.role !== "Admin") {
     throw apiError(403, "Менять PIN другому сотруднику может только администратор");
+  } else if (isOwnerId(targetId)) {
+    // Иначе смена главных прав делается в обход передачи: сбросил PIN, вошёл
+    // под ним — и ты главный.
+    throw apiError(409, "PIN главного администратора меняет только он сам");
   }
 
   var patch = {
@@ -2630,6 +2772,42 @@ function requireAdmin(token) {
   var staffRow = checkAuth(token);
   if (staffRow.role !== "Admin") {
     throw apiError(403, "Действие доступно только администратору");
+  }
+  return staffRow;
+}
+
+// --- Главный администратор ---
+//
+// Он один на систему, и его нельзя ни удалить, ни отключить, ни понизить —
+// права можно только передать. Иначе система теряется вместе с человеком: один
+// администратор снимает другого, и войти становится некому.
+//
+// Хранится ключом в Meta, а не ролью в Staff: роль правится двумя кликами прямо
+// в таблице, и «главным» стал бы кто угодно с доступом к файлу. Ключ меняется
+// только передачей через приложение.
+function ownerId() {
+  var stored = String(metaGet("owner_staff_id") || "").trim();
+  if (stored) return stored;
+  // Таблицы, заведённые до появления главного администратора: им становится
+  // самый первый созданный администратор — тот, с кого система началась.
+  var admins = readRows(getSheet(SHEETS.STAFF)).filter(function (r) {
+    return r.role === "Admin";
+  });
+  if (!admins.length) return "";
+  admins.sort(function (a, b) { return Number(a.staff_id) - Number(b.staff_id); });
+  metaSet("owner_staff_id", admins[0].staff_id);
+  return String(admins[0].staff_id);
+}
+
+function isOwnerId(staffId) {
+  var owner = ownerId();
+  return !!owner && String(staffId) === owner;
+}
+
+function requireOwner(token) {
+  var staffRow = checkAuth(token);
+  if (!isOwnerId(staffRow.staff_id)) {
+    throw apiError(403, "Действие доступно только главному администратору");
   }
   return staffRow;
 }

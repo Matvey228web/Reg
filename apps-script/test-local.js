@@ -361,6 +361,10 @@ r = call('/staff/set-active', { staff_id: 2, active: false }, token);
 check('сотрудник отключён', r.ok === true, r);
 r = call('/auth/login', { login: 'ivan', pin: '1111' });
 check('отключённый не может войти', r.ok === false && r.status === 401, r);
+// Отключение должно действовать сразу, а не когда истечёт срок сессии: иначе
+// человек с уже открытым приложением продолжает работать.
+check('прежняя сессия отключённого больше не действует',
+  call('/equipment/list', {}, ivanToken).status === 401);
 
 console.log('\n== авторизация ==');
 r = call('/equipment/list', {}, 'мусорный-токен');
@@ -790,8 +794,10 @@ r = call('/settings/set', { settings: { session_ttl_hours: 24, max_login_attempt
 check('допустимые значения сохранены', r.ok === true && r.data.settings.session_ttl_hours === 24, r);
 check('неизвестная настройка отклонена',
   call('/settings/set', { settings: { hack: 1 } }, token).status === 400);
+// Ивана к этому моменту уже отключили, и его сессия аннулирована — отказ
+// приходит на входе, до проверки роли.
 check('сотрудник склада настройки менять не может',
-  call('/settings/set', { settings: { session_ttl_hours: 2 } }, ivanToken).status === 403);
+  call('/settings/set', { settings: { session_ttl_hours: 2 } }, ivanToken).status === 401);
 
 console.log('\n== категории: добавление и защита номера ==');
 r = call('/category/create', { code: 'BAT', label: 'Аккумуляторы' }, token);
@@ -882,7 +888,7 @@ check('повторная подрезка снова требует выгру�
 
 console.log('\n== обслуживание из приложения ==');
 check('сотрудник склада обслуживание не запускает',
-  call('/maintenance', { action: 'archive' }, ivanToken).status === 403);
+  call('/maintenance', { action: 'archive' }, ivanToken).status === 401);
 check('неизвестное действие отклонено',
   call('/maintenance', { action: 'drop-everything' }, token).status === 400);
 r = call('/maintenance', { action: 'trim' }, token);
@@ -1080,6 +1086,94 @@ check('заказы на месте после перезалива', readRows(g
   [ordersBefore, readRows(getSheet(SHEETS.ORDERS)).length]);
 check('студенты на месте', readRows(getSheet(SHEETS.STUDENTS)).length === studentsBefore);
 check('состав заказов на месте', readRows(getSheet(SHEETS.ORDER_ITEMS)).length === linesBefore);
+
+console.log('\n== главный администратор ==');
+// Всё, ради чего он заведён: его нельзя ни удалить, ни отключить, ни понизить,
+// а удаление обязано убирать именно того, кого выбрали.
+// Повторный вход выдаёт новый токен и гасит прежний, поэтому дальше работаем
+// именно им.
+const ownerLogin = call('/auth/login', { login: 'matvey', pin: '4321' }).data;
+check('вход сообщает, что вы главный', ownerLogin.is_owner === true, ownerLogin);
+const ownerToken = ownerLogin.token;
+r = call('/staff/list', {}, ownerToken);
+check('в списке отмечен главный',
+  r.ok && r.data.filter(s2 => s2.is_owner).length === 1 &&
+  String(r.data.filter(s2 => s2.is_owner)[0].staff_id) === '1', r.data);
+
+r = call('/staff/delete', { staff_id: 1 }, ownerToken);
+check('себя удалить нельзя', r.ok === false && r.status === 409, r);
+r = call('/staff/set-active', { staff_id: 1, active: false }, ownerToken);
+check('главного нельзя отключить', r.ok === false && r.status === 409, r);
+check('в отказе сказано про передачу прав', /передать/.test(String(r.error)), r.error);
+r = call('/staff/set-role', { staff_id: 1, role: 'Warehouse Staff' }, ownerToken);
+check('главного нельзя понизить', r.ok === false && r.status === 409, r);
+
+// Трое подряд: удаляем среднего и смотрим, что соседи целы. Именно здесь
+// вылезал бы сдвиг строк — «удалил другого, а отключился сам».
+call('/staff/create', { full_name: 'Первый', login: 'one', pin: '1111' }, ownerToken);
+call('/staff/create', { full_name: 'Второй', login: 'two', pin: '2222' }, ownerToken);
+call('/staff/create', { full_name: 'Третий', login: 'three', pin: '3333' }, ownerToken);
+const two = call('/staff/list', {}, ownerToken).data.filter(s2 => s2.login === 'two')[0];
+r = call('/staff/delete', { staff_id: two.staff_id }, ownerToken);
+check('удалён именно выбранный', r.ok === true && r.data.full_name === 'Второй', r);
+let staffAfter = call('/staff/list', {}, ownerToken).data.map(s2 => s2.login);
+check('соседи на месте', staffAfter.indexOf('one') !== -1 && staffAfter.indexOf('three') !== -1, staffAfter);
+check('удалённого в списке нет', staffAfter.indexOf('two') === -1, staffAfter);
+check('удаляющий на месте и работает', call('/staff/list', {}, ownerToken).ok === true);
+check('строка сотрудника удалена из листа, а не помечена',
+  readRows(getSheet(SHEETS.STAFF)).filter(s2 => s2.login === 'two').length === 0);
+check('журнал выдач не пострадал: имена в нём остались',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).every(t => t.staff_out_name !== undefined));
+
+console.log('\n== права обычного администратора ==');
+call('/staff/set-role', { staff_id: call('/staff/list', {}, ownerToken).data
+  .filter(s2 => s2.login === 'one')[0].staff_id, role: 'Admin' }, ownerToken);
+const oneToken = call('/auth/login', { login: 'one', pin: '1111' }).data.token;
+check('обычный админ сотрудников не заводит',
+  call('/staff/create', { full_name: 'Никто', login: 'nobody', pin: '5555' }, oneToken).status === 403);
+check('обычный админ сотрудников не удаляет',
+  call('/staff/delete', { staff_id: 3 }, oneToken).status === 403);
+check('обычный админ не сбрасывает PIN главному',
+  call('/staff/set-pin', { staff_id: 1, pin: '9999' }, oneToken).status === 409);
+check('обычный админ настройки менять по-прежнему может',
+  call('/settings/set', { settings: { session_ttl_hours: 12 } }, oneToken).ok === true);
+
+console.log('\n== передача главных прав ==');
+r = call('/staff/transfer-owner', { staff_id: 1 }, ownerToken);
+check('себе передать нельзя', r.ok === false && r.status === 409, r);
+const three = call('/staff/list', {}, ownerToken).data.filter(s2 => s2.login === 'three')[0];
+call('/staff/set-active', { staff_id: three.staff_id, active: false }, ownerToken);
+r = call('/staff/transfer-owner', { staff_id: three.staff_id }, ownerToken);
+check('отключённому передать нельзя', r.ok === false && r.status === 409, r);
+call('/staff/set-active', { staff_id: three.staff_id, active: true }, ownerToken);
+
+r = call('/staff/transfer-owner', { staff_id: three.staff_id }, ownerToken);
+check('права переданы', r.ok === true && r.data.full_name === 'Третий', r);
+const owners = call('/staff/list', {}, ownerToken).data;
+check('главный теперь другой',
+  String(owners.filter(s2 => s2.is_owner)[0].staff_id) === String(three.staff_id), owners);
+check('новый главный стал администратором',
+  owners.filter(s2 => s2.login === 'three')[0].role === 'Admin', owners);
+check('прежний главный остался администратором',
+  owners.filter(s2 => String(s2.login).toLowerCase() === 'matvey')[0].role === 'Admin', owners);
+check('прежний главный сотрудников больше не заводит',
+  call('/staff/create', { full_name: 'Никто', login: 'nobody', pin: '5555' }, ownerToken).status === 403);
+const threeToken = call('/auth/login', { login: 'three', pin: '3333' }).data.token;
+check('новый главный сотрудников заводит',
+  call('/staff/create', { full_name: 'Новичок', login: 'rookie', pin: '6666' }, threeToken).ok === true);
+check('теперь нельзя удалить нового главного',
+  call('/staff/delete', { staff_id: three.staff_id }, threeToken).status === 409);
+// Возвращаем права назад, чтобы дальнейшие проверки шли от прежнего владельца.
+call('/staff/transfer-owner', { staff_id: 1 }, threeToken);
+
+console.log('\n== сводка для панели ==');
+r = call('/settings/get', {}, ownerToken);
+check('сводка отдаётся вместе с настройками', r.ok && !!r.data.summary, r.data && Object.keys(r.data));
+check('в сводке есть каталог и заказы',
+  r.data.summary.items > 0 && r.data.summary.orders >= 0, r.data.summary);
+check('сводка знает, сколько сотрудников',
+  r.data.summary.staff === call('/staff/list', {}, ownerToken).data.length, r.data.summary);
+check('панель знает, кто главный', r.data.me.is_owner === true && String(r.data.owner.staff_id) === '1', r.data.me);
 
 console.log('\n== самозагрузка первого администратора закрыта навсегда ==');
 // Раньше защита держалась на «в Staff есть строки»: почистив лист, кто угодно

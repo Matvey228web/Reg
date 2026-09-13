@@ -62,6 +62,14 @@ function qtyText(item) {
   return `${free} из ${total} ${plural(total, "свободна", "свободно", "свободно")}`;
 }
 
+// Как называется роль для человека. Главный администратор — не отдельная
+// роль в таблице, а отметка: удалить её нельзя, можно только передать.
+function roleLabel(person) {
+  if (!person) return "";
+  if (person.is_owner) return "Главный администратор";
+  return person.role === "Admin" ? "Администратор" : "Сотрудник склада";
+}
+
 function categoryLabel(code) {
   const c = categoryList().find((c) => c.code === code);
   return c ? c.label : code;

@@ -249,6 +249,36 @@ select {
 .badge--rented, .badge--in-repair { background: var(--warning); color: #fff; }
 .badge--open { background: var(--danger); color: #fff; }
 .badge--retired, .badge--closed { background: var(--surface-strong); color: var(--muted); }
+.badge--owner { background: var(--tg-button-color); color: var(--tg-button-text-color); }
+
+/* Действия над сотрудником: их до пяти, и в столбик они растягивают карточку
+   на экран. Складываем в ряды по месту. */
+.staff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.staff-actions .btn { width: auto; margin: 0; padding: 8px var(--s3); font-size: 13px; }
+
+/* Сводка по складу в панели: числа крупно, подпись мелко. Читается взглядом,
+   а не чтением — в этом весь смысл панели. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--s2);
+  margin: var(--s3) 0;
+}
+.tile {
+  padding: var(--s3) var(--s2);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  text-align: center;
+}
+.tile--warn { background: rgba(201, 42, 42, 0.12); }
+.tile-value { font-size: 22px; font-weight: 700; line-height: 1.1; }
+.tile--warn .tile-value { color: var(--danger-line); }
+.tile-label { margin-top: 4px; font-size: 11px; color: var(--muted); }
 
 .error-box {
   background: rgba(224, 49, 49, 0.13);

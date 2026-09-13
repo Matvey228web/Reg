@@ -9,7 +9,7 @@
       const session = Auth.getSession();
       // Имя крупно, роль строкой ниже: это заголовок экрана, а не подпись.
       document.getElementById("home-user").innerHTML = session
-        ? `${escapeHtml(session.full_name)}<span>${session.role === "Admin" ? "Администратор" : "Сотрудник склада"}</span>`
+        ? `${escapeHtml(session.full_name)}<span>${escapeHtml(roleLabel(session))}</span>`
         : "";
       const isAdmin = !!session && session.role === "Admin";
       // Пустая строка, а не "block": раскладку карточки задаёт стиль, а inline
