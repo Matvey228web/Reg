@@ -117,11 +117,18 @@ const TG = (() => {
     },
     hide() {
       if (webApp) {
+        // Снимаем обработчик вместе с кнопкой. show() предыдущий снимал, а
+        // hide() — нет, и обработчик оставался привязанным в SDK: кнопка могла
+        // выстрелить в форму, которой на экране уже нет.
+        if (mainButton._handler) {
+          webApp.MainButton.offClick(mainButton._handler);
+          mainButton._handler = null;
+        }
         webApp.MainButton.hide();
         return;
       }
       const btn = document.getElementById("fallback-main-button");
-      if (btn) btn.style.display = "none";
+      if (btn) { btn.onclick = null; btn.style.display = "none"; }
     },
     setLoading(loading) {
       if (webApp) {

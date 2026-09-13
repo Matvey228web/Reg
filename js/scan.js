@@ -115,6 +115,20 @@ const ScanScreen = (() => {
     return `<p class="hint">${outText.map(escapeHtml).join(" ")}</p>`;
   }
 
+  // Поля читаем только так: пропавший элемент должен стать понятной ошибкой, а
+  // не исключением, которое никто не ловит.
+  function field(id) {
+    const el = document.getElementById(id);
+    if (!el) throw new Error("stale-form:" + id);
+    return el;
+  }
+
+  function formError(err) {
+    return /^stale-form:/.test(String(err && err.message))
+      ? "Форма устарела — отсканируйте предмет заново."
+      : (err && err.message) || "Не получилось";
+  }
+
   function renderItem() {
     const result = document.getElementById("scan-result");
     const item = currentItem;
@@ -184,7 +198,7 @@ const ScanScreen = (() => {
         const date = picked ? picked.dataset.return : "";
         if (date) document.getElementById("scan-return-date").value = date;
       });
-      TG.mainButton.show("Подтвердить выдачу", submitCheckout);
+      confirmButton("Подтвердить выдачу", submitCheckout);
     } else if (mode === "checkin") {
       box.innerHTML = `
         <div class="section">
@@ -221,7 +235,7 @@ const ScanScreen = (() => {
       document.getElementById("scan-has-defect").addEventListener("change", (e) => {
         document.getElementById("scan-defect-fields").style.display = e.target.checked ? "block" : "none";
       });
-      TG.mainButton.show("Подтвердить приём", submitCheckin);
+      confirmButton("Подтвердить приём", submitCheckin);
     } else if (mode === "defect") {
       box.innerHTML = `
         <div class="section">
@@ -238,28 +252,57 @@ const ScanScreen = (() => {
             </select>
           </div>
         </div>`;
-      TG.mainButton.show("Сохранить дефект", submitDefect);
+      confirmButton("Сохранить дефект", submitDefect);
     } else {
       box.innerHTML = "";
-      TG.mainButton.hide();
+    }
+  }
+
+  // Подтверждение живёт в самой форме, а не в нативной кнопке Telegram.
+  // Нативную было не видно в браузере, её нельзя было нажать из теста, и
+  // проверялся у нас поэтому путь, которым на телефоне никто не ходит.
+  // Обычная кнопка одинакова везде и видна там, где заканчивается форма.
+  function confirmButton(text, onSubmit) {
+    const box = document.getElementById("mode-form");
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.id = "scan-confirm";
+    btn.type = "button";
+    btn.textContent = text;
+    btn.addEventListener("click", onSubmit);
+    box.appendChild(btn);
+  }
+
+  // Индикатор ожидания на той же кнопке: запрос к таблице идёт секунды, и без
+  // этого человек жмёт второй раз.
+  function setSubmitting(on, text) {
+    const btn = document.getElementById("scan-confirm");
+    if (!btn) return;
+    btn.disabled = on;
+    if (on) {
+      btn.dataset.label = btn.textContent;
+      btn.textContent = "Отправляем…";
+    } else {
+      btn.textContent = text || btn.dataset.label || btn.textContent;
     }
   }
 
   async function submitCheckout() {
-    const picked = document.getElementById("scan-order").value;
-    // «Без заказа» выбирается сознательно: иначе выдача без заказа случалась бы
-    // просто от того, что список не пролистали.
-    if (!picked) { TG.showAlert("Выберите заказ или «Без заказа»"); return; }
-    const orderId = picked === "none" ? null : Number(picked);
-    TG.mainButton.setLoading(true);
+    let orderId = null;
     try {
+      const picked = field("scan-order").value;
+      // «Без заказа» выбирается сознательно: иначе выдача без заказа случалась бы
+      // просто от того, что список не пролистали.
+      if (!picked) { TG.showAlert("Выберите заказ или «Без заказа»"); return; }
+      orderId = picked === "none" ? null : Number(picked);
+      setSubmitting(true);
       const qtyField = document.getElementById("scan-qty");
       const result = await apiPost("/transaction/checkout", {
         item_id: currentItem.item_id,
         order_id: orderId,
         qty: qtyField ? Number(qtyField.value) || 1 : 1,
-        expected_return_at: document.getElementById("scan-return-date").value || null,
-        notes: document.getElementById("scan-notes").value.trim(),
+        expected_return_at: field("scan-return-date").value || null,
+        notes: field("scan-notes").value.trim(),
       });
       TG.hapticSuccess();
       // Выдача вне состава заказа разрешена (в заказе есть свободное поле, куда
@@ -271,24 +314,25 @@ const ScanScreen = (() => {
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
-      TG.showAlert(err.message);
+      TG.showAlert(formError(err));
     } finally {
-      TG.mainButton.setLoading(false);
+      setSubmitting(false);
     }
   }
 
   async function submitCheckin() {
-    const hasDefect = document.getElementById("scan-has-defect").checked;
-    TG.mainButton.setLoading(true);
+    let hasDefect = false;
     try {
+      hasDefect = field("scan-has-defect").checked;
+      setSubmitting(true);
       const qtyInField = document.getElementById("scan-qty-in");
       await apiPost("/transaction/checkin", {
         item_id: currentItem.item_id,
         qty: qtyInField ? Number(qtyInField.value) || 1 : 1,
         has_defect: hasDefect,
-        defect_description: hasDefect ? document.getElementById("scan-defect-desc").value.trim() : null,
-        defect_severity: hasDefect ? document.getElementById("scan-defect-severity").value : null,
-        notes: document.getElementById("scan-checkin-notes").value.trim(),
+        defect_description: hasDefect ? field("scan-defect-desc").value.trim() : null,
+        defect_severity: hasDefect ? field("scan-defect-severity").value : null,
+        notes: field("scan-checkin-notes").value.trim(),
       });
       TG.hapticSuccess();
       TG.showAlert("Оборудование принято");
@@ -297,21 +341,21 @@ const ScanScreen = (() => {
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
-      TG.showAlert(err.message);
+      TG.showAlert(formError(err));
     } finally {
-      TG.mainButton.setLoading(false);
+      setSubmitting(false);
     }
   }
 
   async function submitDefect() {
-    const description = document.getElementById("scan-standalone-desc").value.trim();
-    if (!description) { TG.showAlert("Опишите дефект"); return; }
-    TG.mainButton.setLoading(true);
     try {
+      const description = field("scan-standalone-desc").value.trim();
+      if (!description) { TG.showAlert("Опишите дефект"); return; }
+      setSubmitting(true);
       await apiPost("/defect/report", {
         item_id: currentItem.item_id,
         description,
-        severity: document.getElementById("scan-standalone-severity").value,
+        severity: field("scan-standalone-severity").value,
       });
       TG.hapticSuccess();
       TG.showAlert("Дефект сохранён");
@@ -321,9 +365,9 @@ const ScanScreen = (() => {
       await lookup(currentItem.item_id);
     } catch (err) {
       TG.hapticError();
-      TG.showAlert(err.message);
+      TG.showAlert(formError(err));
     } finally {
-      TG.mainButton.setLoading(false);
+      setSubmitting(false);
     }
   }
 
