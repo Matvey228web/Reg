@@ -13,6 +13,7 @@ const SettingsScreen = (() => {
     { key: "max_login_attempts", label: "Сколько неверных PIN до блокировки входа" },
     { key: "login_lock_minutes", label: "На сколько минут блокировать вход" },
     { key: "import_source_id", label: "Идентификатор исходной таблицы для импорта", text: true },
+    { key: "notify_chat_id", label: "Чат склада для уведомлений бота", text: true },
   ];
 
   async function load() {
@@ -99,6 +100,18 @@ const SettingsScreen = (() => {
             ${hints[f.key] ? `<p class="hint">${escapeHtml(hints[f.key])}</p>` : ""}
           </div>`).join("")}
         <button class="btn" id="settings-save">Сохранить</button>
+      </div>
+
+      <div class="section">
+        <h2>Бот в Telegram</h2>
+        <p class="hint">Бот пишет в чат склада о дефектах и по кнопке — о
+        просрочках. Токен бота хранится не здесь, а в Apps Script → Project
+        Settings → Script Properties, ключ <b>TELEGRAM_BOT_TOKEN</b>: настройки
+        читает любой вошедший сотрудник, а токен — это полный доступ к боту.
+        Пошаговая инструкция лежит в файле BOT.md.</p>
+        <div id="settings-bot-result"></div>
+        <button class="btn btn--secondary" id="settings-bot-test">Проверить связь с чатом</button>
+        <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
       </div>
 
       <div class="section">
@@ -246,6 +259,28 @@ const SettingsScreen = (() => {
     }
   }
 
+  // Проверка связи и сводка просрочек — одно и то же по форме: нажали, ждём,
+  // показали, что ответил Telegram. Отказ здесь ожидаем (нет токена, бота не
+  // добавили в чат), поэтому объясняем причину, а не прячем её.
+  async function bot(endpoint, btnId) {
+    const btn = document.getElementById(btnId);
+    const out = document.getElementById("settings-bot-result");
+    btn.disabled = true;
+    out.innerHTML = skeleton(1);
+    try {
+      const res = await apiPost(endpoint, {
+        chat_id: document.getElementById("set-notify_chat_id").value.trim(),
+      });
+      out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(res.message || "Готово")}</div></div>`;
+      TG.hapticSuccess();
+    } catch (err) {
+      out.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      TG.hapticError();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function maintenance(action, btnId) {
     const btn = document.getElementById(btnId);
     const out = document.getElementById("settings-maintenance-result");
@@ -282,6 +317,10 @@ const SettingsScreen = (() => {
     });
     document.getElementById("settings-cat-submit").addEventListener("click", addCategory);
     document.getElementById("settings-save").addEventListener("click", saveFields);
+    document.getElementById("settings-bot-test")
+      .addEventListener("click", () => bot("/notify/test", "settings-bot-test"));
+    document.getElementById("settings-bot-overdue")
+      .addEventListener("click", () => bot("/notify/overdue", "settings-bot-overdue"));
     document.getElementById("settings-archive")
       .addEventListener("click", () => maintenance("archive", "settings-archive"));
     document.getElementById("settings-trim")

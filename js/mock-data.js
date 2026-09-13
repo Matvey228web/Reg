@@ -16,6 +16,8 @@ const mockSettings = {
   import_source_id: "",
 };
 const MOCK_SETTINGS_SPEC = {
+  notify_chat_id: { def: "", text: true, check: (v) => v === "" || /^-?\d{5,20}$/.test(String(v)),
+                    hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит" },
   session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },
   max_login_attempts: { min: 3, max: 20, hint: "от 3 до 20 попыток" },
   login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
@@ -923,6 +925,20 @@ const MockAPI = {
           active: true,
         });
         return { staff_id };
+      }
+
+      case "/notify/test": {
+        MockStore.requireAdmin(token);
+        if (!String(body.chat_id || "").trim()) {
+          const e = new Error("Не указан чат: впишите числовой id чата склада в настройках и сохраните.");
+          e.status = 400; throw e;
+        }
+        return { ok: true, message: "Сообщение отправлено — проверьте чат." };
+      }
+
+      case "/notify/overdue": {
+        MockStore.requireAdmin(token);
+        return { overdue: 1, sent: true, message: "Просроченные заказы — 1" };
       }
 
       case "/inventory/save": {

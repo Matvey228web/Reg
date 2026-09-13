@@ -30,6 +30,9 @@ const InventoryScreen = (() => {
   // перерисовывается после каждого скана, и надпись внутри него затиралась бы
   // ровно тем действием, о котором сообщает.
   let lastMessage = "";
+  // Последний прочитанный код: показываем его серым примером в поле ввода,
+  // чтобы было видно, что именно взял сканер.
+  let lastCode = "";
 
   // ---- хранение ----
   //
@@ -114,6 +117,7 @@ const InventoryScreen = (() => {
   function accept(rawCode) {
     const code = String(rawCode || "").replace(/[\s\-]/g, "");
     if (!code) return { kind: "empty" };
+    lastCode = code;
     const item = itemById(code);
     if (!item) {
       if (session.unknown.indexOf(code) === -1) session.unknown.push(code);
@@ -198,7 +202,8 @@ const InventoryScreen = (() => {
 
       <div class="field">
         <label for="inventory-manual">Ввести номер руками</label>
-        <input type="text" id="inventory-manual" inputmode="numeric" placeholder="010101" />
+        <input type="text" id="inventory-manual" inputmode="numeric"
+               placeholder="${escapeHtml(lastCode || "010101")}" />
         <button class="btn btn--secondary" id="inventory-add" style="margin-top:8px;">Отметить</button>
       </div>
 

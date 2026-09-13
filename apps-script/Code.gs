@@ -835,6 +835,8 @@ function doPost(e) {
       case "/staff/delete": data = handleStaffDelete(payload, token); break;
       case "/staff/set-role": data = handleStaffSetRole(payload, token); break;
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
+      case "/notify/test": data = handleNotifyTest(payload, token); break;
+      case "/notify/overdue": data = handleNotifyOverdue(payload, token); break;
       case "/inventory/save": data = handleInventorySave(payload, token); break;
       case "/inventory/list": data = handleInventoryList(payload, token); break;
       case "/settings/get": data = handleSettingsGet(payload, token); break;
@@ -1143,6 +1145,12 @@ function reportDefect(itemId, staffRow, transactionId, payload) {
     resolved_at: "",
     resolution_notes: "",
   });
+  // В чат склада — только то, из-за чего техника выбывает из оборота. Сообщать
+  // о каждой выдаче значит завалить чат и приучить его не читать.
+  var item = findRowByValue(getSheet(SHEETS.EQUIPMENT), "item_id", itemId);
+  tgNotify("Дефект: " + ((item && item.name) || itemId) + " (" + itemId + ")\n" +
+    (payload.defect_description || "без описания") + "\n" +
+    "Заявил: " + staffRow.full_name);
   return defectId;
 }
 
@@ -2100,6 +2108,99 @@ function handleStaffTransferOwner(payload, token) {
 }
 
 // ---------------------------------------------------------------------
+// Телеграм-бот: уведомления в чат склада
+// ---------------------------------------------------------------------
+//
+// Токен живёт ТОЛЬКО в Script Properties (ключ TELEGRAM_BOT_TOKEN) и наружу не
+// отдаётся ни одним эндпоинтом. Причина простая: токен бота — это полный доступ
+// к нему, а настройки читает любой вошедший сотрудник.
+//
+// Если токена или чата нет — бот молча молчит. Уведомление не должно ронять
+// выдачу: техника уже выдана, и отказ мессенджера не повод откатывать работу.
+
+function botToken() {
+  try {
+    return String(PropertiesService.getScriptProperties().getProperty("TELEGRAM_BOT_TOKEN") || "").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+function notifyChatId() {
+  return String(getSettings().notify_chat_id || "").trim();
+}
+
+// Возвращает, что произошло, — это нужно кнопке проверки связи. Обычные вызовы
+// результат игнорируют.
+function tgSend(text, chatIdOverride) {
+  var token = botToken();
+  var chatId = String(chatIdOverride || notifyChatId());
+  if (!token) return { ok: false, reason: "no-token" };
+  if (!chatId) return { ok: false, reason: "no-chat" };
+  try {
+    var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({ chat_id: chatId, text: text, disable_web_page_preview: true }),
+      muteHttpExceptions: true,
+    });
+    var body = JSON.parse(res.getContentText() || "{}");
+    return body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
+  } catch (e) {
+    return { ok: false, reason: "network", error: String(e) };
+  }
+}
+
+// Тихая отправка: всё, что зовётся по ходу работы склада, идёт через неё.
+function tgNotify(text) {
+  try { tgSend(text); } catch (e) { /* уведомление не важнее самой операции */ }
+}
+
+function handleNotifyTest(payload, token) {
+  requireAdmin(token);
+  var chat = String(payload.chat_id || "").trim();
+  var res = tgSend("Проверка связи: приложение склада на связи с этим чатом.", chat);
+  if (res.ok) return { ok: true, message: "Сообщение отправлено — проверьте чат." };
+  if (res.reason === "no-token") {
+    throw apiError(400, "Токен бота не задан. Apps Script → Project Settings → " +
+      "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
+  }
+  if (res.reason === "no-chat") {
+    throw apiError(400, "Не указан чат: впишите числовой id чата склада в настройках " +
+      "и сохраните.");
+  }
+  throw apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
+    ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
+}
+
+// Сводка просрочек. Вызывается кнопкой в админке и — если повесить временной
+// триггер на dailyOverdueDigest — раз в сутки сама.
+function overdueDigest() {
+  var today = new Date().toISOString().substring(0, 10);
+  var txRows = readRows(getSheet(SHEETS.TRANSACTIONS));
+  var counts = orderCounts(txRows);
+  var lines = [];
+  readRows(getSheet(SHEETS.ORDERS)).forEach(function (o) {
+    if (orderStatus(o, counts[String(o.order_id)]) !== "Issued") return;
+    var due = String(o.return_date || "").substring(0, 10);
+    if (!due || due >= today) return;
+    var open = (counts[String(o.order_id)] || {}).open || 0;
+    lines.push("№" + o.order_no + " · " + (o.student_name || "—") +
+      " · вернуть до " + due + " · на руках " + open);
+  });
+  if (!lines.length) return { overdue: 0, message: "Просрочек нет." };
+  var text = "Просроченные заказы — " + lines.length + ":\n" + lines.join("\n");
+  var res = tgSend(text);
+  return { overdue: lines.length, sent: res.ok, message: text };
+}
+
+// Отдельная функция для временного триггера: в редакторе Apps Script у
+// триггера можно выбрать только функцию без аргументов.
+function dailyOverdueDigest() {
+  overdueDigest();
+}
+
+// ---------------------------------------------------------------------
 // Инвентаризация: журнал сверок склада
 // ---------------------------------------------------------------------
 //
@@ -2109,6 +2210,11 @@ function handleStaffTransferOwner(payload, token) {
 //
 // Пишем только итог и расхождения. Строка «ожидали найти и нашли» ничего не
 // сообщает, а на 628 позициях каждая сверка добавляла бы столько же строк.
+
+function handleNotifyOverdue(payload, token) {
+  requireAdmin(token);
+  return overdueDigest();
+}
 
 function handleInventorySave(payload, token) {
   var staffRow = checkAuth(token);
@@ -2678,6 +2784,15 @@ var SETTINGS_SPEC = {
     text: true,
     check: function (v) { return v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v); },
     hint: "идентификатор таблицы Google (из её адреса) или пусто",
+  },
+  // Куда бот пишет. Сам токен здесь не хранится и храниться не должен: он
+  // лежит в Script Properties, потому что настройки отдаются всякому вошедшему,
+  // а токен — это полный доступ к боту.
+  notify_chat_id: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^-?\d{5,20}$/.test(v); },
+    hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит",
   },
 };
 

@@ -17,6 +17,9 @@ const ScanScreen = (() => {
     session = [];
     document.getElementById("scan-order-bar").innerHTML = "";
     document.getElementById("scan-result").innerHTML = "";
+    // Пример в поле ввода возвращаем к общему: прошлый номер к новому обходу
+    // отношения не имеет.
+    document.getElementById("scan-manual-input").placeholder = "010101";
     showBoxError("scan-error", "");
     // Форма ввода снова главная: предмета на экране нет.
     document.getElementById("scan-manual-wrap").classList.remove("scan-manual--tucked");
@@ -64,6 +67,10 @@ const ScanScreen = (() => {
     try {
       const item = await apiPost("/item/lookup", { item_id: itemId });
       currentItem = item;
+      // Отсканированный номер становится примером в поле ввода — серым, как
+      // подсказка. Наклейки затираются, и увидеть, что именно прочиталось, —
+      // единственный способ заметить, что сканер взял соседний код.
+      document.getElementById("scan-manual-input").placeholder = item.item_id;
       // Статус мог измениться — поправим его в кэше каталога, чтобы список не
       // показывал устаревшее «Доступно» до следующего обновления.
       Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
