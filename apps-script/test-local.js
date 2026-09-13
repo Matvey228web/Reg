@@ -249,7 +249,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 11 вкладок', spreadsheet.getSheets().length === 11, spreadsheet.getSheets().map(s => s.name));
+check('создано 12 вкладок', spreadsheet.getSheets().length === 12, spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -259,7 +259,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 11', spreadsheet.getSheets().length === 11);
+check('вкладок по-прежнему 12', spreadsheet.getSheets().length === 12);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 

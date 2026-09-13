@@ -73,5 +73,14 @@ const QR = (() => {
     TG.scanQr("Наведите камеру на QR-код оборудования", onResult);
   }
 
-  return { render, downloadCanvas, showFullscreen, scan };
+  // Для сверки склада: сканируем подряд, не закрывая окно после каждого кода.
+  function scanContinuous(text, onCode) {
+    return TG.scanQrContinuous(text, onCode);
+  }
+
+  function stopScan() {
+    TG.closeScanQr();
+  }
+
+  return { render, downloadCanvas, showFullscreen, scan, scanContinuous, stopScan };
 })();

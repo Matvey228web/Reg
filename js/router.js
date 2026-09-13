@@ -24,7 +24,8 @@ const Router = (() => {
   // Экраны без своей вкладки подсвечивают вкладку раздела, из которого открыты,
   // чтобы на карточке предмета было видно, где ты находишься.
   const PARENT_TAB = { item: "catalog", labels: "catalog", order: "orders",
-                       staff: "home", settings: "home", pin: "home" };
+                       staff: "home", settings: "home", pin: "home",
+                       inventory: "home" };
 
   // Панель разделов видна везде, кроме экрана входа; активная вкладка подсвечена.
   function renderTabbar(name) {

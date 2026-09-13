@@ -775,6 +775,22 @@ select {
   font-size: 14px;
 }
 
+/* Поле пересчёта у штучной позиции: узкое, рядом со строкой, а не во всю
+   ширину — это одно число, а не форма. */
+.inventory-qty {
+  width: 92px;
+  margin-top: var(--s2);
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline);
+  background: var(--tg-bg-color);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  text-align: center;
+}
+
 /* Сколько по заказу уже отдано. Полоса нужна не ради украшения: «выдано 1 из
    25» цифрами читается медленнее, чем видно глазом, что заказ едва начат. */
 .progress-line { font-size: 13px; font-weight: 600; margin-top: var(--s2); }

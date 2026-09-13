@@ -404,6 +404,7 @@ const MockStore = (() => {
     staff, equipment, clients, transactions, defects, tokens,
     students, orders, orderItems,
     findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin, rotateToken,
+    inventories: [],
     ownerId: () => ownerStaffId,
     setOwnerId: (id) => { ownerStaffId = id; },
     requireOwner(token) {
@@ -922,6 +923,24 @@ const MockAPI = {
           active: true,
         });
         return { staff_id };
+      }
+
+      case "/inventory/save": {
+        const staff_id = MockStore.requireToken(token);
+        const found = Object.keys(body.found || {});
+        const rec = {
+          inventory_id: MockStore.inventories.length + 1,
+          scope: body.scope, started_at: body.started_at, finished_at: body.finished_at,
+          found: found.length, missing: (body.missing || []).length,
+          unknown: (body.unknown || []).length, staff_id,
+        };
+        MockStore.inventories.push(rec);
+        return rec;
+      }
+
+      case "/inventory/list": {
+        MockStore.requireToken(token);
+        return MockStore.inventories.slice().reverse();
       }
 
       case "/settings/get": {

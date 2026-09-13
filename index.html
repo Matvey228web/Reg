@@ -47,6 +47,9 @@
     <!-- Разделы живут в нижней панели, дублировать их карточками здесь не нужно.
          Главная — это кабинет: кто вошёл и что он может настроить. -->
     <div class="menu-grid">
+      <div class="card" data-nav="inventory">
+        <div class="card-title">Инвентаризация</div>
+      </div>
       <div class="card" data-nav="staff" id="home-staff-card" style="display:none;">
         <div class="card-title">Сотрудники</div>
       </div>
@@ -196,6 +199,12 @@
     <div id="order-content"></div>
   </div>
 
+  <!-- Экран: инвентаризация (сверка склада по QR) -->
+  <div class="screen" id="screen-inventory">
+    <h1>Инвентаризация</h1>
+    <div id="inventory-content"></div>
+  </div>
+
   <!-- Экран: сотрудники (только для Admin) -->
   <div class="screen" id="screen-staff">
     <h1>Сотрудники</h1>
@@ -300,6 +309,7 @@
 <script src="js/staff.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/labels.js"></script>
+<script src="js/inventory.js"></script>
 <script src="js/pin.js"></script>
 <script src="js/app.js"></script>
 </body>

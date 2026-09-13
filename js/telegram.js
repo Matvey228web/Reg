@@ -110,6 +110,30 @@ const TG = (() => {
     });
   }
 
+  // Сканирование подряд: окно сканера НЕ закрывается после каждого кода.
+  //
+  // Это разница между «сверка склада» и «шестьсот раз нажать кнопку»: при
+  // обычном scanQr человек на каждый предмет открывает камеру заново и ждёт.
+  // Здесь окно остаётся открытым, а обработчик вызывается на каждый код, пока
+  // человек сам не закроет сканер.
+  //
+  // Окно закрывает собой экран, поэтому единственный доступный отклик —
+  // вибрация: показать счётчик под окном Telegram не даёт.
+  function scanQrContinuous(text, onCode) {
+    if (!hasScanQr()) {
+      return { ok: false, error: "QR-сканер Telegram недоступен в этой версии клиента" };
+    }
+    webApp.showScanQrPopup({ text }, (code) => {
+      if (code) onCode(String(code).trim());
+      return false;   // false — окно остаётся открытым
+    });
+    return { ok: true };
+  }
+
+  function closeScanQr() {
+    if (webApp && typeof webApp.closeScanQrPopup === "function") webApp.closeScanQrPopup();
+  }
+
   // Вне Telegram (обычный браузер, локальная разработка) нативной MainButton не существует —
   // подменяем её обычной кнопкой, зафиксированной снизу экрана, с тем же API.
   function getFallbackButton() {
@@ -210,7 +234,7 @@ const TG = (() => {
   }
 
   return {
-    init, getUser, getInitData, isAvailable, hasScanQr, scanQr,
+    init, getUser, getInitData, isAvailable, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
     mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm,
   };
 })();

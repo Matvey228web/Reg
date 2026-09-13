@@ -20,6 +20,7 @@ var SHEETS = {
   TRANSACTIONS: "Transactions",
   DEFECTS: "Defects",
   CATEGORIES: "Categories",
+  INVENTORY: "Inventory",
   META: "Meta",
 };
 
@@ -120,6 +121,11 @@ var SCHEMA = {
   Transactions: ["transaction_id", "item_id", "client_id", "order_id", "order_line", "staff_out", "staff_out_name", "staff_in", "staff_in_name", "checked_out_at", "expected_return_at", "checked_in_at", "status", "notes", "qty", "qty_in"],
   Defects: ["defect_id", "item_id", "reported_by", "reported_by_name", "related_transaction_id", "description", "severity", "status", "reported_at", "resolved_at", "resolution_notes"],
   Categories: ["code", "num", "label", "by_qty", "created_at"],
+  // Журнал сверок склада. Пишем только итог и расхождения, а не все 628
+  // найденных позиций: строка «нашли то, что и ожидали» ничего не сообщает, а
+  // лист пухнет на каждую сверку.
+  Inventory: ["inventory_id", "kind", "item_id", "item_name", "expected_qty", "found_qty",
+              "scope", "started_at", "finished_at", "staff_id", "staff_name"],
   Meta: ["key", "value"],
 };
 
@@ -829,6 +835,8 @@ function doPost(e) {
       case "/staff/delete": data = handleStaffDelete(payload, token); break;
       case "/staff/set-role": data = handleStaffSetRole(payload, token); break;
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
+      case "/inventory/save": data = handleInventorySave(payload, token); break;
+      case "/inventory/list": data = handleInventoryList(payload, token); break;
       case "/settings/get": data = handleSettingsGet(payload, token); break;
       case "/settings/set": data = handleSettingsSet(payload, token); break;
       case "/category/create": data = handleCategoryCreate(payload, token); break;
@@ -2089,6 +2097,97 @@ function handleStaffTransferOwner(payload, token) {
   if (target.role !== "Admin") updateRow(sheet, target.__row, { role: "Admin" });
   metaSet("owner_staff_id", target.staff_id);
   return { staff_id: target.staff_id, full_name: target.full_name };
+}
+
+// ---------------------------------------------------------------------
+// Инвентаризация: журнал сверок склада
+// ---------------------------------------------------------------------
+//
+// Сверка НИЧЕГО НЕ МЕНЯЕТ в каталоге. Ненайденный предмет может лежать в чужой
+// сумке, а не пропасть, и решать это должен человек. Наше дело — записать, что
+// увидели, и когда.
+//
+// Пишем только итог и расхождения. Строка «ожидали найти и нашли» ничего не
+// сообщает, а на 628 позициях каждая сверка добавляла бы столько же строк.
+
+function handleInventorySave(payload, token) {
+  var staffRow = checkAuth(token);
+  var sheet = getSheet(SHEETS.INVENTORY);
+  var id = nextId("inventory_id", maxIdIn(sheet, "inventory_id"));
+
+  var found = payload.found || {};
+  var missing = payload.missing || [];
+  var unknown = payload.unknown || [];
+  var equipment = readRows(getSheet(SHEETS.EQUIPMENT));
+  var byId = {};
+  equipment.forEach(function (r) { byId[String(r.item_id)] = r; });
+
+  var scope = String(payload.scope || "all");
+  var started = String(payload.started_at || "");
+  var finished = String(payload.finished_at || new Date().toISOString());
+  var foundIds = Object.keys(found);
+
+  function row(kind, itemId, expectedQty, foundQty) {
+    var item = byId[String(itemId)] || {};
+    return {
+      inventory_id: id, kind: kind,
+      item_id: itemId === null || itemId === undefined ? "" : String(itemId),
+      item_name: item.name || "",
+      expected_qty: expectedQty === null ? "" : expectedQty,
+      found_qty: foundQty === null ? "" : foundQty,
+      scope: scope, started_at: started, finished_at: finished,
+      staff_id: staffRow.staff_id, staff_name: staffRow.full_name,
+    };
+  }
+
+  var rows = [row("summary", "", foundIds.length + missing.length, foundIds.length)];
+  missing.forEach(function (itemId) {
+    var item = byId[String(itemId)] || {};
+    rows.push(row("missing", itemId, categoryByQty(item.category) ? itemQty(item) : 1, 0));
+  });
+  // Расхождение по количеству — только у штучных позиций: у поштучных «нашли»
+  // это всегда единица.
+  foundIds.forEach(function (itemId) {
+    var item = byId[String(itemId)];
+    if (!item || !categoryByQty(item.category)) return;
+    var want = itemQty(item);
+    var got = Math.floor(Number(found[itemId]));
+    if (got !== want) rows.push(row("mismatch", itemId, want, got));
+  });
+  unknown.forEach(function (code) { rows.push(row("unknown", code, "", "")); });
+
+  appendRows(sheet, rows);
+  return {
+    inventory_id: id,
+    found: foundIds.length,
+    missing: missing.length,
+    unknown: unknown.length,
+    written: rows.length,
+  };
+}
+
+// Пачкой, а не по строке: на сверке с сотней расхождений построчная запись
+// упирается в лимит времени Apps Script.
+function appendRows(sheet, rowObjects) {
+  if (!rowObjects.length) return;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var values = rowObjects.map(function (obj) {
+    return headers.map(function (h) { return obj[h] !== undefined ? obj[h] : ""; });
+  });
+  var target = sheet.getLastRow() + 1;
+  prepareRows(sheet, target, values.length);
+  sheet.getRange(target, 1, values.length, headers.length).setValues(values);
+}
+
+function handleInventoryList(payload, token) {
+  checkAuth(token);
+  var rows = readRows(getSheet(SHEETS.INVENTORY));
+  // Наружу отдаём итоги сверок, а не все их строки: список нужен, чтобы
+  // выбрать сверку, а подробности читаются в самой таблице.
+  return rows.filter(function (r) { return r.kind === "summary"; }).map(function (r) {
+    delete r.__row;
+    return r;
+  }).reverse();
 }
 
 // ---------------------------------------------------------------------
