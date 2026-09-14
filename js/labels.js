@@ -298,8 +298,28 @@ const LabelsScreen = (() => {
     ctx.fillStyle = "#000000";
     ctx.textBaseline = "top";
 
-    const pad = mm(size.pad, k);
-    const gap = mm(size.pad * 0.5, k);
+    // Рамка со скруглением. У высечки этикетки углы закруглены, и прямоугольная
+    // вёрстка на ней выглядит обрезанной: содержимое упирается в скос. Рамка
+    // повторяет высечку и заодно собирает этикетку в законченный блок — видно,
+    // где она кончается, даже когда наклеена на чёрный кофр.
+    // Отступ рамки от края щедрый: термопринтер тянет ленту с погрешностью в
+    // полмиллиметра, и линия впритык к краю уехала бы на одном боку.
+    const edge = mm(Math.max(0.8, size.pad * 0.55), k);
+    const radius = mm(1.4, k);
+    const stroke = Math.max(1, Math.round(mm(0.25, k)));
+    roundRect(ctx, edge + stroke / 2, edge + stroke / 2,
+              canvas.width - (edge + stroke / 2) * 2, canvas.height - (edge + stroke / 2) * 2,
+              radius);
+    ctx.lineWidth = stroke;
+    ctx.strokeStyle = "#000000";
+    ctx.stroke();
+    // Всё дальнейшее режется по той же рамке: ни одна подпись не вылезет за неё
+    // даже на самой мелкой ленте.
+    ctx.save();
+    ctx.clip();
+
+    const pad = edge + stroke + mm(Math.max(0.7, size.pad * 0.5), k);
+    const gap = mm(size.pad * 0.45, k);
     const inner = canvas.width - pad * 2;
 
     // 1. Название сверху. Занимает столько, сколько нужно, но не больше двух
@@ -327,14 +347,15 @@ const LabelsScreen = (() => {
     const modules = 21 + QUIET * 2;
     const minDot = 4 * k;
     const innerH = canvas.height - pad * 2;
+    const ruleH = fitted.rows.length ? Math.round(gap * 0.7) + stroke : 0;
     const bottomH = () => chipH + bottomLines.length * orgLine + (bottomLines.length ? Math.round(gap * 0.5) : 0);
     // Первой уходит категория: она и так закодирована первыми двумя цифрами
     // номера. Подпись колледжа ниоткуда не выводится, поэтому держится дольше.
-    while (bottomLines.length && nameHeight + bottomH() + gap * 2 + modules * minDot > innerH) {
+    while (bottomLines.length && nameHeight + ruleH + bottomH() + gap * 2 + modules * minDot > innerH) {
       bottomLines.shift();
     }
 
-    const free = innerH - nameHeight - bottomH() - gap * 2;
+    const free = innerH - nameHeight - ruleH - bottomH() - gap * 2;
     const dot = Math.max(1, Math.floor(Math.min(inner, free) / modules));
     const qrSide = dot * modules;
 
@@ -352,6 +373,17 @@ const LabelsScreen = (() => {
       y += nameLine;
     });
 
+    // Линия под названием: отделяет «что это» от «как это найти». Без неё
+    // название и код висели в одном пустом поле и читались как один блок.
+    if (fitted.rows.length) {
+      const ruleW = Math.round(inner * 0.45);
+      y += Math.round(gap * 0.7);
+      ctx.fillRect(Math.round((canvas.width - ruleW) / 2), y, ruleW, stroke);
+      y += stroke;
+    }
+
+    // Остаток высоты делим поровну над и под кодом. Сам код уже взял из него
+    // всё, что мог (dot выше), так что делить остаётся считанные точки.
     const spare = Math.max(0, free - qrSide);
     y += gap + Math.round(spare / 2);
     ctx.drawImage(qrCanvas, Math.round((canvas.width - qrSide) / 2), y, qrSide, qrSide);
@@ -364,7 +396,7 @@ const LabelsScreen = (() => {
     const text = groupedId(item.item_id);
     ctx.font = "bold " + numPx + "px " + FONT_MONO;
     const textW = ctx.measureText(text).width;
-    const chipW = Math.min(inner, Math.round(textW + numPx * 1.1));
+    const chipW = Math.min(inner, Math.round(textW + numPx * 0.8));
     const chipX = Math.round((canvas.width - chipW) / 2);
     roundRect(ctx, chipX, y, chipW, chipH, Math.round(chipH * 0.28));
     ctx.fillStyle = "#000000";
@@ -384,6 +416,7 @@ const LabelsScreen = (() => {
       });
     }
     ctx.textAlign = "left";
+    ctx.restore();
     // Отдаём измеренную геометрию: так о ней можно спросить, а не вычислять её
     // обратно из картинки.
     canvas.dataset.qrMm = (qrSide / (DOTS_PER_MM * k)).toFixed(2);
