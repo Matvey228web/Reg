@@ -20,6 +20,13 @@
 //
 // Результат ничего не меняет сам: сверка пишет отчёт, а не правит статусы.
 // Ненайденный предмет может лежать в чужой сумке, и решать это должен человек.
+//
+// 3. НА ПОЛКЕ НАХОДИТСЯ И ЛИШНЕЕ. Вещь есть, а в системе её нет — и если не
+//    завести её на месте, на складе, где «полмастерской работает одновременно»,
+//    её не заведут никогда. Но сначала «Нашёл»: вещь без наклейки выглядит
+//    новой, хотя обычно она уже заведена, просто наклейка отвалилась. Заводить
+//    её второй раз — это ровно тот способ, которым в каталоге появились 64
+//    строки Sony A7 IV на 29 заводских номеров (DUPLICATES.md).
 
 const InventoryScreen = (() => {
   const STORE_KEY = "mifs_inventory_session";
@@ -33,6 +40,17 @@ const InventoryScreen = (() => {
   // Последний прочитанный код: показываем его серым примером в поле ввода,
   // чтобы было видно, что именно взял сканер.
   let lastCode = "";
+  // Поиск по ненайденному: их бывает под сотню, и глазами это не список.
+  let missingFilter = "";
+  const MISSING_LIMIT = 50;
+
+  // Форма заведения живёт в модуле, а не в DOM. Экран перерисовывается после
+  // каждого скана, а отказ сети не должен стирать набранное: повторять ввод
+  // стоя у полки с вещью в руках — верный способ бросить эту вещь незаведённой.
+  let creating = false;
+  let form = null;        // { category, model, name, serial, inventory, qty }
+  let createError = "";
+  let created = null;     // { item_id, name, qty, added }
 
   // ---- хранение ----
   //
@@ -137,7 +155,64 @@ const InventoryScreen = (() => {
     return { kind: "found", item, byQty: categoryByQty(item.category) };
   }
 
+  // «Нашёл» из списка ненайденного: тот же путь, что у скана, но серый пример в
+  // поле ввода не трогаем — там показано то, что прочитал сканер, а здесь
+  // ничего не сканировали.
+  function markFound(id) {
+    const keep = lastCode;
+    const result = accept(id);
+    lastCode = keep;
+    return result;
+  }
+
+  // ---- справочник моделей ----
+  //
+  // Собирается из кэша каталога, а не запросом: в каждом предмете уже лежат
+  // категория, код модели и название. Модель, у которой на складе нет ни одного
+  // экземпляра, сюда не попадёт — для неё есть «новая модель», и дубликата от
+  // этого не будет: сервер ищет модель по нормализованному названию и отдаёт
+  // существующий код (findOrCreateModel в Code.gs).
+  function modelsOf(category) {
+    const seen = {};
+    const out = [];
+    catalog().forEach((item) => {
+      if (item.category !== category || !item.model_code) return;
+      const code = String(item.model_code);
+      if (seen[code]) return;
+      seen[code] = true;
+      out.push({ model_code: code, model_name: item.name });
+    });
+    out.sort((a, b) => String(a.model_name).localeCompare(String(b.model_name), "ru"));
+    return out;
+  }
+
+  function defaultModel(category) {
+    const list = modelsOf(category);
+    return list.length ? list[0].model_code : "__new";
+  }
+
+  function blankForm() {
+    const fallback = (categoryList()[0] || {}).code || "OTH";
+    const category = session && session.scope !== "all" ? session.scope : fallback;
+    return {
+      category,
+      model: defaultModel(category),
+      name: "", serial: "", inventory: "", qty: "1",
+    };
+  }
+
   // ---- экран ----
+
+  // Всё, что относится к одной сверке и не должно пережить её конец.
+  function resetTransient() {
+    lastMessage = "";
+    lastCode = "";
+    missingFilter = "";
+    creating = false;
+    form = null;
+    createError = "";
+    created = null;
+  }
 
   function render() {
     const box = document.getElementById("inventory-content");
@@ -174,7 +249,7 @@ const InventoryScreen = (() => {
 
     document.getElementById("inventory-start").addEventListener("click", () => {
       const scope = document.getElementById("inventory-scope").value;
-      lastMessage = "";
+      resetTransient();
       session = { scope, started_at: new Date().toISOString(), found: {}, unknown: [] };
       save();
       render();
@@ -242,17 +317,30 @@ const InventoryScreen = (() => {
 
       <div class="section">
         <div class="section-title">Не найдено — ${s.missing.length}</div>
-        ${s.missing.length
-          ? `<div class="list">${s.missing.slice(0, 50).map((i) => `
-              <div class="card">
-                <div class="card-title">${escapeHtml(i.name)}</div>
-                <div class="card-sub">${escapeHtml(i.item_id)} · ${escapeHtml(categoryLabel(i.category))}</div>
-              </div>`).join("")}</div>
-             ${s.missing.length > 50 ? `<p class="hint">…и ещё ${s.missing.length - 50}. Полный список — в отчёте.</p>` : ""}`
-          : `<p class="hint">Всё на месте.</p>`}
+        ${s.missing.length ? `
+        <p class="hint">«Нашёл» отмечает позицию без сканирования — для вещей, с
+        которых отвалилась наклейка. Считается по кэшу, запросов ноль.</p>
+        <div class="field">
+          <input type="search" id="inventory-missing-filter" placeholder="Поиск по названию или номеру"
+                 value="${escapeHtml(missingFilter)}" />
+        </div>` : ""}
+        <div id="inventory-missing-list">${missingListHtml(s.missing)}</div>
       </div>
 
-      <button class="btn btn--secondary" id="inventory-cancel">Отменить сверку</button>`;
+      ${createdHtml()}
+
+      <div class="section">
+        <div class="section-title">Нашли то, чего нет в системе</div>
+        <p class="hint">Сначала поищите вещь выше, в «Не найдено»: чаще всего она
+        уже заведена, просто наклейка отвалилась. Заведённая второй раз вещь
+        навсегда останется в каталоге двумя строками.</p>
+        ${createHtml()}
+      </div>
+
+      <div class="inventory-drop">
+        <button class="btn btn--secondary" id="inventory-cancel">Отменить сверку</button>
+        <p class="hint">Отсканированное пропадёт целиком, восстанавливать будет нечем.</p>
+      </div>`;
 
     wireSession();
   }
@@ -261,6 +349,110 @@ const InventoryScreen = (() => {
   function byQtyFound() {
     return expected.filter((i) => categoryByQty(i.category) &&
       session.found[String(i.item_id)] !== undefined);
+  }
+
+  // ---- список ненайденного ----
+
+  function missingFiltered(missing) {
+    const q = missingFilter.trim().toLowerCase();
+    if (!q) return missing;
+    return missing.filter((i) =>
+      [i.name, i.item_id, i.serial_number, i.inventory_number]
+        .filter(Boolean).join(" ").toLowerCase().indexOf(q) !== -1);
+  }
+
+  function missingListHtml(missing) {
+    if (!missing.length) return `<p class="hint">Всё на месте.</p>`;
+    const list = missingFiltered(missing);
+    if (!list.length) return `<p class="hint">Под запрос ничего не подходит.</p>`;
+    const rows = list.slice(0, MISSING_LIMIT).map((i) => `
+      <div class="order-line inventory-miss">
+        <div class="inventory-miss-main">
+          <div class="order-line-name">${escapeHtml(i.name)}</div>
+          <div class="order-line-qty">${escapeHtml(i.item_id)} · ${escapeHtml(categoryLabel(i.category))}</div>
+        </div>
+        <button class="btn btn--secondary order-line-btn inventory-found"
+                data-item="${escapeHtml(i.item_id)}">Нашёл</button>
+      </div>`).join("");
+    const rest = list.length - MISSING_LIMIT;
+    return rows + (rest > 0
+      ? `<p class="hint">…и ещё ${rest}. Найдите нужное поиском выше — полный список уйдёт в отчёт.</p>`
+      : "");
+  }
+
+  // ---- форма заведения ----
+
+  function createHtml() {
+    if (!creating) {
+      return `<button class="btn btn--secondary" id="inventory-new-open">Завести новый экземпляр</button>`;
+    }
+    const models = modelsOf(form.category);
+    const bulk = categoryByQty(form.category);
+    const isNew = form.model === "__new";
+    return `
+      <div class="field">
+        <label for="inventory-new-category">Категория</label>
+        <select id="inventory-new-category">
+          ${categoryList().map((c) => `<option value="${escapeHtml(c.code)}"${
+            c.code === form.category ? " selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label for="inventory-new-model">Модель</label>
+        <select id="inventory-new-model">
+          ${models.map((m) => `<option value="${escapeHtml(m.model_code)}"${
+            m.model_code === form.model ? " selected" : ""}>${escapeHtml(m.model_name)}</option>`).join("")}
+          <option value="__new"${isNew ? " selected" : ""}>+ Новая модель</option>
+        </select>
+      </div>
+      ${isNew ? `
+      <div class="field">
+        <label for="inventory-new-name">Название новой модели</label>
+        <input type="text" id="inventory-new-name" value="${escapeHtml(form.name)}" />
+        <p class="hint">Если такая модель в таблице уже есть, номер возьмётся от неё —
+        второй модели с тем же названием не появится.</p>
+      </div>` : ""}
+      ${bulk ? `
+      <div class="field">
+        <label for="inventory-new-qty">Сколько добавить</label>
+        <input type="number" id="inventory-new-qty" inputmode="numeric" min="1" step="1"
+               value="${escapeHtml(form.qty)}" />
+        <p class="hint">Штучная позиция: если такая куча уже заведена, это количество
+        добавится к ней — второй строки не появится.</p>
+      </div>` : `
+      <div class="field">
+        <label for="inventory-new-serial">Заводской номер</label>
+        <input type="text" id="inventory-new-serial" value="${escapeHtml(form.serial)}" />
+      </div>
+      <div class="field">
+        <label for="inventory-new-inventory">Инвентарный номер</label>
+        <input type="text" id="inventory-new-inventory" value="${escapeHtml(form.inventory)}" />
+      </div>`}
+      <div id="inventory-new-error"></div>
+      <p class="hint">Это единственное место сверки, которому нужна сеть: номер
+      выдаёт таблица, придумать его на телефоне нельзя — иначе два человека за
+      вечер выдадут один и тот же. Один запрос, 5–8 секунд. Сканирование как было
+      офлайновым, так и остаётся.</p>
+      <div class="btn-row">
+        <button class="btn" id="inventory-new-submit">Завести</button>
+        <button class="btn btn--secondary" id="inventory-new-cancel">Отмена</button>
+      </div>`;
+  }
+
+  function createdHtml() {
+    if (!created) return "";
+    return `
+      <div class="section">
+        <div class="section-title">${created.added ? "Пополнено" : "Заведено"}</div>
+        <div class="card">
+          <div class="card-title">${escapeHtml(created.name)}</div>
+          <div class="qr-id">${escapeHtml(created.item_id)}</div>
+          <div class="card-sub">${created.added
+            ? `добавлено ${created.added}, всего на складе ${created.qty} · позиция отмечена найденной`
+            : "номер присвоила таблица · позиция отмечена найденной"}</div>
+          <button class="btn btn--secondary" id="inventory-created-label" style="margin-top:12px;">Этикетка</button>
+        </div>
+      </div>`;
   }
 
   function wireSession() {
@@ -282,15 +474,181 @@ const InventoryScreen = (() => {
       render();
     });
     document.getElementById("inventory-finish").addEventListener("click", finish);
+    wireMissing();
+    wireCreate();
     document.getElementById("inventory-cancel").addEventListener("click", () => {
       TG.showConfirm("Отменить сверку? Всё, что отсканировано, пропадёт.", (yes) => {
         if (!yes) return;
         session = null;
-        lastMessage = "";
+        resetTransient();
         save();
         render();
       });
     });
+  }
+
+  function bindFound(container) {
+    container.querySelectorAll(".inventory-found").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        showResult(markFound(btn.dataset.item));
+        render();
+      });
+    });
+  }
+
+  function wireMissing() {
+    const box = document.getElementById("inventory-missing-list");
+    bindFound(box);
+    const filter = document.getElementById("inventory-missing-filter");
+    if (!filter) return;
+    // Перерисовываем только список: полный render() выбивал бы фокус из поля на
+    // каждой набранной букве.
+    filter.addEventListener("input", () => {
+      missingFilter = filter.value;
+      box.innerHTML = missingListHtml(summary().missing);
+      bindFound(box);
+    });
+  }
+
+  // Значения формы забираем в модуль перед любой перерисовкой.
+  function readForm() {
+    if (!creating || !form) return;
+    const value = (id) => {
+      const el = document.getElementById(id);
+      return el ? el.value : undefined;
+    };
+    const next = {
+      category: value("inventory-new-category"),
+      model: value("inventory-new-model"),
+      name: value("inventory-new-name"),
+      serial: value("inventory-new-serial"),
+      inventory: value("inventory-new-inventory"),
+      qty: value("inventory-new-qty"),
+    };
+    Object.keys(next).forEach((k) => { if (next[k] !== undefined) form[k] = next[k]; });
+  }
+
+  function wireCreate() {
+    const label = document.getElementById("inventory-created-label");
+    if (label) {
+      label.addEventListener("click", () =>
+        Router.navigate("labels", { itemId: created.item_id }));
+    }
+
+    const open = document.getElementById("inventory-new-open");
+    if (open) {
+      open.addEventListener("click", () => {
+        creating = true;
+        createError = "";
+        created = null;
+        form = blankForm();
+        render();
+      });
+      return;
+    }
+
+    const cat = document.getElementById("inventory-new-category");
+    cat.addEventListener("change", () => {
+      readForm();
+      // Модель из прошлой категории в новой не существует.
+      form.model = defaultModel(form.category);
+      render();
+    });
+    document.getElementById("inventory-new-model").addEventListener("change", () => {
+      readForm();
+      render();
+    });
+    ["inventory-new-name", "inventory-new-serial", "inventory-new-inventory", "inventory-new-qty"]
+      .forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("input", readForm);
+      });
+
+    document.getElementById("inventory-new-submit").addEventListener("click", submitNew);
+    document.getElementById("inventory-new-cancel").addEventListener("click", () => {
+      readForm();
+      creating = false;
+      createError = "";
+      render();
+    });
+    showBoxError("inventory-new-error", createError);
+  }
+
+  async function submitNew() {
+    readForm();
+    createError = "";
+    const bulk = categoryByQty(form.category);
+    if (form.model === "__new" && !form.name.trim()) {
+      createError = "Укажите название новой модели";
+      render();
+      return;
+    }
+    const qty = bulk ? Math.floor(Number(form.qty)) : 1;
+    if (bulk && (!qty || qty < 1)) {
+      createError = "Количество — целое число от одного";
+      render();
+      return;
+    }
+
+    const payload = { category: form.category };
+    if (form.model === "__new") payload.model_name = form.name.trim();
+    else payload.model_code = Number(form.model);
+    if (bulk) payload.qty = qty;
+    else {
+      payload.serial_number = form.serial.trim();
+      payload.inventory_number = form.inventory.trim();
+    }
+    const name = form.model === "__new"
+      ? form.name.trim()
+      : (modelsOf(form.category).find((m) => m.model_code === form.model) || {}).model_name || "";
+
+    const btn = document.getElementById("inventory-new-submit");
+    btn.disabled = true;
+    btn.textContent = "Заводим…";
+    showBoxError("inventory-new-error", "");
+    try {
+      const res = await apiPost("/item/create", payload);
+      const id = String(res.item_id);
+      const items = catalog();
+      const known = items.some((i) => String(i.item_id) === id);
+      if (known) {
+        // Штучную позицию сервер пополнил, а не завёл заново.
+        Cache.patch("equipment", "item_id", id, { qty: Number(res.qty || qty) });
+      } else {
+        // Номер собран как XXYYZZ, средняя пара — код модели; сервер его не
+        // возвращает, а этикеткам и группировке он нужен.
+        Cache.set("equipment", items.concat([{
+          item_id: id,
+          name: name || id,
+          category: form.category,
+          model_code: id.slice(2, 4),
+          serial_number: payload.serial_number || "",
+          inventory_number: payload.inventory_number || "",
+          status: "Available",
+          qty: Number(res.qty || 1),
+          qty_out: 0,
+          qty_free: Number(res.qty || 1),
+        }]));
+      }
+      refreshExpected();
+      // Вещь в руках — значит найдена. Иначе она попадёт в «не найдено» тем же
+      // вечером, когда её и завели.
+      const fresh = itemById(id);
+      session.found[id] = fresh ? expectedQty(fresh) : 1;
+      save();
+      TG.hapticSuccess();
+      created = { item_id: id, name: (fresh && fresh.name) || name || id,
+                  qty: Number(res.qty || 1), added: res.added };
+      creating = false;
+      form = null;
+      lastMessage = "";
+      render();
+    } catch (err) {
+      TG.hapticError();
+      // Форма остаётся заполненной: набирать заново, стоя у полки, никто не станет.
+      createError = err.message;
+      render();
+    }
   }
 
   // Отклик на скан. Пока открыт сканер, экрана не видно — поэтому вибрация
@@ -346,6 +704,7 @@ const InventoryScreen = (() => {
       TG.showAlert(`Сверка записана в журнал. Найдено ${s.found} из ${s.total}, ` +
         `не найдено ${s.missing.length}.`);
       session = null;
+      resetTransient();
       save();
       render();
     } catch (err) {

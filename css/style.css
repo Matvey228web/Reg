@@ -775,6 +775,21 @@ select {
   font-size: 14px;
 }
 
+/* «Отменить сверку» стоит следом за «Завести новый экземпляр» и выглядит так
+   же. Отделяем линией и предупреждением: цена промаха — весь обход. */
+.inventory-drop {
+  margin-top: var(--s6);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--hairline);
+}
+.inventory-drop .hint { margin-top: 0; }
+
+/* Строка ненайденного с кнопкой «Нашёл»: имя слева, кнопка справа. Кнопка под
+   каждым из полусотни имён растянула бы список вдвое, а он и так длинный. */
+.inventory-miss { display: flex; align-items: center; gap: var(--s2); }
+.inventory-miss-main { flex: 1 1 auto; min-width: 0; }
+.inventory-miss .order-line-btn { flex: 0 0 auto; margin-top: 0; }
+
 /* Поле пересчёта у штучной позиции: узкое, рядом со строкой, а не во всю
    ширину — это одно число, а не форма. */
 .inventory-qty {
