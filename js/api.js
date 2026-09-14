@@ -37,7 +37,11 @@ function getStoredSession() {
   }
 }
 
-async function apiPost(endpoint, body = {}) {
+// fresh — «пойди за свежим, минуя кэш». Нужно кнопке «Обновить»: человек жмёт
+// её именно потому, что не верит показанному. Кэш в браузере мы и так обходим,
+// а этот флаг доезжает до Worker перед таблицей (worker/src/index.js), где
+// лежит общий кэш склада.
+async function apiPost(endpoint, body = {}, { fresh = false } = {}) {
   const session = getStoredSession();
   const token = session ? session.token : null;
 
@@ -62,7 +66,7 @@ async function apiPost(endpoint, body = {}) {
     res = await fetch(CONFIG.WEBHOOK_BASE_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ endpoint, token, payload: body }),
+      body: JSON.stringify({ endpoint, token, payload: body, fresh }),
     });
   } catch {
     throw new ApiError("Нет связи с сервером. Проверьте интернет-соединение.", 0);

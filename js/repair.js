@@ -78,7 +78,7 @@ const RepairScreen = (() => {
     drawRefreshRow();
     try {
       const [defects] = await Promise.all([
-        apiPost("/defects/list", { status: "all" }),
+        apiPost("/defects/list", { status: "all" }, { fresh: force }),
         loadItemsMap(),
       ]);
       Cache.set(CACHE, defects);

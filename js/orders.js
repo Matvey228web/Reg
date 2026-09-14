@@ -114,7 +114,7 @@ const OrdersScreen = (() => {
     busy = true;
     drawRefreshRow();
     try {
-      const orders = await apiPost("/orders/list", { status: "all" });
+      const orders = await apiPost("/orders/list", { status: "all" }, { fresh: force });
       Cache.set(CACHE, orders);
       render(orders);
     } catch (err) {

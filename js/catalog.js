@@ -169,7 +169,7 @@ const CatalogScreen = (() => {
     try {
       // Каталог берём целиком один раз, фильтры применяем локально: спрашивать
       // сервер на каждое переключение фильтра значило бы ждать снова.
-      const items = await apiPost("/equipment/list", { category: "all", status: "all" });
+      const items = await apiPost("/equipment/list", { category: "all", status: "all" }, { fresh: force });
       allItems = items;
       Cache.set(CACHE, items);
       render();
