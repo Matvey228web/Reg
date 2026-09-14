@@ -47,6 +47,17 @@ const TG = (() => {
     root.setProperty("--safe-bottom", bottom + "px");
   }
 
+  // Внешняя ссылка. Внутри Telegram открываем его же браузером — страница
+  // ложится поверх приложения и закрывается свайпом, склад остаётся под ней.
+  // Вне Telegram — обычной вкладкой.
+  function openLink(url) {
+    if (webApp && typeof webApp.openLink === "function") {
+      try { webApp.openLink(url); return true; } catch (ignored) {}
+    }
+    window.open(url, "_blank", "noopener");
+    return true;
+  }
+
   function applyTheme() {
     if (!webApp || !webApp.themeParams) return;
     const root = document.documentElement.style;
@@ -242,6 +253,6 @@ const TG = (() => {
 
   return {
     init, getUser, getInitData, isAvailable, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
-    mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm,
+    mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm, openLink,
   };
 })();

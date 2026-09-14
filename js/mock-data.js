@@ -14,8 +14,11 @@ const mockSettings = {
   max_login_attempts: 5,
   login_lock_minutes: 15,
   import_source_id: "",
+  site_url: "",
 };
 const MOCK_SETTINGS_SPEC = {
+  site_url: { def: "", text: true, check: (v) => v === "" || /^https:\/\/[^\s]+$/.test(String(v)),
+              hint: "адрес сайта проката целиком, начиная с https:// — или пусто" },
   notify_chat_id: { def: "", text: true, check: (v) => v === "" || /^-?\d{5,20}$/.test(String(v)),
                     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит" },
   session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },
@@ -1004,7 +1007,14 @@ const MockAPI = {
         Object.keys(incoming).forEach((k) => {
           const spec = MOCK_SETTINGS_SPEC[k];
           if (!spec) { rejected.push(k + ": неизвестная настройка"); return; }
-          if (spec.text) { mockSettings[k] = String(incoming[k]).trim(); return; }
+          if (spec.text) {
+            // Текстовые настройки бэкенд тоже проверяет — мок обязан вести себя
+            // так же, иначе кривой адрес ловился бы только на живой таблице.
+            const raw = String(incoming[k]).trim();
+            if (spec.check && !spec.check(raw)) { rejected.push(k + ": " + spec.hint); return; }
+            mockSettings[k] = raw;
+            return;
+          }
           const v = Number(incoming[k]);
           if (!isFinite(v) || v < spec.min || v > spec.max) { rejected.push(k + ": " + spec.hint); return; }
           mockSettings[k] = v;

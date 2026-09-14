@@ -14,6 +14,7 @@ const SettingsScreen = (() => {
     { key: "login_lock_minutes", label: "На сколько минут блокировать вход" },
     { key: "import_source_id", label: "Идентификатор исходной таблицы для импорта", text: true },
     { key: "notify_chat_id", label: "Чат склада для уведомлений бота", text: true },
+    { key: "site_url", label: "Адрес сайта проката", text: true },
   ];
 
   async function load() {
@@ -288,6 +289,10 @@ const SettingsScreen = (() => {
     try {
       const res = await apiPost("/settings/set", { settings: payload });
       data.settings = res.settings;
+      // Главная читает адрес сайта из сессии — без этого кнопка появилась бы
+      // только после следующего входа.
+      const me = Auth.getSession();
+      if (me) Auth.setSession({ ...me, settings: res.settings });
       TG.hapticSuccess();
       TG.showAlert("Настройки сохранены");
     } catch (err) {
@@ -344,7 +349,7 @@ const SettingsScreen = (() => {
   async function reloadAndRefreshSession() {
     data = await apiPost("/settings/get", {});
     const session = Auth.getSession();
-    if (session) Auth.setSession({ ...session, categories: data.categories });
+    if (session) Auth.setSession({ ...session, categories: data.categories, settings: data.settings });
     render();
   }
 

@@ -322,12 +322,15 @@ const LabelsScreen = (() => {
     const gap = mm(size.pad * 0.45, k);
     const inner = canvas.width - pad * 2;
 
-    // 1. Название сверху. Занимает столько, сколько нужно, но не больше двух
-    //    строк — остальное место принадлежит коду.
+    // 1. Название сверху. Две строки, если помещается; на самой мелкой ленте
+    //    ужимается до одной — см. бюджет ниже.
     const name = String(item.name || "").toUpperCase();
-    const fitted = name ? fitText(ctx, name, inner, mm(size.name, k), 2, "bold") : { px: 0, rows: [] };
-    const nameLine = Math.round(fitted.px * 1.06);
-    const nameHeight = fitted.rows.length * nameLine;
+    const fitName = (lines) => name
+      ? fitText(ctx, name, inner, mm(size.name, k), lines, "bold")
+      : { px: 0, rows: [] };
+    let fitted = fitName(2);
+    let nameLine = Math.round(fitted.px * 1.06);
+    let nameHeight = fitted.rows.length * nameLine;
 
     // 2. Низ: плашка с номером и подписи под ней. Считаем заранее, чтобы знать,
     //    сколько высоты остаётся коду.
@@ -347,15 +350,26 @@ const LabelsScreen = (() => {
     const modules = 21 + QUIET * 2;
     const minDot = 4 * k;
     const innerH = canvas.height - pad * 2;
-    const ruleH = fitted.rows.length ? Math.round(gap * 0.7) + stroke : 0;
+    const ruleH = () => (fitted.rows.length ? Math.round(gap * 0.7) + stroke : 0);
     const bottomH = () => chipH + bottomLines.length * orgLine + (bottomLines.length ? Math.round(gap * 0.5) : 0);
-    // Первой уходит категория: она и так закодирована первыми двумя цифрами
-    // номера. Подпись колледжа ниоткуда не выводится, поэтому держится дольше.
-    while (bottomLines.length && nameHeight + ruleH + bottomH() + gap * 2 + modules * minDot > innerH) {
-      bottomLines.shift();
-    }
+    const fits = () => nameHeight + ruleH() + bottomH() + gap * 2 + modules * minDot <= innerH;
 
-    const free = innerH - nameHeight - ruleH - bottomH() - gap * 2;
+    // Порядок, в котором жертвуем местом, когда лента мелкая:
+    //  1) категория — она и так закодирована первыми двумя цифрами номера;
+    //  2) вторая строка названия — модель узнают и по первой, а на приборе она
+    //     обычно написана и без нас;
+    //  3) и только в самом конце подпись колледжа. По ней вещь возвращают,
+    //     когда она уехала со съёмок в чужой сумке, — из номера она не
+    //     выводится ничем.
+    if (!fits() && bottomLines.length > 1) bottomLines.shift();
+    if (!fits() && fitted.rows.length > 1) {
+      fitted = fitName(1);
+      nameLine = Math.round(fitted.px * 1.06);
+      nameHeight = fitted.rows.length * nameLine;
+    }
+    while (!fits() && bottomLines.length) bottomLines.shift();
+
+    const free = innerH - nameHeight - ruleH() - bottomH() - gap * 2;
     const dot = Math.max(1, Math.floor(Math.min(inner, free) / modules));
     const qrSide = dot * modules;
 
@@ -375,7 +389,7 @@ const LabelsScreen = (() => {
 
     // Линия под названием: отделяет «что это» от «как это найти». Без неё
     // название и код висели в одном пустом поле и читались как один блок.
-    if (fitted.rows.length) {
+    if (ruleH()) {
       const ruleW = Math.round(inner * 0.45);
       y += Math.round(gap * 0.7);
       ctx.fillRect(Math.round((canvas.width - ruleW) / 2), y, ruleW, stroke);
