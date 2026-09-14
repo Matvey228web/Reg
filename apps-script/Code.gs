@@ -21,6 +21,12 @@ var SHEETS = {
   DEFECTS: "Defects",
   CATEGORIES: "Categories",
   INVENTORY: "Inventory",
+  // Как читать чужую таблицу при импорте. Раньше и названия колонок, и правила
+  // раскладки по категориям были прибиты в коде: чужая выгрузка с колонкой
+  // «Название» вместо «Наименование» импортировалась пустой, и починить это
+  // мог только тот, у кого открыт редактор Apps Script.
+  IMPORT_MAP: "ImportMap",
+  IMPORT_RULES: "ImportRules",
   META: "Meta",
 };
 
@@ -89,6 +95,14 @@ var SCHEMA = {
   // Заводить сэндбэги по одному с личным QR никто не станет.
   Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id", "qty", "qty_out"],
   Models: ["category", "model_code", "model_name", "created_at"],
+  // Синонимы колонок исходной таблицы, через запятую. Проверяются по порядку,
+  // первый совпавший выигрывает. Особые записи: colN — колонка по счёту
+  // (col0 — первая), ВКЛАДКА:colN — то же, но только на этой вкладке.
+  ImportMap: ["field", "aliases", "note"],
+  // Правила раскладки по категориям. Проверяются сверху вниз, первое совпавшее
+  // выигрывает — поэтому частные правила стоят выше общих. match: name — искать
+  // в названии, type — в колонке «Тип», tab — имя вкладки целиком.
+  ImportRules: ["category", "match", "keywords", "note"],
   Staff: ["staff_id", "full_name", "login", "pin_hash", "telegram_id", "role", "active", "session_token", "token_issued_at", "failed_attempts", "locked_until"],
   // Clients — предыдущая модель: справочник «клиент/проект», из которого
   // выбирали при выдаче. Заменён на Students + Orders (заказ приходит с сайта,
@@ -178,6 +192,18 @@ function setupEverything() {
   return message;
 }
 
+// Заполняет лист умолчаниями, если в нём нет ни одной строки данных.
+function seedSheet(ss, name, rows) {
+  var sheet = ss.getSheetByName(name);
+  if (!sheet || sheet.getLastRow() > 1 || !rows.length) return;
+  var headers = sheetHeaders(sheet);
+  var values = rows.map(function (r) {
+    return headers.map(function (h) { return r[h] !== undefined ? r[h] : ""; });
+  });
+  prepareRows(sheet, 2, values.length);
+  sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+}
+
 /**
  * Создаёт недостающие вкладки и проставляет заголовки колонок.
  * Запускать можно сколько угодно раз: существующие данные не трогаются,
@@ -224,6 +250,11 @@ function setupSheets() {
     if (!target) continue;
     prepareRows(target, 1, target.getMaxRows ? target.getMaxRows() : 1000);
   }
+
+  // Карта колонок и правила категорий: засеваем только пустой лист. Если в нём
+  // уже что-то есть — значит его правили руками, и затирать правку нельзя.
+  seedSheet(ss, SHEETS.IMPORT_MAP, IMPORT_MAP_DEFAULTS);
+  seedSheet(ss, SHEETS.IMPORT_RULES, IMPORT_RULES_DEFAULTS);
 
   // Справочник категорий засеваем умолчаниями при первом запуске. Существующие
   // номера предметов от этого не меняются: засеваем ровно те коды, по которым
@@ -317,6 +348,50 @@ function setupSheets() {
 // Берётся из её адреса: docs.google.com/spreadsheets/d/<ЭТОТ_КУСОК>/edit
 var IMPORT_SOURCE_ID = "1Y9UR7whPZt8ONRId30TevI-Rid7VhiisWEogE30XbY4";
 
+// Умолчания для листа ImportMap: как называются колонки в нашей исходной
+// таблице. Засеваются один раз, дальше правятся прямо в таблице.
+var IMPORT_MAP_DEFAULTS = [
+  { field: "name", aliases: "Наименование, Название, Оборудование, col0, Тип",
+    note: "Название позиции. col0 — первая колонка, если заголовка нет" },
+  { field: "serial_number", aliases: "Заводской номер, Серийный номер, Serial, S/N",
+    note: "Заводской номер" },
+  { field: "inventory_number", aliases: "Инвентарный номер, Инв. номер, Инв номер",
+    note: "Инвентарный номер колледжа" },
+  { field: "type", aliases: "Тип, Категория",
+    note: "Тип — по нему тоже определяется категория" },
+  { field: "status", aliases: "Состояние, Статус, ЗВУК:col2",
+    note: "Состояние. ЗВУК:col2 — на вкладке ЗВУК заголовка нет, состояние в третьей колонке" },
+  { field: "kit", aliases: "Комплектация, Комплектация 13.04 наличие",
+    note: "Комплектация — уходит в примечания" },
+  { field: "notes", aliases: "Примечания, Комментарий", note: "Примечания" },
+  { field: "storage", aliases: "Хранение", note: "Где лежит — уходит в примечания" },
+];
+
+// Умолчания для листа ImportRules — ровно та раскладка, что была прибита в
+// коде и вычитана на 628 строках (CATEGORIES.md). Порядок важен: первое
+// совпавшее правило выигрывает, поэтому частные стоят выше общих.
+var IMPORT_RULES_DEFAULTS = [
+  { category: "FLT", match: "name", keywords: "фильтр, b+w, поляриз, clear mrc" },
+  { category: "FLT", match: "type", keywords: "светофильтр" },
+  { category: "MON", match: "name", keywords: "tvlogic, swit, accsoon, cineview, монитор, сендер" },
+  { category: "RIG", match: "name", keywords: "nucleus, tilta, матбокс, клетка, cage, follow focus, радиофокус" },
+  { category: "MOD", match: "name", keywords: "чайнабол, октобокс, софтбокс, sb-ufw, cs-85, vsa-, соты, зонт, рассеиват, шторки, рефлектор" },
+  { category: "SUP", match: "name", keywords: "штатив, greenbean, videomaster, hdv elite, слайдер, стедикам, гимбал, монопод, easyrig" },
+  { category: "PWR", match: "name", keywords: "аккумулятор, зарядк, np-f, v-mount, блок питания, удлинител" },
+  { category: "MED", match: "name", keywords: "карта памяти, cfexpress, ридер, card reader, ssd, накопител" },
+  { category: "GRP", match: "name", keywords: "мешок, sandbag, флаг, струбцин, clamp, пена, стойка, журавл" },
+  { category: "AUD", match: "tab", keywords: "ЗВУК" },
+  { category: "AUD", match: "name", keywords: "hollyland, tascam, тascam, петличк, рекордер, микрофон, радиосистем" },
+  // «sony a7», а не просто «a7»: двух символов слишком мало, они найдутся в
+  // середине чужого названия и утащат в камеры что попало.
+  { category: "CAM", match: "name", keywords: "burano, pyxis, blackmagic, ilce, ilme, fx-3, fx3, fx6, xa-60, c70, pmw, red one, komodo, alexa, sony a7, sony а7, камера, фотоаппарат, фотоапарат" },
+  { category: "CAM", match: "type", keywords: "камера, фотоаппарат, фотоапарат" },
+  { category: "LEN", match: "name", keywords: "объектив, обьектив, zenit, samyang, dzofilm, illumina, sigma, tamron, canon rf, canon ef, zenitar, selena, helios, mm" },
+  { category: "LEN", match: "type", keywords: "объектив, обьектив" },
+  { category: "LGT", match: "tab", keywords: "СВЕТ" },
+  { category: "LGT", match: "name", keywords: "godox, nanlite, forza, осветител, knowled, aputure" },
+];
+
 // Ключевые слова, по которым состояние считается неисправным / утерянным.
 var IMPORT_BROKEN = ["не работает", "неработает", "ремонт", "разбит", "сломан",
                      "нельзя", "горелый", "заела", "треснут", "не включ"];
@@ -333,10 +408,23 @@ function importInventory() {
   // появились в новой версии кода, полагаться на то, что setupSheets запустили
   // руками, нельзя — импорт упадёт на середине.
   setupSheets();
+  // Конфигурацию перечитываем: её могли поправить в таблице между запусками.
+  IMPORT_CONFIG = null;
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var source = SpreadsheetApp.openById(importSourceId());
+    var sourceId = importSourceId();
+    var source;
+    try {
+      source = SpreadsheetApp.openById(sourceId);
+    } catch (openErr) {
+      // Без этого Apps Script says только «Unexpected error while getting the
+      // method or property openById», и непонятно, что виноват один id.
+      throw apiError(400, "Не удалось открыть исходную таблицу по идентификатору «" +
+        sourceId + "». Проверьте «Идентификатор исходной таблицы для импорта» в " +
+        "настройках приложения: он берётся из адреса таблицы между /d/ и /edit, " +
+        "и у этого аккаунта должен быть к ней доступ.");
+    }
     var eqSheet = getSheet(SHEETS.EQUIPMENT);
 
     // Что уже импортировано. Метка источника («вкладка#строка») — единственный
@@ -371,7 +459,7 @@ function importInventory() {
     // поэтому позиция в SCHEMA не совпадает с позицией в таблице.
     var headers = sheetHeaders(eqSheet);
     var out = [];
-    var stats = { merged: 0, alreadyImported: 0, byTab: {} };
+    var stats = { merged: 0, alreadyImported: 0, noName: 0, byTab: {} };
     var now = new Date().toISOString();
 
     // Справочник моделей строим в памяти: на 600+ позиций обращаться к вкладке
@@ -404,11 +492,14 @@ function importInventory() {
         var row = {};
         for (var c = 0; c < keys.length; c++) row[keys[c]] = importTrim(values[i][c]);
 
-        var name = row["Наименование"] || row["col0"] || row["Тип"] || "";
-        var serial = importCleanSerial(row["Заводской номер"]);
-        var inventory = row["Инвентарный номер"] || "";
+        var name = importField(row, keys, tab, "name");
+        var serial = importCleanSerial(importField(row, keys, tab, "serial_number"));
+        var inventory = importField(row, keys, tab, "inventory_number");
         if (!name && !serial && !inventory) continue;
-        if (!name) name = "[без названия] " + (serial || inventory);
+        // Пустое название на всей вкладке — верный признак, что ImportMap не
+        // подходит этой таблице. Считаем и говорим об этом в отчёте, иначе
+        // импорт молча заведёт шестьсот «[без названия]».
+        if (!name) { stats.noName++; name = "[без названия] " + (serial || inventory); }
         // Сводим известные синонимы к одному имени до того, как по имени будут
         // определены категория и модель: иначе один аппарат разъедется на две
         // модели с разными блоками номеров.
@@ -420,9 +511,8 @@ function importInventory() {
         if (serial) seenSerial[serial] = true;
         seenImport[importKey] = true;
 
-        var statusCell = row["Состояние"] || (tab === "ЗВУК" ? row["col2"] : "");
-        var st = importStatus(statusCell);
-        var category = importCategory(row["Тип"] || "", tab, name);
+        var st = importStatus(importField(row, keys, tab, "status"));
+        var category = importCategory(importField(row, keys, tab, "type"), tab, name);
 
         // Модель: ищем среди уже известных по нормализованному названию,
         // иначе заводим новую и запоминаем, чтобы дописать во вкладку Models.
@@ -451,11 +541,12 @@ function importInventory() {
         }
         var itemId = buildItemId(category, modelCode, counters[unitKey]);
 
+        var storage = importField(row, keys, tab, "storage");
         var notes = [
-          row["Комплектация"] || row["Комплектация 13.04 наличие"] || "",
-          row["Примечания"] || "",
+          importField(row, keys, tab, "kit"),
+          importField(row, keys, tab, "notes"),
           st.note,
-          row["Хранение"] ? "Хранение: " + row["Хранение"] : "",
+          storage ? "Хранение: " + storage : "",
           "Импорт: " + importKey,
         ].filter(function (x) { return x; }).join(" / ");
 
@@ -499,6 +590,8 @@ function importInventory() {
       " (" + parts.join(", ") + "). Моделей в справочнике: " + newModels.length +
       ". Склеено дублей по заводскому номеру: " + stats.merged +
       ". Пропущено (импортировано ранее): " + stats.alreadyImported + "." +
+      (stats.noName ? " БЕЗ НАЗВАНИЯ: " + stats.noName +
+        " — похоже, колонка с названием называется иначе; поправьте лист ImportMap." : "") +
       (overflow.length ? " НЕ ПОМЕСТИЛОСЬ (кончились номера): " + overflow.join("; ") : "");
     Logger.log(message);
     try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
@@ -741,33 +834,79 @@ function importStatus(cell) {
 //
 // Порядок правил — от частного к общему: «Godox SB-UFW120» это софтбокс, а не
 // осветитель, хотя Godox делает и то и другое.
+// Конфигурация импорта читается один раз за запуск: importCategory зовётся на
+// каждую из 600+ строк, и лезть в таблицу на каждую было бы дороже самого
+// импорта.
+var IMPORT_CONFIG = null;
+
+function importConfig() {
+  if (IMPORT_CONFIG) return IMPORT_CONFIG;
+  IMPORT_CONFIG = { fields: {}, rules: [] };
+
+  readRows(getSheet(SHEETS.IMPORT_MAP)).forEach(function (r) {
+    var field = String(r.field || "").trim();
+    if (!field) return;
+    IMPORT_CONFIG.fields[field] = splitList(r.aliases);
+  });
+  readRows(getSheet(SHEETS.IMPORT_RULES)).forEach(function (r) {
+    var category = String(r.category || "").trim().toUpperCase();
+    var words = splitList(r.keywords);
+    if (!category || !words.length) return;
+    IMPORT_CONFIG.rules.push({
+      category: category,
+      match: String(r.match || "name").trim().toLowerCase(),
+      keywords: words.map(function (w) { return w.toLowerCase(); }),
+    });
+  });
+  return IMPORT_CONFIG;
+}
+
+function splitList(value) {
+  return String(value || "").split(",").map(function (x) { return x.trim(); })
+    .filter(function (x) { return x; });
+}
+
+// Значение поля в строке исходной таблицы по списку синонимов из ImportMap.
+// keys — заголовки этой вкладки в том виде, как их вернул importHeaderKeys.
+function importField(row, keys, tab, field) {
+  var aliases = importConfig().fields[field] || [];
+  for (var i = 0; i < aliases.length; i++) {
+    var alias = aliases[i];
+    // «ВКЛАДКА:colN» — синоним, действующий только на одной вкладке: в нашей
+    // выгрузке у «ЗВУК» нет заголовков вовсе, а на других вкладках третья
+    // колонка означает совсем другое.
+    var scoped = alias.indexOf(":");
+    if (scoped !== -1) {
+      if (alias.slice(0, scoped).trim().toUpperCase() !== String(tab).trim().toUpperCase()) continue;
+      alias = alias.slice(scoped + 1).trim();
+    }
+    if (keys.indexOf(alias) === -1) continue;
+    var value = row[alias];
+    if (value) return value;
+  }
+  return "";
+}
+
+// Категория по правилам из листа ImportRules: сверху вниз, первое совпавшее
+// выигрывает. Раньше это был столбик if-ов в коде — поменять раскладку мог
+// только тот, у кого открыт редактор Apps Script.
 function importCategory(tip, tab, name) {
-  var t = String(name || "").toLowerCase();
-  var type = String(tip || "").toLowerCase();
-
-  if (has(t, ["фильтр", "b+w", "поляриз", "clear mrc"]) || has(type, ["светофильтр"])) return "FLT";
-  if (has(t, ["tvlogic", "swit", "accsoon", "cineview", "монитор", "сендер"])) return "MON";
-  if (has(t, ["nucleus", "tilta", "матбокс", "клетка", "cage", "follow focus", "радиофокус"])) return "RIG";
-  if (has(t, ["чайнабол", "октобокс", "софтбокс", "sb-ufw", "cs-85", "vsa-", "соты",
-              "зонт", "рассеиват", "шторки", "рефлектор"])) return "MOD";
-  if (has(t, ["штатив", "greenbean", "videomaster", "hdv elite", "слайдер", "стедикам",
-              "гимбал", "монопод", "easyrig"])) return "SUP";
-  if (has(t, ["аккумулятор", "зарядк", "np-f", "v-mount", "блок питания", "удлинител"])) return "PWR";
-  if (has(t, ["карта памяти", "cfexpress", "ридер", "card reader", "ssd", "накопител"])) return "MED";
-  if (has(t, ["мешок", "sandbag", "флаг", "струбцин", "clamp", "пена", "стойка", "журавл"])) return "GRP";
-
-  if (tab === "ЗВУК" || has(t, ["hollyland", "tascam", "тascam", "петличк", "рекордер",
-                                "микрофон", "радиосистем"])) return "AUD";
-  // «sony a7», а не просто «a7»: двух символов слишком мало, они найдутся в
-  // середине чужого названия и утащат в камеры что попало.
-  if (has(t, ["burano", "pyxis", "blackmagic", "ilce", "ilme", "fx-3", "fx3", "fx6", "xa-60",
-              "c70", "pmw", "red one", "komodo", "alexa", "sony a7", "sony а7",
-              "камера", "фотоаппарат", "фотоапарат"]) ||
-      has(type, ["камера", "фотоаппарат", "фотоапарат"])) return "CAM";
-  if (has(t, ["объектив", "обьектив", "zenit", "samyang", "dzofilm", "illumina", "sigma",
-              "tamron", "canon rf", "canon ef", "zenitar", "selena", "helios", "mm"]) ||
-      has(type, ["объектив", "обьектив"])) return "LEN";
-  if (tab === "СВЕТ" || has(t, ["godox", "nanlite", "forza", "осветител", "knowled", "aputure"])) return "LGT";
+  var haystacks = {
+    name: String(name || "").toLowerCase(),
+    type: String(tip || "").toLowerCase(),
+  };
+  var tabName = String(tab || "").trim().toLowerCase();
+  var rules = importConfig().rules;
+  for (var i = 0; i < rules.length; i++) {
+    var rule = rules[i];
+    if (rule.match === "tab") {
+      if (rule.keywords.indexOf(tabName) !== -1) return rule.category;
+      continue;
+    }
+    var haystack = haystacks[rule.match];
+    if (haystack === undefined) continue;
+    if (has(haystack, rule.keywords)) return rule.category;
+  }
   return "OTH";
 }
 

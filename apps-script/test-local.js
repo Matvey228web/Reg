@@ -249,7 +249,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 12 вкладок', spreadsheet.getSheets().length === 12, spreadsheet.getSheets().map(s => s.name));
+check('создано 14 вкладок', spreadsheet.getSheets().length === 14, spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -259,7 +259,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 12', spreadsheet.getSheets().length === 12);
+check('вкладок по-прежнему 14', spreadsheet.getSheets().length === 14);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -1174,6 +1174,84 @@ check('в сводке есть каталог и заказы',
 check('сводка знает, сколько сотрудников',
   r.data.summary.staff === call('/staff/list', {}, ownerToken).data.length, r.data.summary);
 check('панель знает, кто главный', r.data.me.is_owner === true && String(r.data.owner.staff_id) === '1', r.data.me);
+
+console.log('\n== схема импорта живёт в таблице, а не в коде ==');
+check('лист ImportMap засеян умолчаниями',
+      readRows(getSheet(SHEETS.IMPORT_MAP)).length === IMPORT_MAP_DEFAULTS.length,
+      readRows(getSheet(SHEETS.IMPORT_MAP)).length);
+check('лист ImportRules засеян умолчаниями',
+      readRows(getSheet(SHEETS.IMPORT_RULES)).length === IMPORT_RULES_DEFAULTS.length,
+      readRows(getSheet(SHEETS.IMPORT_RULES)).length);
+// Засев только пустого листа: правку руками setupSheets затирать не имеет права.
+getSheet(SHEETS.IMPORT_MAP).getRange(2, 2, 1, 1).setValues([['Название товара']]);
+setupSheets();
+check('повторный setupSheets не затирает правку в ImportMap',
+      readRows(getSheet(SHEETS.IMPORT_MAP))[0].aliases === 'Название товара',
+      readRows(getSheet(SHEETS.IMPORT_MAP))[0].aliases);
+getSheet(SHEETS.IMPORT_MAP).getRange(2, 2, 1, 1).setValues([[IMPORT_MAP_DEFAULTS[0].aliases]]);
+IMPORT_CONFIG = null;
+
+// Раскладка по категориям вычитана на 628 реальных строках (CATEGORIES.md).
+// Переезд правил из кода в лист ImportRules не должен был её изменить —
+// проверяем на именах, каждое из которых закрывает своё правило.
+const catCases = [
+  ['B+W поляризационный', '', '', 'FLT'],
+  ['Нечто', 'светофильтр', '', 'FLT'],
+  ['TVLogic 058W', '', '', 'MON'],
+  ['Tilta Nucleus-M', '', '', 'RIG'],
+  ['Чайнабол 65см', '', '', 'MOD'],
+  ['Штатив GreenBean', '', '', 'SUP'],
+  ['Аккумулятор V-mount', '', '', 'PWR'],
+  ['CFexpress 128', '', '', 'MED'],
+  ['SANDBAG BIG', '', '', 'GRP'],
+  ['Безымянная железка', '', 'ЗВУК', 'AUD'],
+  ['Tascam DR-60', '', '', 'AUD'],
+  ['Sony BURANO 8K', '', '', 'CAM'],
+  ['Нечто', 'фотоаппарат', '', 'CAM'],
+  ['Sigma 24-70mm', '', '', 'LEN'],
+  ['Нечто', 'объектив', '', 'LEN'],
+  ['Безымянная железка', '', 'СВЕТ', 'LGT'],
+  ['Godox VL150', '', '', 'LGT'],
+  ['Ковёр гойда', '', '', 'OTH'],
+];
+const catWrong = catCases.filter(([name, type, tab, want]) => importCategory(type, tab, name) !== want)
+  .map(([name, type, tab, want]) => `${name}|${type}|${tab}: ждали ${want}, вышло ${importCategory(type, tab, name)}`);
+check('правила из листа дают ту же раскладку, что прибитый код', catWrong.length === 0, catWrong);
+
+// Приоритет задаётся порядком строк: «стойка» в GRP стоит выше правил света,
+// поэтому «Стойка Godox» — грип, а не осветитель. Если кто-то переставит
+// строки в таблице, это изменится — и это ровно то, ради чего лист заведён.
+check('первое совпавшее правило выигрывает', importCategory('', '', 'Стойка Godox') === 'GRP',
+      importCategory('', '', 'Стойка Godox'));
+
+// Синонимы колонок. col0 — колонка по счёту, «ВКЛАДКА:colN» — только на своей
+// вкладке: в нашей выгрузке у «ЗВУК» заголовков нет вовсе, а на других
+// вкладках третья колонка означает совсем другое.
+const keysNamed = ['Наименование', 'Заводской номер', 'Состояние'];
+const rowNamed = { 'Наименование': 'Sony FX6', 'Заводской номер': 'SN-1', 'Состояние': 'не работает' };
+check('колонка находится по основному имени',
+      importField(rowNamed, keysNamed, 'КИНО', 'name') === 'Sony FX6');
+const keysAlias = ['Название', 'Serial'];
+const rowAlias = { 'Название': 'Canon C70', 'Serial': 'SN-2' };
+check('и по синониму тоже', importField(rowAlias, keysAlias, 'КИНО', 'name') === 'Canon C70' &&
+      importField(rowAlias, keysAlias, 'КИНО', 'serial_number') === 'SN-2');
+const keysBlank = ['col0', 'col1', 'col2'];
+const rowBlank = { col0: 'Петличка', col1: '', col2: 'сломан' };
+check('без заголовков берётся колонка по счёту',
+      importField(rowBlank, keysBlank, 'ЗВУК', 'name') === 'Петличка');
+check('привязанный к вкладке синоним работает на своей вкладке',
+      importField(rowBlank, keysBlank, 'ЗВУК', 'status') === 'сломан');
+check('и молчит на чужой',
+      importField(rowBlank, keysBlank, 'КИНО', 'status') === '',
+      importField(rowBlank, keysBlank, 'КИНО', 'status'));
+
+// Правка листа подхватывается без правки кода — ради этого всё и делалось.
+spreadsheet.getSheetByName('ImportRules').appendRow(['CNS', 'name', 'гойда', 'тест']);
+IMPORT_CONFIG = null;
+check('добавленное в таблицу правило работает сразу',
+      importCategory('', '', 'Ковёр гойда') === 'CNS', importCategory('', '', 'Ковёр гойда'));
+spreadsheet.getSheetByName('ImportRules').deleteRow(spreadsheet.getSheetByName('ImportRules').getLastRow());
+IMPORT_CONFIG = null;
 
 console.log('\n== самозагрузка первого администратора закрыта навсегда ==');
 // Раньше защита держалась на «в Staff есть строки»: почистив лист, кто угодно
