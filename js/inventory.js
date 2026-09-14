@@ -80,7 +80,12 @@ const InventoryScreen = (() => {
     return Cache.items("equipment") || [];
   }
 
+  // Выборка задана — область это ровно она, и ничего кроме. Остальное для этой
+  // сверки «вне области»: так же, как предмет чужой категории.
   function inScope(item, scope) {
+    if (session && session.sample) {
+      return session.sample.indexOf(String(item.item_id)) !== -1;
+    }
     return scope === "all" || item.category === scope;
   }
 
@@ -99,7 +104,24 @@ const InventoryScreen = (() => {
   }
 
   function scopeLabel(scope) {
-    return scope === "all" ? "весь каталог" : categoryLabel(scope);
+    const base = scope === "all" ? "весь каталог" : categoryLabel(scope);
+    if (session && session.sample) {
+      const n = session.sample.length;
+      return `выборка ${n} ${plural(n, "позиции", "позиций", "позиций")} · ${base}`;
+    }
+    return base;
+  }
+
+  // Случайные n позиций. Перемешиваем копию (Фишер–Йетс), а не сортируем по
+  // random: сортировка со случайным компаратором даёт неравномерный результат,
+  // и «наугад» оказывается смещённым к началу каталога.
+  function pickSample(pool, n) {
+    const ids = pool.map((i) => String(i.item_id));
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const swap = ids[i]; ids[i] = ids[j]; ids[j] = swap;
+    }
+    return ids.slice(0, n);
   }
 
   // ---- подсчёт ----
@@ -245,12 +267,26 @@ const InventoryScreen = (() => {
         <p class="hint">Считают полками, а не складом целиком. Предмет из другой
         категории при сверке по категории не пропал — он просто вне области.</p>
       </div>
+      <div class="field">
+        <label for="inventory-sample">Проверить только часть — сколько позиций</label>
+        <input type="number" id="inventory-sample" inputmode="numeric" min="1" step="1"
+               placeholder="пусто — все" />
+        <p class="hint">Выборочная сверка: система сама наугад выберет столько позиций
+        из области, и сходится склад или нет будет видно по ним. Полный обход на
+        629 позиций — это вечер и шестьсот строк в журнале; двадцать случайных
+        занимают десять минут и ловят ровно то же расхождение, если оно системное.</p>
+      </div>
       <button class="btn" id="inventory-start">Начать сверку</button>`;
 
     document.getElementById("inventory-start").addEventListener("click", () => {
       const scope = document.getElementById("inventory-scope").value;
+      const pool = items.filter((i) => scope === "all" || i.category === scope);
+      const want = Math.floor(Number(document.getElementById("inventory-sample").value));
       resetTransient();
       session = { scope, started_at: new Date().toISOString(), found: {}, unknown: [] };
+      // Выборку фиксируем на старте и держим в сессии: пересчитывать её на каждом
+      // открытии экрана значило бы менять область посреди обхода.
+      if (want >= 1 && want < pool.length) session.sample = pickSample(pool, want);
       save();
       render();
     });
@@ -338,8 +374,13 @@ const InventoryScreen = (() => {
       </div>
 
       <div class="inventory-drop">
-        <button class="btn btn--secondary" id="inventory-cancel">Отменить сверку</button>
-        <p class="hint">Отсканированное пропадёт целиком, восстанавливать будет нечем.</p>
+        <div class="btn-row btn-row--equal">
+          <button class="btn btn--secondary" id="inventory-reset">Сбросить отметки</button>
+          <button class="btn btn--outline-danger" id="inventory-cancel">Отменить сверку</button>
+        </div>
+        <p class="hint">«Сбросить» обнуляет отмеченное, но оставляет область и
+        выборку — удобно, когда пересчитываешь заново ту же полку. «Отменить»
+        закрывает сверку целиком, и восстанавливать будет нечем.</p>
       </div>`;
 
     wireSession();
@@ -476,6 +517,18 @@ const InventoryScreen = (() => {
     document.getElementById("inventory-finish").addEventListener("click", finish);
     wireMissing();
     wireCreate();
+    document.getElementById("inventory-reset").addEventListener("click", () => {
+      TG.showConfirm("Обнулить отмеченное? Область и выборка останутся.", (yes) => {
+        if (!yes) return;
+        session.found = {};
+        session.unknown = [];
+        lastMessage = "";
+        lastCode = "";
+        missingFilter = "";
+        save();
+        render();
+      });
+    });
     document.getElementById("inventory-cancel").addEventListener("click", () => {
       TG.showConfirm("Отменить сверку? Всё, что отсканировано, пропадёт.", (yes) => {
         if (!yes) return;
