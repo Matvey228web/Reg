@@ -6,7 +6,7 @@ const CONFIG = {
   // URL веб-приложения Google Apps Script (заканчивается на /exec).
   // Это не секрет: он всё равно уходит в браузер каждого сотрудника вместе
   // с этим файлом. Защита — на стороне Apps Script (логин, PIN, токен).
-  WEBHOOK_BASE_URL: "https://script.google.com/macros/s/AKfycbwseLqYuSorX55ICsCCTMB2L8r79HbYYRx4VVdOH0G6jjyzOUCQYmDoVNbY9GSDgGsX/exec",
+  WEBHOOK_BASE_URL: "https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec",
 
   // true = все запросы API обслуживаются локальными фейковыми данными (js/mock-data.js),
   // без обращения к Google Sheets/Apps Script. Удобно для разработки и демонстрации
