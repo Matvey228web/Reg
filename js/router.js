@@ -28,7 +28,11 @@ const Router = (() => {
                        inventory: "home" };
 
   // Панель разделов видна везде, кроме экрана входа; активная вкладка подсвечена.
+  // Вывеска в шапке остаётся и на входе — она и есть название системы, — а
+  // кнопка настроек до входа не ведёт никуда.
   function renderTabbar(name) {
+    var gear = document.getElementById("appbar-settings");
+    if (gear) gear.style.display = name === "login" ? "none" : "";
     var bar = document.getElementById("tabbar");
     if (!bar) return;
     bar.style.display = name === "login" ? "none" : "flex";

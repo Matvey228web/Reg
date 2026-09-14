@@ -18,8 +18,18 @@ const SettingsScreen = (() => {
 
   async function load() {
     const box = document.getElementById("settings-content");
-    box.innerHTML = skeleton(4);
+    const me = Auth.getSession() || {};
     showBoxError("settings-error", "");
+    // Складскому сотруднику здесь нужна только своя учётная запись: категории,
+    // сроки, бот и обслуживание — администраторские, их правку бэкенд всё равно
+    // не пропустит, и показывать кнопки, которые ответят «нельзя», незачем.
+    // Заодно ни одного запроса: сменить PIN и выйти можно и без сети.
+    if (me.role !== "Admin") {
+      box.innerHTML = accountHtml();
+      bindAccount();
+      return;
+    }
+    box.innerHTML = skeleton(4);
     try {
       data = await apiPost("/settings/get", {});
       render();
@@ -42,12 +52,39 @@ const SettingsScreen = (() => {
             <p class="hint">Важно выбрать именно «новую версию» существующего
             развёртывания, а не создавать новое: у нового будет другой адрес, и
             приложение перестанет находить таблицу.</p>
-          </div>`;
+          </div>
+          ${accountHtml()}`;
+        bindAccount();
       } else {
         showBoxError("settings-error", err.message);
-        box.innerHTML = "";
+        // Своя учётная запись от состояния таблицы не зависит: выйти из системы
+        // и сменить PIN нужно уметь как раз тогда, когда всё остальное отвалилось.
+        box.innerHTML = accountHtml();
+        bindAccount();
       }
     }
+  }
+
+  // Своя учётная запись — в самом низу и отдельной зоной: это единственное на
+  // экране, что меняет не склад, а вас. «Выйти» красной: на складе один телефон
+  // ходит по рукам, и промах здесь выкидывает человека в форму входа.
+  function accountHtml() {
+    const me = Auth.getSession() || {};
+    return `
+      <div class="section section--account">
+        <h2>Учётная запись</h2>
+        <p class="hint">Вошли как ${escapeHtml(me.full_name || "—")}${
+          me.full_name ? ` · ${escapeHtml(roleLabel(me))}` : ""}.</p>
+        <button class="btn btn--secondary" id="settings-pin">Сменить свой PIN</button>
+        <button class="btn btn--outline-danger" id="settings-logout">Выйти</button>
+      </div>`;
+  }
+
+  function bindAccount() {
+    const pin = document.getElementById("settings-pin");
+    if (pin) pin.addEventListener("click", () => Router.navigate("pin"));
+    const out = document.getElementById("settings-logout");
+    if (out) out.addEventListener("click", () => Auth.logout());
   }
 
   function render() {
@@ -129,10 +166,13 @@ const SettingsScreen = (() => {
         <p class="hint">Перезаливка каталога осталась в редакторе Apps Script: она тяжёлая,
         и по сети запрос может отвалиться раньше, чем она закончит — тогда непонятно, прошла ли.</p>
       </div>
+
+      ${accountHtml()}
     `;
 
     renderCategories();
     bind();
+    bindAccount();
   }
 
   // Панель главного администратора. Смысл не в красоте, а в том, чтобы одним

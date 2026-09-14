@@ -23,10 +23,16 @@ const TG = (() => {
     });
   }
 
-  // Шапка Telegram («Закрыть», стрелка, «…») висит НАД содержимым страницы.
-  // С Bot API 8.0 клиент сообщает безопасные отступы: contentSafeAreaInset —
-  // это как раз высота шапки, safeAreaInset — вырез и «шторка» устройства.
-  // Где клиент их не присылает, остаётся значение по умолчанию из CSS.
+  // Запас сверху. С Bot API 8.0 клиент сообщает безопасные отступы:
+  // contentSafeAreaInset — высота своей шапки там, где она лежит ПОВЕРХ
+  // страницы (полноэкранный режим), safeAreaInset — вырез и «шторка»
+  // устройства. В обычном режиме шапка рисуется над веб-вью, ничего не
+  // перекрывает, и оба отступа честно равны нулю.
+  //
+  // Раньше ноль считался за «клиент промолчал» и подставлялся запас из CSS —
+  // 56 px пустоты на каждом экране, которые и было видно на телефоне. Теперь
+  // ноль от клиента 8.0 — это ноль. Для клиентов постарше запас остаётся: там
+  // спросить не у кого, а полноэкранного режима у них и нет.
   function applySafeArea() {
     if (!webApp) return;
     var root = document.documentElement.style;
@@ -34,9 +40,10 @@ const TG = (() => {
     var content = webApp.contentSafeAreaInset || {};
     var top = Number(device.top || 0) + Number(content.top || 0);
     var bottom = Number(device.bottom || 0) + Number(content.bottom || 0);
-    // Клиент присылает 0, пока не развернётся: тогда оставляем запас из CSS,
-    // иначе заголовок экрана снова окажется под шапкой.
+    var reports = false;
+    try { reports = webApp.isVersionAtLeast("8.0"); } catch (ignored) {}
     if (top > 0) root.setProperty("--safe-top", top + 8 + "px");
+    else if (reports) root.setProperty("--safe-top", "0px");
     root.setProperty("--safe-bottom", bottom + "px");
   }
 

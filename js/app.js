@@ -12,18 +12,20 @@
         ? `${escapeHtml(session.full_name)}<span>${escapeHtml(roleLabel(session))}</span>`
         : "";
       const isAdmin = !!session && session.role === "Admin";
-      // Пустая строка, а не "block": раскладку карточки задаёт стиль, а inline
-      // display её перебивал — стрелка уезжала под название.
+      // Пустая строка, а не "block": раскладку плитки задаёт стиль, а inline
+      // display её перебивал — иконка уезжала от названия.
       document.getElementById("home-staff-card").style.display = isAdmin ? "" : "none";
-      document.getElementById("home-settings-card").style.display = isAdmin ? "" : "none";
     },
   });
 
   document.querySelectorAll("#screen-home [data-nav]").forEach((el) => {
     el.addEventListener("click", () => Router.navigate(el.dataset.nav));
   });
-  document.getElementById("pin-change-btn").addEventListener("click", () => Router.navigate("pin"));
-  document.getElementById("logout-btn").addEventListener("click", () => Auth.logout());
+  // Настройки — кнопкой в шапке, а не карточкой на главной, и открыты любому
+  // вошедшему: смена своего PIN и выход лежат там же, и складскому сотруднику
+  // они нужны не реже, чем администратору настройки категорий.
+  document.getElementById("appbar-settings")
+    .addEventListener("click", () => Router.navigate("settings"));
 
   Router.init();
   Suggest.init();

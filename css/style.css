@@ -57,6 +57,15 @@
   --gutter: 18px;
   --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Шрифт вывески. Склад киношный, и название должно это говорить — системным
+     шрифтом интерфейса оно выглядит как ещё одна строка меню. Futura стоит в
+     титрах у Кубрика и Уэса Андерсона и лежит на iOS из коробки; дальше по
+     стеку ближайшие узкие геометрики Android и Windows, в конце Arial Narrow.
+     Файл шрифта не возим и из сети не тянем: система должна работать сама по
+     себе, а шрифт с чужого домена — и зависимость, и слежка за сотрудниками. */
+  --font-display: "Futura", "Futura Medium", "Avenir Next Condensed", "DIN Alternate",
+                  "Bahnschrift SemiCondensed", "Roboto Condensed", "Arial Narrow",
+                  "Helvetica Neue", sans-serif;
   --tabbar-h: calc(var(--tap) + 18px);
 }
 
@@ -107,6 +116,83 @@ html, body {
   padding-top: var(--safe-top);
   padding-bottom: calc(var(--tabbar-h) + var(--s5) + var(--safe-bottom) + env(safe-area-inset-bottom, 0px));
 }
+
+/* --- Вывеска над всеми экранами ---
+   Занимает то место, где раньше была пустая полоса запаса под шапку Telegram.
+   Не sticky: при прокрутке длинного каталога название не нужно, а полоса
+   сверху отъедала бы экран у списка. */
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--gutter) var(--s1);
+}
+.wordmark { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
+
+/* Хлопушка, нарисованная границей и полосками: тема склада — кино, а картинку
+   ради этого возить незачем. */
+.clap {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 23px;
+  border: 1.6px solid var(--ink);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.clap::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 8px;
+  border-bottom: 1.6px solid var(--ink);
+  background: repeating-linear-gradient(72deg,
+    var(--ink) 0 3.5px, transparent 3.5px 8px);
+}
+
+.wordmark-text { min-width: 0; }
+.wordmark-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  /* Трекинг добавляет воздух справа от последней буквы — сдвигаем обратно,
+     иначе название выглядит смещённым влево относительно кнопки настроек. */
+  margin-right: -0.14em;
+}
+/* Вторая половина названия акцентом и с зазором: «MIFSRENT» слитно читается
+   одним непонятным словом. */
+.wordmark-name b { font-weight: 500; color: var(--accent); margin-left: 0.16em; }
+.wordmark-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Кнопка-иконка: «Настройки» в шапке и всё, что по смыслу такое же. Цель под
+   палец — 40 px, хотя рисунок в ней 20 px. */
+.icon-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.icon-btn:active { background: var(--surface-strong); }
 
 .screen { display: none; padding: var(--s3) var(--gutter) 0; }
 .screen--active { display: block; animation: screen-in 0.18s ease-out; }
@@ -212,6 +298,20 @@ select {
   box-shadow: none;
 }
 .btn--danger { background: var(--danger); color: #fff; }
+/* Красное, но не залитое: «Выйти» — не разрушительное действие, а заметное.
+   Сплошная красная полоса во всю ширину кричала бы громче, чем удаление
+   сотрудника, которое рядом же залито красным по-настоящему. */
+.btn--outline-danger {
+  background: transparent;
+  color: var(--danger-line);
+  border-color: var(--danger-line);
+  box-shadow: none;
+}
+.btn--outline-danger:active { background: rgba(224, 49, 49, 0.1); }
+
+/* Своя учётная запись в настройках: отделена линией, потому что всё выше — про
+   склад, а это про вас. */
+.section--account { border-top: 1px solid var(--hairline); padding-top: var(--s4); }
 
 .btn-ico {
   flex: none;
@@ -415,31 +515,53 @@ select {
   margin-top: 2px;
 }
 
-/* Разделы кабинета — строки во всю ширину со стрелкой, а не два серых квадрата:
-   так видно, что по ним переходят, и название не приходится ужимать. */
-.menu-grid { display: block; margin-bottom: var(--s5); }
-.menu-grid .card {
-  display: flex;
-  align-items: center;
+/* Разделы кабинета — плитками. Строкой со стрелкой они читались как пункты
+   списка, а это кнопки: по ним бьют пальцем, часто в перчатке. Квадрат даёт
+   цель в полтора раза крупнее строки при том же месте на экране, а иконка
+   опознаётся раньше, чем прочитано слово. */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--s3);
-  min-height: var(--tap);
-  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s5);
+}
+.tile-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-height: 96px;
+  padding: var(--s4);
+  border: 1px solid var(--hairline);
+  /* Скругление мельче карточного: чем ближе к квадрату, тем больше похоже на
+     кнопку, а не на карточку со содержимым. */
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
   text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease;
 }
-.menu-grid .card-title {
-  font-size: 16px;
-  font-weight: 600;
-  flex: 1;
-}
-.menu-grid .card::after {
-  content: "";
+.tile-btn:active { transform: scale(0.97); background: var(--surface-strong); }
+.tile-ico {
+  width: 24px;
+  height: 24px;
   flex: none;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid var(--muted);
-  border-top: 2px solid var(--muted);
-  transform: rotate(45deg);
-  opacity: 0.7;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tile-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  /* «Инвентаризация» — самое длинное слово в приложении: переносим его, а не
+     ужимаем плитку и не режем многоточием. */
+  overflow-wrap: anywhere;
 }
 
 /* Ручной ввод на «Скане». Раньше это была приписка под кнопкой «Сканировать»
