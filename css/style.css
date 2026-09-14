@@ -545,6 +545,12 @@ select {
   transition: transform 0.12s ease;
 }
 .tile-btn:active { transform: scale(0.97); background: var(--surface-strong); }
+/* Плитка, которой ещё нечего открывать: пунктир вместо линии — то же самое, чем
+   в чертежах помечают «предусмотрено место». Гасить её целиком нельзя: тогда
+   она читается как сломанная. */
+.tile-btn--pending { border-style: dashed; }
+.tile-btn--pending .tile-ico { stroke: var(--muted); }
+.tile-btn--pending .tile-name { color: var(--muted); }
 .tile-ico {
   width: 24px;
   height: 24px;

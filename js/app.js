@@ -19,8 +19,11 @@
       // ради одной строки стоил бы 5–8 секунд на каждом открытии главной.
       const site = ((session && session.settings) || {}).site_url || "";
       const siteCard = document.getElementById("home-site-card");
-      siteCard.style.display = site ? "" : "none";
       siteCard.dataset.url = site;
+      // Плитка на месте и без адреса, но видно, что она не готова: иначе
+      // человек жмёт её, ничего не происходит, и он считает это поломкой.
+      siteCard.classList.toggle("tile-btn--pending", !site);
+      siteCard.dataset.admin = isAdmin ? "1" : "";
     },
   });
 
@@ -31,7 +34,12 @@
   // закрывается свайпом — приложение остаётся под ним, а не перезапускается.
   document.getElementById("home-site-card").addEventListener("click", (e) => {
     const url = e.currentTarget.dataset.url;
-    if (url) TG.openLink(url);
+    if (url) { TG.openLink(url); return; }
+    // Кому это исправить, тому и говорим как. Складмену адрес сайта задать
+    // нечем — ему хватает знать, что дело не в его телефоне.
+    TG.showAlert(e.currentTarget.dataset.admin
+      ? "Адрес сайта ещё не задан. Настройки → «Адрес сайта проката» — и кнопка начнёт его открывать."
+      : "Сайт проката ещё не подключён.");
   });
   // Настройки — кнопкой в шапке, а не карточкой на главной, и открыты любому
   // вошедшему: смена своего PIN и выход лежат там же, и складскому сотруднику
