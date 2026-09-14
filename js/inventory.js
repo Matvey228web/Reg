@@ -690,7 +690,17 @@ const InventoryScreen = (() => {
     const s = summary();
     const btn = document.getElementById("inventory-finish");
     btn.disabled = true;
+    // Кнопка обязана говорить, что происходит. В журнал уходит строка на каждую
+    // ненайденную позицию: при сверке всего каталога это сотни строк и
+    // десятки секунд, и молчащая кнопка читается как зависшая.
+    const rows = 1 + s.missing.length + s.mismatch.length + s.unknown.length;
+    btn.textContent = "Сохраняем…";
     showBoxError("inventory-error", "");
+    lastMessage = `Записываем ${rows} ${plural(rows, "строку", "строки", "строк")} в журнал — ` +
+      "таблица отвечает 5–8 секунд, на полной сверке дольше. Не закрывайте экран.";
+    renderSession(document.getElementById("inventory-content"));
+    document.getElementById("inventory-finish").disabled = true;
+    document.getElementById("inventory-finish").textContent = "Сохраняем…";
     try {
       await apiPost("/inventory/save", {
         scope: session.scope,
@@ -701,6 +711,7 @@ const InventoryScreen = (() => {
         unknown: s.unknown,
       });
       TG.hapticSuccess();
+      lastMessage = "";
       TG.showAlert(`Сверка записана в журнал. Найдено ${s.found} из ${s.total}, ` +
         `не найдено ${s.missing.length}.`);
       session = null;
@@ -719,7 +730,8 @@ const InventoryScreen = (() => {
         showBoxError("inventory-error", err.message);
       }
     } finally {
-      btn.disabled = false;
+      const again = document.getElementById("inventory-finish");
+      if (again) { again.disabled = false; again.textContent = "Завершить"; }
     }
   }
 

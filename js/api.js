@@ -61,15 +61,27 @@ async function apiPost(endpoint, body = {}, { fresh = false } = {}) {
   // внутри JSON-тела, а не в URL/заголовке. Content-Type должен быть
   // "простым" (text/plain), иначе браузер шлёт CORS-preflight (OPTIONS),
   // который doPost не обрабатывает, и кросс-доменный запрос падает.
+  // Предел ожидания. Без него отвалившийся запрос висит вечно: кнопка остаётся
+  // нажатой, человек не знает, идёт ли дело, и жмёт ещё раз. Две минуты — с
+  // запасом к потолку Apps Script в 5–8 секунд и к самым тяжёлым записям
+  // (журнал сверки по всему каталогу — это сотни строк).
+  const TIMEOUT_MS = 120000;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
   let res;
   try {
     res = await fetch(CONFIG.WEBHOOK_BASE_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ endpoint, token, payload: body, fresh }),
+      signal: abort.signal,
     });
-  } catch {
-    throw new ApiError("Нет связи с сервером. Проверьте интернет-соединение.", 0);
+  } catch (err) {
+    throw new ApiError(err && err.name === "AbortError"
+      ? "Таблица не ответила за две минуты. Данные могли и записаться — проверьте, прежде чем повторять."
+      : "Нет связи с сервером. Проверьте интернет-соединение.", 0);
+  } finally {
+    clearTimeout(timer);
   }
 
   let payload;
