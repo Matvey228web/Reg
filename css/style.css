@@ -24,6 +24,14 @@
   --accent: var(--tg-button-color);
   --on-accent: var(--tg-button-text-color);
 
+  /* Сгруппированный вид, как в системных настройках: страница приглушённая,
+     группы поверх неё сплошные. Telegram присылает ровно эту пару — bg_color
+     и secondary_bg_color, — и в его теме для айфона это белый и #F2F2F7, то
+     есть буквально системные цвета. Ничего зашивать не нужно, и в тёмной теме
+     пара тоже приходит своя. */
+  --page-bg: var(--tg-secondary-bg-color);
+  --group-bg: var(--tg-bg-color);
+
   /* Поверхности и границы — серый с прозрачностью, см. комментарий выше. */
   --surface: rgba(128, 128, 128, 0.10);
   --surface-strong: rgba(128, 128, 128, 0.17);
@@ -45,7 +53,24 @@
      экранам и вёрстка выглядит случайной. */
   --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px; --s5: 20px; --s6: 28px;
 
-  --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-pill: 999px;
+  /* Радиусы по системной шкале iOS. Точный squircle — непрерывную кривизну,
+     которой система рисует углы, — в CSS не получить: border-radius даёт дугу
+     окружности. На радиусах до 16 разница неразличима, поэтому берём значения
+     и единообразие, а не подделываем кривую. */
+  --r-xs: 6px; --r-sm: 10px; --r-md: 12px; --r-lg: 16px; --r-pill: 999px;
+
+  /* Шкала Dynamic Type. Главное отличие от прежней вёрстки — body 17, а не 15:
+     системный текст на айфоне именно такой, и рядом с ним наши 15 читались как
+     «мелкий шрифт чужого приложения».
+     Отрицательный трекинг на крупных кеглях — тоже системное поведение: SF на
+     больших размерах сжимается, без этого заголовки выглядят разреженными. */
+  --t-large: 34px;   --t-large-lh: 41px;
+  --t-title: 20px;   --t-title-lh: 25px;
+  --t-head: 17px;    --t-head-lh: 22px;
+  --t-body: 17px;    --t-body-lh: 22px;
+  --t-sub: 15px;     --t-sub-lh: 20px;
+  --t-foot: 13px;    --t-foot-lh: 18px;
+  --t-caption: 12px; --t-caption-lh: 16px;
 
   /* Минимальная цель для пальца. Склад — работа руками, часто в перчатке. */
   --tap: 48px;
@@ -96,11 +121,11 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--tg-bg-color);
+  background: var(--page-bg);
   color: var(--ink);
   font-family: var(--font-body);
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   /* Табличные цифры: номера, количества и суммы получают одинаковую ширину
@@ -137,7 +162,7 @@ html, body {
   width: 30px;
   height: 23px;
   border: 1.6px solid var(--ink);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   overflow: hidden;
 }
 .clap::before {
@@ -188,7 +213,7 @@ html, body {
   padding: 0;
   border: 1px solid var(--hairline);
   border-radius: var(--r-sm);
-  background: var(--surface);
+  background: var(--group-bg);
   color: var(--ink);
   cursor: pointer;
 }
@@ -215,9 +240,28 @@ html, body {
 /* Иерархия задаётся размером и трекингом, а не жирностью: когда полужирным
    набрано всё — заголовок, строка списка и бейдж, — глазу не за что зацепиться.
    Крупному кеглю трекинг поджимаем, мелкому — нет. */
-h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; margin: var(--s1) 0 var(--s4); }
-h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; margin: 0 0 var(--s3); }
-p.hint { color: var(--muted); font-size: 13px; line-height: 1.45; margin: var(--s1) 0 var(--s4); }
+h1 {
+  font-size: var(--t-large);
+  line-height: var(--t-large-lh);
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  margin: var(--s1) 0 var(--s4);
+}
+h2 {
+  font-size: var(--t-title);
+  line-height: var(--t-title-lh);
+  font-weight: 600;
+  letter-spacing: -0.45px;
+  margin: 0 0 var(--s3);
+}
+/* Подпись под блоком — footnote: в системных настройках пояснения набраны
+   именно им, и это единственный кегль мельче основного, который там есть. */
+p.hint {
+  color: var(--muted);
+  font-size: var(--t-foot);
+  line-height: var(--t-foot-lh);
+  margin: var(--s1) 0 var(--s4);
+}
 a { color: var(--tg-link-color); }
 
 /* --- Поля ввода ---
@@ -238,7 +282,7 @@ a { color: var(--tg-link-color); }
   padding: 12px 14px;
   border-radius: var(--r-md);
   border: 1px solid var(--hairline);
-  background: var(--tg-bg-color);
+  background: var(--group-bg);
   color: var(--ink);
   font-family: inherit;
   font-size: 16px;   /* меньше 16px — и Safari на iPhone увеличивает страницу */
@@ -292,7 +336,7 @@ select {
 .btn:active { transform: scale(0.985); }
 .btn:disabled { opacity: 0.45; box-shadow: none; cursor: default; transform: none; }
 .btn--secondary {
-  background: var(--surface);
+  background: var(--group-bg);
   color: var(--ink);
   border-color: var(--hairline);
   box-shadow: none;
@@ -335,8 +379,8 @@ select {
 
 /* --- Карточки и строки списка --- */
 .card {
-  background: var(--surface);
-  border-radius: var(--r-md);
+  background: var(--group-bg);
+  border-radius: var(--r-sm);
   padding: var(--s3) var(--s4);
   margin-bottom: var(--s2);
   transition: transform 0.12s ease, background 0.12s ease;
@@ -350,16 +394,33 @@ select {
    серых блоков не имеет ритма: все строки одинаково заметны, и глаз не за что
    не цепляется. Разделители идут от края до края экрана — за это отвечают
    отрицательные поля, а отступ содержимого возвращается изнутри строки. */
-.list { margin: 0 calc(var(--gutter) * -1); }
+.list {
+  margin: 0 calc(var(--gutter) * -1);
+  background: var(--group-bg);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
 .list > .card {
+  position: relative;
   background: none;
   border-radius: 0;
   margin-bottom: 0;
   min-height: 56px;
-  padding: 10px var(--gutter);
-  border-top: 1px solid var(--hairline);
+  padding: 11px var(--gutter);
+  border-top: none;
 }
-.list > .card:first-child { border-top: none; }
+/* Разделитель рисуем не рамкой строки, а линией внутри неё: в системе он
+   начинается от текста, а не от края экрана, и последняя строка группы его не
+   имеет вовсе. Рамкой так не получится — она либо на всю ширину, либо никак. */
+.list > .card + .card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--gutter);
+  right: 0;
+  height: 1px;
+  background: var(--hairline);
+}
 .list > .card:active { background: var(--surface); transform: none; }
 /* Строка списка ведёт на свой экран — говорим об этом так же, как разделы на
    главной: уголком справа. */
@@ -387,18 +448,18 @@ select {
   align-items: center;
   gap: var(--s2);
   min-width: 0;
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.1px;
-  line-height: 1.3;
+  font-size: var(--t-head);
+  line-height: var(--t-head-lh);
+  font-weight: 600;
+  letter-spacing: -0.4px;
 }
 .card-title .badge { flex: none; }
 .card-title .badge:first-of-type { margin-left: auto; }
 .card-sub {
-  font-size: 13px;
+  font-size: var(--t-foot);
+  line-height: var(--t-foot-lh);
   color: var(--muted);
-  line-height: 1.4;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 .card-sub:empty { display: none; }
 
@@ -451,7 +512,7 @@ select {
   min-height: 68px;
   padding: var(--s3) var(--s4);
   border-radius: var(--r-md);
-  background: var(--surface);
+  background: var(--group-bg);
 }
 .tile--warn { background: rgba(201, 42, 42, 0.12); }
 .tile-value { font-size: 26px; font-weight: 700; line-height: 1.05; letter-spacing: -0.5px; }
@@ -493,7 +554,7 @@ select {
   padding: 6px 34px 6px 14px;
   border-radius: var(--r-pill);
   border: 1px solid var(--hairline);
-  background-color: var(--surface);
+  background: var(--group-bg);
   color: var(--ink);
   font-family: inherit;
   font-size: 14px;
@@ -536,10 +597,8 @@ select {
   min-height: 96px;
   padding: var(--s4);
   border: 1px solid var(--hairline);
-  /* Скругление мельче карточного: чем ближе к квадрату, тем больше похоже на
-     кнопку, а не на карточку со содержимым. */
-  border-radius: 12px;
-  background: var(--surface);
+  border-radius: var(--r-md);
+  background: var(--group-bg);
   color: var(--ink);
   font-family: inherit;
   text-align: left;
@@ -606,11 +665,14 @@ select {
 .qr-id { font-family: var(--font-mono); font-size: 16px; margin-top: var(--s3); letter-spacing: 1px; }
 
 .section { margin-top: var(--s5); }
+/* Заголовок группы — как в системных настройках: прописные, приглушённые,
+   с отступом от края группы. */
 .section-title {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--t-foot);
+  line-height: var(--t-foot-lh);
+  font-weight: 400;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.3px;
   color: var(--muted);
   margin-bottom: var(--s2);
 }
@@ -645,7 +707,7 @@ select {
   align-items: center;
   gap: var(--s1);
   border: none;
-  background: var(--surface);
+  background: var(--group-bg);
   color: var(--ink);
   font-family: inherit;
   font-size: 14px;
@@ -665,7 +727,7 @@ select {
   left: 0; right: 0; bottom: 0;
   z-index: 90;
   display: flex;
-  background: var(--tg-bg-color);
+  background: var(--group-bg);
   border-top: 1px solid var(--hairline);
   padding: var(--s2) var(--s1);
   padding-bottom: calc(var(--s2) + env(safe-area-inset-bottom, 0px));
@@ -712,9 +774,9 @@ select {
   top: var(--safe-top);
   z-index: 20;
   margin: 0 calc(var(--gutter) * -1) var(--s2);
-  padding: var(--s2) var(--gutter) 0;
-  background: var(--tg-bg-color);
-  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, 0.4);
+  padding: var(--s2) var(--gutter) var(--s2);
+  background: var(--page-bg);
+  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, 0.25);
 }
 
 /* Скелетон загрузки: плашки в форме будущих карточек с бегущим блеском.
