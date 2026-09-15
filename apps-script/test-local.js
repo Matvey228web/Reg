@@ -1175,6 +1175,32 @@ check('сводка знает, сколько сотрудников',
   r.data.summary.staff === call('/staff/list', {}, ownerToken).data.length, r.data.summary);
 check('панель знает, кто главный', r.data.me.is_owner === true && String(r.data.owner.staff_id) === '1', r.data.me);
 
+console.log('\n== журнал сверки не теряет ведущий ноль ==');
+// Номер 010101 таблица охотно записывает числом 10101, и тогда поиск по номеру
+// в журнале не находит ничего. Лечится форматом «@» через TEXT_COLUMNS.
+const invItems = readRows(getSheet(SHEETS.EQUIPMENT));
+const zeroItem = invItems.filter(r => String(r.item_id).charAt(0) === '0')[0];
+check('в каталоге есть номер с ведущим нулём', !!zeroItem, invItems.slice(0, 3).map(r => r.item_id));
+// К этому месту прежний токен уже отозван проверками смены PIN и выхода —
+// берём действующий прямо из листа Staff, а не выдумываем новый логин.
+const liveToken = readRows(getSheet(SHEETS.STAFF))
+  .map(r => String(r.session_token || '')).filter(Boolean)[0];
+const invRes = call('/inventory/save', {
+  scope: 'all',
+  started_at: new Date().toISOString(),
+  finished_at: new Date().toISOString(),
+  found: {},
+  missing: [String(zeroItem.item_id)],
+  unknown: [],
+}, liveToken);
+check('сверка записалась', invRes.ok, invRes);
+const invRows = readRows(getSheet(SHEETS.INVENTORY));
+const missRow = invRows.filter(r => r.kind === 'missing')[0];
+check('номер в журнале остался строкой с нулём',
+      String(missRow.item_id) === String(zeroItem.item_id), {
+        want: String(zeroItem.item_id), got: String(missRow.item_id) });
+check('в журнале есть итоговая строка', invRows.some(r => r.kind === 'summary'), invRows.map(r => r.kind));
+
 console.log('\n== схема импорта живёт в таблице, а не в коде ==');
 check('лист ImportMap засеян умолчаниями',
       readRows(getSheet(SHEETS.IMPORT_MAP)).length === IMPORT_MAP_DEFAULTS.length,
