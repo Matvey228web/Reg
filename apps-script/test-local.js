@@ -1236,6 +1236,46 @@ updateRow(eqSheetAvail, findRowByValue(eqSheetAvail, 'item_id', availIds[0]).__r
 check('списанная единица из наличия исчезла', freeOn('2026-03-04', '2026-03-05') === 2,
       freeOn('2026-03-04', '2026-03-05'));
 
+console.log('\n== публичный срез каталога ==');
+// Главное здесь — не «список отдаётся», а что наружу не уходит ничего, по чему
+// опознают конкретную единицу: по инвентарному номеру технику ищут, когда она
+// пропала, и публиковать его нельзя.
+const pub = call('/public/catalog', { from: '2026-03-04', to: '2026-03-05' });
+check('публичный маршрут работает без токена', pub.ok, pub);
+check('модели отданы', pub.ok && pub.data.models.length > 0, pub.ok && pub.data.models.length);
+const pubJson = JSON.stringify(pub.data);
+check('в ответе нет инвентарных и заводских номеров',
+      !/serial_number|inventory_number|item_id/.test(pubJson), pubJson.substring(0, 200));
+const pubSky = pub.ok && pub.data.models.filter(m => m.model_name === 'Arri SkyPanel S60')[0];
+check('у модели видно всего и свободно',
+      !!pubSky && pubSky.total === 2 && pubSky.free === 2, pubSky);
+check('категория пришла с человеческой подписью',
+      !!pubSky && pubSky.category === 'LGT' && !!pubSky.category_label, pubSky);
+
+// Заказ на эти даты должен уменьшить свободное — это то, ради чего всё.
+const pubOrderId = nextId('order_id', maxIdIn(getSheet(SHEETS.ORDERS), 'order_id'));
+appendRow(getSheet(SHEETS.ORDERS), { order_id: pubOrderId, order_no: 'B-2', status: 'New',
+  issue_date: '2026-03-04', return_date: '2026-03-06', student_name: 'Тест',
+  created_at: new Date().toISOString() });
+appendRow(getSheet(SHEETS.ORDER_ITEMS), { order_id: pubOrderId, line_no: 1,
+  raw_name: 'Arri SkyPanel S60', model_code: String(availIds[0]).substring(2, 4),
+  category: 'LGT', qty: 1, issued_qty: 0 });
+const pub2 = call('/public/catalog', { from: '2026-03-05', to: '2026-03-05' });
+const pubSky2 = pub2.data.models.filter(m => m.model_name === 'Arri SkyPanel S60')[0];
+check('заказ на эти даты уменьшил свободное', pubSky2.free === 1 && pubSky2.total === 2, pubSky2);
+const pub3 = call('/public/catalog', { from: '2026-05-01', to: '2026-05-02' });
+const pubSky3 = pub3.data.models.filter(m => m.model_name === 'Arri SkyPanel S60')[0];
+check('на другие даты всё свободно', pubSky3.free === 2, pubSky3);
+
+// Мелочи, на которых обычно и спотыкается публичная форма.
+check('без дат считается на сегодня',
+      call('/public/catalog', {}).data.from === new Date().toISOString().substring(0, 10),
+      call('/public/catalog', {}).data.from);
+check('русские даты понимаются',
+      call('/public/catalog', { from: '05.03.2026', to: '05.03.2026' }).data.from === '2026-03-05');
+check('перепутанные местами даты не ломают ответ',
+      call('/public/catalog', { from: '2026-03-09', to: '2026-03-04' }).data.from === '2026-03-04');
+
 console.log('\n== журнал сверки не теряет ведущий ноль ==');
 // Номер 010101 таблица охотно записывает числом 10101, и тогда поиск по номеру
 // в журнале не находит ничего. Лечится форматом «@» через TEXT_COLUMNS.

@@ -946,6 +946,11 @@ function doPost(e) {
     var data;
     switch (endpoint) {
       case "/auth/login": data = handleAuthLogin(payload); break;
+      // Публичные маршруты — единственные без checkAuth: их зовёт сайт проката,
+      // где посетитель не входит в систему. Защита от перебора лежит на Worker
+      // перед таблицей (кэш и ограничение частоты); сюда наружу не уходит
+      // ничего, по чему можно опознать конкретную единицу техники.
+      case "/public/catalog": data = handlePublicCatalog(payload); break;
       case "/item/lookup": data = handleItemLookup(payload); break;
       case "/item/create": data = handleItemCreate(payload, token); break;
       case "/transaction/checkout": data = handleTransactionCheckout(payload, token); break;
@@ -2544,6 +2549,53 @@ function bookingOverlaps(order, start, end) {
   if (!from) return to >= start;
   if (!to) return from <= end;
   return from <= end && to >= start;
+}
+
+/**
+ * Публичный срез каталога: что за модель, сколько всего и сколько свободно.
+ *
+ * Собирается отдельной функцией, а не фильтрацией готового списка на стороне
+ * сайта: фильтр на фронте означает, что номера всё равно уехали в браузер и их
+ * видно в отладчике. Здесь их нет с самого начала — ни item_id, ни
+ * serial_number, ни inventory_number. По ним ищут технику, когда она пропала.
+ */
+function handlePublicCatalog(payload) {
+  var today = new Date().toISOString().substring(0, 10);
+  var from = parseRuDate(payload.from) || today;
+  var to = parseRuDate(payload.to) || from;
+  // Перепутанные местами даты — обычная опечатка в форме, а не повод отказывать.
+  if (to < from) { var swap = from; from = to; to = swap; }
+
+  var avail = availabilityFor(from, to);
+
+  // Название берём из справочника моделей: в Equipment оно повторяется у каждой
+  // единицы и могло разъехаться, а Models — единственное место, где оно одно.
+  var names = {};
+  readRows(getSheet(SHEETS.MODELS)).forEach(function (m) {
+    names[m.category + "|" + pad2(Number(m.model_code))] = m.model_name;
+  });
+  var labels = {};
+  categories().forEach(function (c) { labels[c.code] = c.label; });
+
+  var models = [];
+  for (var key in avail) {
+    var a = avail[key];
+    if (!a.total) continue;
+    var parts = key.split("|");
+    models.push({
+      category: parts[0],
+      category_label: labels[parts[0]] || parts[0],
+      model_code: parts[1],
+      model_name: names[key] || a.model_name || "",
+      total: a.total,
+      free: a.free,
+    });
+  }
+  models.sort(function (x, y) {
+    if (x.category_label !== y.category_label) return x.category_label < y.category_label ? -1 : 1;
+    return String(x.model_name).localeCompare(String(y.model_name), "ru");
+  });
+  return { from: from, to: to, models: models };
 }
 
 function warehouseSummary() {
