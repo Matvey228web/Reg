@@ -223,7 +223,7 @@ const TG = (() => {
         return;
       }
       // Вне Telegram и на старых клиентах «назад» рисует сама страница
-      // (#back-row в index.html), подменять нечего.
+      // (кнопка #back-button в шапке index.html), подменять нечего.
     },
     hide() {
       if (hasNativeBackButton()) {

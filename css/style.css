@@ -91,7 +91,11 @@
   --font-display: "Futura", "Futura Medium", "Avenir Next Condensed", "DIN Alternate",
                   "Bahnschrift SemiCondensed", "Roboto Condensed", "Arial Narrow",
                   "Helvetica Neue", sans-serif;
-  --tabbar-h: calc(var(--tap) + 18px);
+  /* Метрики системных панелей. Компактная шапка на айфоне — 44, панель
+     разделов — 49 плюс запас под домашнюю полоску. Раньше у обеих были свои
+     числа, и обе были выше системных: панель разделов занимала 66. */
+  --navbar-h: 44px;
+  --tabbar-h: 49px;
 }
 
 /* Тёмная тема. Признак ставит js/telegram.js, посчитав яркость фона: сам
@@ -142,16 +146,94 @@ html, body {
   padding-bottom: calc(var(--tabbar-h) + var(--s5) + var(--safe-bottom) + env(safe-area-inset-bottom, 0px));
 }
 
-/* --- Вывеска над всеми экранами ---
+/* --- Шапка над всеми экранами ---
    Занимает то место, где раньше была пустая полоса запаса под шапку Telegram.
-   Не sticky: при прокрутке длинного каталога название не нужно, а полоса
-   сверху отъедала бы экран у списка. */
+   Теперь это полноценная навигационная панель по образцу iOS: она липнет к
+   верху, при прокрутке под ней появляется волосяная линия, а заголовок экрана
+   перетекает из крупного в строку шапки.
+   Три состояния:
+     обычное        — вывеска слева, шестерёнка справа (корни разделов);
+     --pushed       — вывеска уходит, слева шеврон «назад» с именем экрана,
+                      откуда пришли (вложенные экраны);
+     --collapsed    — крупный заголовок уехал вверх, его подхватила шапка. */
 .appbar {
+  position: sticky;
+  top: var(--safe-top);
+  z-index: 60;
   display: flex;
   align-items: center;
   gap: var(--s3);
-  padding: var(--s2) var(--gutter) var(--s1);
+  height: var(--navbar-h);
+  padding: 0 var(--gutter);
+  background: var(--page-bg);
+  /* Линия рисуется всегда, но проявляется только под прокруткой: в покое
+     системная шапка сливается с содержимым, а границу получает ровно тогда,
+     когда под неё что-то заехало. */
+  box-shadow: 0 0.5px 0 0 var(--hairline);
+  opacity: 1;
+  transition: box-shadow 0.2s ease;
 }
+.appbar:not(.appbar--collapsed) { box-shadow: none; }
+
+/* Заголовок экрана в шапке. Absolute и по центру — как в системе: он стоит по
+   середине панели независимо от того, насколько длинная кнопка «назад» слева.
+   Всплывает снизу вверх, ровно навстречу уезжающему крупному заголовку. */
+.appbar-title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: 58%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--t-head);
+  line-height: var(--t-head-lh);
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  opacity: 0;
+  transform: translate(-50%, calc(-50% + 7px));
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.appbar--collapsed .appbar-title { opacity: 1; transform: translate(-50%, -50%); }
+
+/* Кнопка «назад» — шеврон и название предыдущего экрана, как в iOS: видно не
+   только что «назад» есть, но и куда он ведёт. Отрицательное поле слева
+   выравнивает шеврон по краю содержимого: сам по себе он оптически светлее
+   буквы и без сдвига выглядел бы отступившим. */
+.nav-back {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  max-width: 55%;
+  height: var(--navbar-h);
+  margin-left: -7px;
+  padding: 0 var(--s1) 0 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  cursor: pointer;
+}
+.appbar--pushed .nav-back { display: inline-flex; }
+.appbar--pushed .wordmark { display: none; }
+.nav-back:active { opacity: 0.4; }
+.nav-back span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav-chevron {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .wordmark { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
 
 /* Хлопушка, нарисованная границей и полосками: тема склада — кино, а картинку
@@ -201,15 +283,18 @@ html, body {
   color: var(--muted);
 }
 
-/* Кнопка-иконка: «Настройки» в шапке и всё, что по смыслу такое же. Цель под
-   палец — 40 px, хотя рисунок в ней 20 px. */
+/* Кнопка-иконка: «Настройки» в шапке и всё, что по смыслу такое же. Рисунок
+   36 px — чтобы поместиться в системные 44 точки высоты шапки и не упереться
+   в её края, — а цель под палец растянута псевдоэлементом до полных 44:
+   на складе по кнопке бьют в перчатке. */
 .icon-btn {
+  position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: 1px solid var(--hairline);
   border-radius: var(--r-sm);
@@ -217,6 +302,7 @@ html, body {
   color: var(--ink);
   cursor: pointer;
 }
+.icon-btn::after { content: ""; position: absolute; inset: -4px; }
 .icon-btn:active { background: var(--surface-strong); }
 
 .screen { display: none; padding: var(--s3) var(--gutter) 0; }
@@ -700,25 +786,6 @@ select {
   box-shadow: var(--shadow-2);
 }
 
-/* Кнопка «назад» внутри страницы — не зависит от версии Telegram */
-.back-row { padding: var(--s2) var(--gutter) 0; }
-.back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-  border: none;
-  background: var(--group-bg);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 500;
-  min-height: 38px;
-  padding: 8px 16px;
-  border-radius: var(--r-pill);
-  cursor: pointer;
-}
-.back-btn:active { background: var(--surface-strong); }
-
 /* --- Панель разделов ---
    Иконки нарисованные, а не эмодзи: эмодзи выглядят по-разному на каждой
    платформе, всегда цветные и не подхватывают цвет активной вкладки. */
@@ -729,9 +796,12 @@ select {
   display: flex;
   background: var(--group-bg);
   border-top: 1px solid var(--hairline);
-  padding: var(--s2) var(--s1);
-  padding-bottom: calc(var(--s2) + env(safe-area-inset-bottom, 0px));
+  padding: 0 var(--s1);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+/* Метрики системные: высота 49, иконка 25, подпись 10. Жирность у активной
+   вкладки не меняем — система подсвечивает её только цветом, а скачок
+   насыщенности читался как дрожание подписи при переключении. */
 .tab {
   flex: 1;
   border: none;
@@ -741,16 +811,18 @@ select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-height: var(--tap);
-  padding: var(--s1) 0;
+  gap: 2px;
+  height: var(--tabbar-h);
+  padding: 0;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 12px;
   font-weight: 500;
+  letter-spacing: -0.1px;
   color: var(--muted);
   transition: color 0.12s ease;
 }
-.tab-ico { display: block; width: 24px; height: 24px; }
+.tab-ico { display: block; width: 25px; height: 25px; }
 .tab-ico svg {
   display: block;
   width: 100%;
@@ -761,7 +833,7 @@ select {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.tab--active { color: var(--accent); font-weight: 600; }
+.tab--active { color: var(--accent); }
 .tab--active .tab-ico svg { stroke-width: 2.1; }
 .tab:active { opacity: 0.6; }
 
@@ -771,7 +843,9 @@ select {
    иначе список просвечивал бы в боковых отступах. */
 .sticky-bar {
   position: sticky;
-  top: var(--safe-top);
+  /* Липнет не к верху экрана, а под шапку: шапка теперь тоже липкая, и без
+     этой поправки фильтры каталога уезжали бы ей под низ. */
+  top: calc(var(--safe-top) + var(--navbar-h));
   z-index: 20;
   margin: 0 calc(var(--gutter) * -1) var(--s2);
   padding: var(--s2) var(--gutter) var(--s2);

@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20260916a" />
+<link rel="stylesheet" href="css/style.css?v=20260916b" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20260916a"></script>
+<script src="js/vendor/qrcode-generator.js?v=20260916b"></script>
 </head>
 <body>
 <div id="app">
@@ -26,6 +26,13 @@
        сотруднику — там смена своего PIN и выход, — а большой карточки на главной
        они не заслуживают. -->
   <header class="appbar" id="appbar">
+    <!-- «Назад» живёт в самой шапке, как в системе, и говорит, куда ведёт.
+         Нативная BackButton Telegram тоже включается роутером, но её легко не
+         заметить, а на клиентах старее Bot API 6.1 её нет вовсе. -->
+    <button class="nav-back" id="back-button" type="button">
+      <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.5 12l7.5 7.5"/></svg>
+      <span id="back-label">Назад</span>
+    </button>
     <div class="wordmark">
       <span class="clap" aria-hidden="true"></span>
       <span class="wordmark-text">
@@ -36,14 +43,10 @@
     <button class="icon-btn" id="appbar-settings" type="button" aria-label="Настройки" title="Настройки">
       <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
+    <!-- Заголовок экрана, который подхватывается шапкой, когда крупный
+         заголовок уезжает вверх. Пустой, пока роутер не поставит название. -->
+    <span class="appbar-title" id="appbar-title"></span>
   </header>
-
-  <!-- Кнопка «назад» внутри страницы. Нативная BackButton Telegram живёт в шапке,
-       её легко не заметить, а на клиентах старее Bot API 6.1 её нет вовсе —
-       и тогда уйти с экрана было бы нечем. Роутер показывает её на неглавных экранах. -->
-  <div class="back-row" id="back-row" style="display:none;">
-    <button class="back-btn" id="back-button">← Назад</button>
-  </div>
 
   <!-- Экран: вход по PIN -->
   <!-- Заголовка здесь нет: название стоит в шапке над всеми экранами, и второй
@@ -328,28 +331,28 @@
 
 </div>
 
-<script src="js/config.js?v=20260916a"></script>
-<script src="js/util.js?v=20260916a"></script>
-<script src="js/suggest.js?v=20260916a"></script>
-<script src="js/cache.js?v=20260916a"></script>
-<script src="js/mock-data.js?v=20260916a"></script>
-<script src="js/api.js?v=20260916a"></script>
-<script src="js/telegram.js?v=20260916a"></script>
-<script src="js/router.js?v=20260916a"></script>
-<script src="js/qr.js?v=20260916a"></script>
-<script src="js/swipe.js?v=20260916a"></script>
-<script src="js/auth.js?v=20260916a"></script>
-<script src="js/catalog.js?v=20260916a"></script>
-<script src="js/scan.js?v=20260916a"></script>
-<script src="js/item.js?v=20260916a"></script>
-<script src="js/order.js?v=20260916a"></script>
-<script src="js/repair.js?v=20260916a"></script>
-<script src="js/orders.js?v=20260916a"></script>
-<script src="js/staff.js?v=20260916a"></script>
-<script src="js/settings.js?v=20260916a"></script>
-<script src="js/labels.js?v=20260916a"></script>
-<script src="js/inventory.js?v=20260916a"></script>
-<script src="js/pin.js?v=20260916a"></script>
-<script src="js/app.js?v=20260916a"></script>
+<script src="js/config.js?v=20260916b"></script>
+<script src="js/util.js?v=20260916b"></script>
+<script src="js/suggest.js?v=20260916b"></script>
+<script src="js/cache.js?v=20260916b"></script>
+<script src="js/mock-data.js?v=20260916b"></script>
+<script src="js/api.js?v=20260916b"></script>
+<script src="js/telegram.js?v=20260916b"></script>
+<script src="js/router.js?v=20260916b"></script>
+<script src="js/qr.js?v=20260916b"></script>
+<script src="js/swipe.js?v=20260916b"></script>
+<script src="js/auth.js?v=20260916b"></script>
+<script src="js/catalog.js?v=20260916b"></script>
+<script src="js/scan.js?v=20260916b"></script>
+<script src="js/item.js?v=20260916b"></script>
+<script src="js/order.js?v=20260916b"></script>
+<script src="js/repair.js?v=20260916b"></script>
+<script src="js/orders.js?v=20260916b"></script>
+<script src="js/staff.js?v=20260916b"></script>
+<script src="js/settings.js?v=20260916b"></script>
+<script src="js/labels.js?v=20260916b"></script>
+<script src="js/inventory.js?v=20260916b"></script>
+<script src="js/pin.js?v=20260916b"></script>
+<script src="js/app.js?v=20260916b"></script>
 </body>
 </html>
