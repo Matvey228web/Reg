@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20260916d" />
+<link rel="stylesheet" href="css/style.css?v=20260916e" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20260916d"></script>
+<script src="js/vendor/qrcode-generator.js?v=20260916e"></script>
 </head>
 <body>
 <div id="app">
@@ -43,9 +43,6 @@
     <button class="icon-btn" id="appbar-settings" type="button" aria-label="Настройки" title="Настройки">
       <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
     </button>
-    <!-- Заголовок экрана, который подхватывается шапкой, когда крупный
-         заголовок уезжает вверх. Пустой, пока роутер не поставит название. -->
-    <span class="appbar-title" id="appbar-title"></span>
   </header>
 
   <!-- Экран: вход по PIN -->
@@ -105,13 +102,15 @@
 
   <!-- Экран: каталог оборудования -->
   <div class="screen" id="screen-catalog">
-    <div class="filters">
-      <select id="catalog-filter-category"></select>
-      <select id="catalog-filter-status"></select>
-    </div>
+    <!-- Поиск первым, фильтры под ним одной строкой: так раскладывает их
+         система, и это экономит экрану полторы строки списка. -->
     <div class="field" id="catalog-search-wrap">
       <input type="search" id="catalog-search" placeholder="Поиск по названию или номеру"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
+    </div>
+    <div class="filters">
+      <select id="catalog-filter-category"></select>
+      <select id="catalog-filter-status"></select>
     </div>
     <!-- Кнопка стоит ДО списка: после него на 629 карточках её было не найти.
          При прокрутке полоса уезжает, а действие подхватывает круглая кнопка
@@ -339,29 +338,29 @@
 
 </div>
 
-<script src="js/config.js?v=20260916d"></script>
-<script src="js/util.js?v=20260916d"></script>
-<script src="js/suggest.js?v=20260916d"></script>
-<script src="js/cache.js?v=20260916d"></script>
-<script src="js/mock-data.js?v=20260916d"></script>
-<script src="js/api.js?v=20260916d"></script>
-<script src="js/telegram.js?v=20260916d"></script>
-<script src="js/router.js?v=20260916d"></script>
-<script src="js/fab.js?v=20260916d"></script>
-<script src="js/qr.js?v=20260916d"></script>
-<script src="js/swipe.js?v=20260916d"></script>
-<script src="js/auth.js?v=20260916d"></script>
-<script src="js/catalog.js?v=20260916d"></script>
-<script src="js/scan.js?v=20260916d"></script>
-<script src="js/item.js?v=20260916d"></script>
-<script src="js/order.js?v=20260916d"></script>
-<script src="js/repair.js?v=20260916d"></script>
-<script src="js/orders.js?v=20260916d"></script>
-<script src="js/staff.js?v=20260916d"></script>
-<script src="js/settings.js?v=20260916d"></script>
-<script src="js/labels.js?v=20260916d"></script>
-<script src="js/inventory.js?v=20260916d"></script>
-<script src="js/pin.js?v=20260916d"></script>
-<script src="js/app.js?v=20260916d"></script>
+<script src="js/config.js?v=20260916e"></script>
+<script src="js/util.js?v=20260916e"></script>
+<script src="js/suggest.js?v=20260916e"></script>
+<script src="js/cache.js?v=20260916e"></script>
+<script src="js/mock-data.js?v=20260916e"></script>
+<script src="js/api.js?v=20260916e"></script>
+<script src="js/telegram.js?v=20260916e"></script>
+<script src="js/router.js?v=20260916e"></script>
+<script src="js/fab.js?v=20260916e"></script>
+<script src="js/qr.js?v=20260916e"></script>
+<script src="js/swipe.js?v=20260916e"></script>
+<script src="js/auth.js?v=20260916e"></script>
+<script src="js/catalog.js?v=20260916e"></script>
+<script src="js/scan.js?v=20260916e"></script>
+<script src="js/item.js?v=20260916e"></script>
+<script src="js/order.js?v=20260916e"></script>
+<script src="js/repair.js?v=20260916e"></script>
+<script src="js/orders.js?v=20260916e"></script>
+<script src="js/staff.js?v=20260916e"></script>
+<script src="js/settings.js?v=20260916e"></script>
+<script src="js/labels.js?v=20260916e"></script>
+<script src="js/inventory.js?v=20260916e"></script>
+<script src="js/pin.js?v=20260916e"></script>
+<script src="js/app.js?v=20260916e"></script>
 </body>
 </html>

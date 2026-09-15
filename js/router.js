@@ -11,8 +11,7 @@ const Router = (() => {
     screens[name] = handlers || {};
   }
 
-  // Названия экранов: ими подписана кнопка «назад» (куда она ведёт) и заголовок,
-  // который шапка подхватывает при прокрутке.
+  // Названия экранов: ими подписана кнопка «назад» — видно, куда она ведёт.
   const SCREEN_TITLES = {
     login: "Вход", home: "Главная", catalog: "Каталог", scan: "Скан",
     repair: "Ремонт", orders: "Заказы", order: "Заказ", item: "Оборудование",
@@ -37,26 +36,6 @@ const Router = (() => {
       TG.backButton.hide();
     }
     return visible;
-  }
-
-  // Крупный заголовок экрана при прокрутке уезжает вверх, и ровно в этот момент
-  // его подхватывает шапка — системное поведение больших заголовков в iOS.
-  // Заголовок читаем каждый раз заново: на карточке предмета и в заказе его
-  // ставят уже после загрузки данных, снимок при показе экрана был бы пустым.
-  function syncTitle() {
-    var bar = document.getElementById("appbar");
-    var slot = document.getElementById("appbar-title");
-    if (!bar || !slot) return;
-    var screen = document.querySelector(".screen--active");
-    var big = screen ? screen.querySelector("h1") : null;
-    var text = big ? big.textContent.trim() : "";
-    if (slot.textContent !== text) slot.textContent = text;
-    // Без крупного заголовка подхватывать нечего — от прокрутки остаётся только
-    // волосяная линия под шапкой, чтобы список не подтекал под неё незаметно.
-    var collapsed = big
-      ? big.getBoundingClientRect().bottom < bar.getBoundingClientRect().bottom
-      : window.scrollY > 4;
-    bar.classList.toggle("appbar--collapsed", collapsed);
   }
 
   // Экраны без своей вкладки подсвечивают вкладку раздела, из которого открыты,
@@ -98,7 +77,6 @@ const Router = (() => {
     var pushed = renderBackButton(name);
     renderTabbar(name, pushed);
     window.scrollTo(0, 0);
-    syncTitle();
     // Круглая кнопка главного действия следит за полосой этого экрана.
     if (typeof Fab !== "undefined") Fab.watch();
   }
@@ -130,14 +108,6 @@ const Router = (() => {
     if (typeof Fab !== "undefined") Fab.init();
     var btn = document.getElementById("back-button");
     if (btn) btn.addEventListener("click", () => back());
-    // Прокрутку слушаем через requestAnimationFrame: событие приходит чаще, чем
-    // браузер успевает рисовать, и считать прямоугольники на каждое — лишнее.
-    var pending = false;
-    window.addEventListener("scroll", function () {
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(function () { pending = false; syncTitle(); });
-    }, { passive: true });
     document.querySelectorAll("#tabbar [data-tab]").forEach(function (el) {
       // Вкладка — это и есть навигация, поэтому стек сбрасываем: «назад»
       // нужен только внутри раздела (например, из карточки предмета).
