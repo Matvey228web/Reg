@@ -1,0 +1,1223 @@
+/* Оформление Mifs Rent.
+ *
+ * Цвета берём из темы Telegram: это мини-приложение, и оно должно выглядеть
+ * частью мессенджера, а не гостем в нём. Тему пользователя мы заранее не знаем,
+ * поэтому все собственные поверхности и границы заданы ПОЛУПРОЗРАЧНЫМ СЕРЫМ:
+ * одно и то же значение одинаково уместно и на белом, и на тёмном фоне. Любой
+ * зашитый цвет однажды оказывается ярким пятном в тёмной теме — этот класс
+ * ошибки мы уже ловили на подложке сообщений об ошибке.
+ */
+
+:root {
+  /* Приходят из Telegram (js/telegram.js). Здесь — значения на случай запуска
+     в обычном браузере. */
+  --tg-bg-color: #ffffff;
+  --tg-text-color: #111111;
+  --tg-hint-color: #8e8e93;
+  --tg-link-color: #2481cc;
+  --tg-button-color: #2481cc;
+  --tg-button-text-color: #ffffff;
+  --tg-secondary-bg-color: #f2f2f7;
+
+  --ink: var(--tg-text-color);
+  --muted: var(--tg-hint-color);
+  --accent: var(--tg-button-color);
+  --on-accent: var(--tg-button-text-color);
+
+  /* Сгруппированный вид, как в системных настройках: страница приглушённая,
+     группы поверх неё сплошные. Telegram присылает ровно эту пару — bg_color
+     и secondary_bg_color, — и в его теме для айфона это белый и #F2F2F7, то
+     есть буквально системные цвета. Ничего зашивать не нужно, и в тёмной теме
+     пара тоже приходит своя. */
+  --page-bg: var(--tg-secondary-bg-color);
+  --group-bg: var(--tg-bg-color);
+
+  /* Поверхности и границы — серый с прозрачностью, см. комментарий выше. */
+  --surface: rgba(128, 128, 128, 0.10);
+  --surface-strong: rgba(128, 128, 128, 0.17);
+  --hairline: rgba(128, 128, 128, 0.24);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 6px 24px rgba(0, 0, 0, 0.16);
+
+  /* Цвета состояний. Подобраны так, чтобы белый текст на них читался: у
+     «оранжевого предупреждения» в исходном виде контраст с белым был ниже
+     нормы, и бейдж «В аренде» на свету читался с трудом. */
+  --danger: #c92a2a;
+  --warning: #c2410c;
+  --success: #2f7d32;
+  /* Те же смыслы, но для тонких линий и акцентов, где контраст не нужен. */
+  --danger-line: #e03131;
+  --warning-line: #f08c00;
+
+  /* Шкала отступов: четыре, восемь и далее. Без неё отступы расползаются по
+     экранам и вёрстка выглядит случайной. */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px; --s5: 20px; --s6: 28px;
+
+  /* Радиусы по системной шкале iOS. Точный squircle — непрерывную кривизну,
+     которой система рисует углы, — в CSS не получить: border-radius даёт дугу
+     окружности. На радиусах до 16 разница неразличима, поэтому берём значения
+     и единообразие, а не подделываем кривую. */
+  --r-xs: 6px; --r-sm: 10px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Шкала Dynamic Type. Главное отличие от прежней вёрстки — body 17, а не 15:
+     системный текст на айфоне именно такой, и рядом с ним наши 15 читались как
+     «мелкий шрифт чужого приложения».
+     Отрицательный трекинг на крупных кеглях — тоже системное поведение: SF на
+     больших размерах сжимается, без этого заголовки выглядят разреженными. */
+  --t-large: 34px;   --t-large-lh: 41px;
+  --t-title: 20px;   --t-title-lh: 25px;
+  --t-head: 17px;    --t-head-lh: 22px;
+  --t-body: 17px;    --t-body-lh: 22px;
+  --t-sub: 15px;     --t-sub-lh: 20px;
+  --t-foot: 13px;    --t-foot-lh: 18px;
+  --t-caption: 12px; --t-caption-lh: 16px;
+
+  /* Минимальная цель для пальца. Склад — работа руками, часто в перчатке. */
+  --tap: 48px;
+
+  /* Запас сверху под шапку Telegram («Закрыть», стрелка, «…») — она висит НАД
+     содержимым. Значения приходят из SDK, здесь — на случай, если их нет. */
+  --safe-top: 56px;
+  --safe-bottom: 0px;
+  --gutter: 18px;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Шрифт вывески. Склад киношный, и название должно это говорить — системным
+     шрифтом интерфейса оно выглядит как ещё одна строка меню. Futura стоит в
+     титрах у Кубрика и Уэса Андерсона и лежит на iOS из коробки; дальше по
+     стеку ближайшие узкие геометрики Android и Windows, в конце Arial Narrow.
+     Файл шрифта не возим и из сети не тянем: система должна работать сама по
+     себе, а шрифт с чужого домена — и зависимость, и слежка за сотрудниками. */
+  --font-display: "Futura", "Futura Medium", "Avenir Next Condensed", "DIN Alternate",
+                  "Bahnschrift SemiCondensed", "Roboto Condensed", "Arial Narrow",
+                  "Helvetica Neue", sans-serif;
+  /* Метрики системных панелей. Компактная шапка на айфоне — 44, панель
+     разделов — 49 плюс запас под домашнюю полоску. Раньше у обеих были свои
+     числа, и обе были выше системных: панель разделов занимала 66. */
+  --navbar-h: 44px;
+  --tabbar-h: 49px;
+}
+
+/* Тёмная тема. Признак ставит js/telegram.js, посчитав яркость фона: сам
+   Telegram его не присылает. Полупрозрачный серый одинаково уместен на любом
+   фоне, но на тёмном он почти не виден — карточки сливались с фоном. Поэтому
+   на тёмной теме поверхности задаются белым с прозрачностью: оно поднимает
+   плашку над фоном, а не гасит её. */
+:root[data-theme="dark"] {
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-strong: rgba(255, 255, 255, 0.14);
+  --hairline: rgba(255, 255, 255, 0.15);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.6);
+}
+/* Вне Telegram признака нет — идём за системной темой браузера. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: rgba(255, 255, 255, 0.07);
+    --surface-strong: rgba(255, 255, 255, 0.14);
+    --hairline: rgba(255, 255, 255, 0.15);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--page-bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  /* Табличные цифры: номера, количества и суммы получают одинаковую ширину
+     знака. Без этого «010101» и «020202» занимают разную ширину, и колонка
+     номеров в списке дёргается при каждой перерисовке. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Запас под шапку Telegram даём один раз здесь, а не на каждом экране: иначе
+   он складывался бы с отступом кнопки «назад» и содержимое уезжало бы вниз. */
+#app {
+  min-height: 100%;
+  padding-top: var(--safe-top);
+  padding-bottom: calc(var(--tabbar-h) + var(--s5) + var(--safe-bottom) + env(safe-area-inset-bottom, 0px));
+}
+
+/* --- Шапка над всеми экранами ---
+   Занимает то место, где раньше была пустая полоса запаса под шапку Telegram.
+   Два состояния:
+     обычное   — вывеска слева, шестерёнка справа (корни разделов);
+     --pushed  — вывеска уходит, слева шеврон «назад» с именем экрана, откуда
+                 пришли (вложенные экраны).
+   Шапка НЕ липкая: в Telegram поверх нашего вебвью висят его собственные
+   кнопки («Закрыть», «…»), и закреплённая под ними полоса вставала посреди
+   списка чужеродным этажом. Уезжает вместе с содержимым — как было. */
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: var(--navbar-h);
+  padding: 0 var(--gutter);
+}
+
+/* Панель разделов не обрубает список непрозрачным краем, а размывает его под
+   собой — так система показывает, что содержимое продолжается, а не кончилось.
+   Шапке это не нужно: она уезжает вместе с содержимым и ничего не перекрывает.
+   Прозрачность выводим из фона темы, чтобы не зашивать цвет; где размытия нет
+   (старый вебвью), панель остаётся сплошной, и это по-прежнему рабочий вид. */
+@supports (backdrop-filter: blur(1px)) and (background: color-mix(in srgb, red 50%, transparent)) {
+  .tabbar {
+    background: color-mix(in srgb, var(--group-bg) 82%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+}
+
+
+/* Кнопка «назад» — шеврон и название предыдущего экрана, как в iOS: видно не
+   только что «назад» есть, но и куда он ведёт. Отрицательное поле слева
+   выравнивает шеврон по краю содержимого: сам по себе он оптически светлее
+   буквы и без сдвига выглядел бы отступившим. */
+.nav-back {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  max-width: 55%;
+  height: var(--navbar-h);
+  margin-left: -7px;
+  padding: 0 var(--s1) 0 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  cursor: pointer;
+}
+.appbar--pushed .nav-back { display: inline-flex; }
+.appbar--pushed .wordmark { display: none; }
+.nav-back:active { opacity: 0.4; }
+.nav-back span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav-chevron {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wordmark { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
+
+/* Хлопушка, нарисованная границей и полосками: тема склада — кино, а картинку
+   ради этого возить незачем. */
+.clap {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 23px;
+  border: 1.6px solid var(--ink);
+  border-radius: var(--r-xs);
+  overflow: hidden;
+}
+.clap::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 8px;
+  border-bottom: 1.6px solid var(--ink);
+  background: repeating-linear-gradient(72deg,
+    var(--ink) 0 3.5px, transparent 3.5px 8px);
+}
+
+.wordmark-text { min-width: 0; }
+.wordmark-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  /* Трекинг добавляет воздух справа от последней буквы — сдвигаем обратно,
+     иначе название выглядит смещённым влево относительно кнопки настроек. */
+  margin-right: -0.14em;
+}
+/* Вторая половина названия акцентом и с зазором: «MIFSRENT» слитно читается
+   одним непонятным словом. */
+.wordmark-name b { font-weight: 500; color: var(--accent); margin-left: 0.16em; }
+.wordmark-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Кнопка-иконка: «Настройки» в шапке и всё, что по смыслу такое же. Рисунок
+   36 px — чтобы поместиться в системные 44 точки высоты шапки и не упереться
+   в её края, — а цель под палец растянута псевдоэлементом до полных 44:
+   на складе по кнопке бьют в перчатке.
+   Круг, а не скруглённый квадрат: система рисует одиночные кнопки-иконки в
+   панелях кругом, и рамка им не нужна — их выделяет заливка. Рамка вдобавок
+   была бессмысленной на белом: плашка кнопки того же цвета, что и группа. */
+.icon-btn {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.icon-btn::after { content: ""; position: absolute; inset: -4px; }
+.icon-btn:active { background: var(--surface-strong); }
+
+.screen { display: none; padding: var(--s3) var(--gutter) 0; }
+.screen--active { display: block; animation: screen-in 0.18s ease-out; }
+
+/* Экран не подменяется мгновенно, а появляется: подмена без перехода читается
+   как рывок, особенно когда содержимое приходит из кэша и рисуется сразу. */
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Обводка по Tab — приложение открывают и в браузере на компьютере, там без
+   неё не видно, где находишься. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Иерархия задаётся размером и трекингом, а не жирностью: когда полужирным
+   набрано всё — заголовок, строка списка и бейдж, — глазу не за что зацепиться.
+   Крупному кеглю трекинг поджимаем, мелкому — нет. */
+h1 {
+  font-size: var(--t-large);
+  line-height: var(--t-large-lh);
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  margin: var(--s1) 0 var(--s4);
+}
+h2 {
+  font-size: var(--t-title);
+  line-height: var(--t-title-lh);
+  font-weight: 600;
+  letter-spacing: -0.45px;
+  margin: 0 0 var(--s3);
+}
+/* Подпись под блоком — footnote: в системных настройках пояснения набраны
+   именно им, и это единственный кегль мельче основного, который там есть. */
+p.hint {
+  color: var(--muted);
+  font-size: var(--t-foot);
+  line-height: var(--t-foot-lh);
+  margin: var(--s1) 0 var(--s4);
+}
+a { color: var(--tg-link-color); }
+
+/* --- Поля ввода ---
+   Поле — «углубление»: фон страницы плюс тонкая рамка. Раньше поля, карточки и
+   вторичные кнопки заливались одним и тем же серым, и кнопка «Сканировать»
+   выглядела ровно как поле ввода рядом с ней. */
+.field { margin-bottom: var(--s3); }
+.field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: var(--s1);
+}
+.field input, .field select, .field textarea {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--group-bg);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 16px;   /* меньше 16px — и Safari на iPhone увеличивает страницу */
+  line-height: 1.3;
+  transition: border-color 0.15s ease;
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); }
+.field input:focus, .field select:focus, .field textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+/* Поиск система рисует иначе, чем поле анкеты: капсула, приглушённая заливка
+   вместо белой и лупа слева. Форма и цвет тут работают подписью — читается как
+   «сюда вводят запрос», а не как ещё одна строка формы.
+   Лупу рисуем фоном, а не тегом в разметке: полей поиска у нас четыре —
+   каталог, заказы, этикетки и список ненайденного в сверке, — и одно правило
+   в CSS дешевле четырёх одинаковых кусков вёрстки.
+   Цвет лупы зашит средне-серым: это ровно системный secondaryLabel, он читается
+   и на белом, и на тёмном, а взять currentColor внутрь data-URI нельзя. */
+input[type="search"] {
+  border-radius: var(--r-pill);
+  border-color: transparent;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 13px center;
+  background-size: 17px 17px;
+  padding-left: 38px;
+}
+input[type="search"]:focus { background-color: var(--surface-strong); }
+/* Системный крестик очистки в вебките серый и на капсуле смотрится чужеродно;
+   очистить поле можно выделением, а место в строке дороже. */
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
+.field textarea { resize: vertical; min-height: 96px; padding-top: 12px; }
+.field .hint { margin-top: var(--s2); margin-bottom: 0; }
+
+/* Своя стрелка у выпадающих списков: системная выглядит по-разному в каждом
+   браузере, и рядом с нашими скруглениями смотрится чужеродно. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+}
+
+/* --- Кнопки ---
+   Главное действие — залитое акцентом, вторичное — приглушённая плашка с
+   рамкой. До этого и то и другое было серым прямоугольником, и глазу не за что
+   было зацепиться.
+   Форма — капсула. Скруглённый прямоугольник был формой кнопок до iOS 26;
+   в последней версии система скруглила элементы управления до капсулы, и
+   прямоугольник со скруглением 12 рядом с ней читается как «почти айфон».
+   Высота 50 — системная для главного действия во всю ширину.
+   Тени нет: системные кнопки плоские, тень выдаёт веб. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 50px;
+  padding: 13px 20px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: inherit;
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  text-align: center;
+  cursor: pointer;
+  margin-bottom: var(--s2);
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.btn:active { transform: scale(0.985); }
+.btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+/* Второй из трёх системных видов — тонированная кнопка: приглушённая заливка и
+   текст акцентом. Раньше вторичная кнопка была белой плашкой с рамкой и рядом
+   с полем ввода выглядела ровно как поле. */
+.btn--secondary {
+  background: var(--surface);
+  color: var(--accent);
+  border-color: transparent;
+}
+.btn--danger { background: var(--danger); color: #fff; }
+/* Красное, но не залитое: «Выйти» — не разрушительное действие, а заметное.
+   Сплошная красная полоса во всю ширину кричала бы громче, чем удаление
+   сотрудника, которое рядом же залито красным по-настоящему. */
+.btn--outline-danger {
+  background: transparent;
+  color: var(--danger-line);
+  border-color: var(--danger-line);
+  box-shadow: none;
+}
+.btn--outline-danger:active { background: rgba(224, 49, 49, 0.1); }
+
+/* Своя учётная запись в настройках: отделена линией, потому что всё выше — про
+   склад, а это про вас. */
+.section--account { border-top: 1px solid var(--hairline); padding-top: var(--s4); }
+
+.btn-ico {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Два действия рядом, а не одно под другим: главное шире, второстепенное
+   прижато к краю. Столбик одинаковых во всю ширину кнопок читается как список
+   равных вариантов, хотя равными они не являются. */
+.btn-row { display: flex; gap: var(--s2); }
+.btn-row .btn { margin-bottom: var(--s2); }
+.btn-row .btn--secondary { flex: 0 1 auto; width: auto; padding-left: var(--s4); padding-right: var(--s4); }
+/* Равные по смыслу действия — равными долями. */
+.btn-row--equal .btn { flex: 1 1 0; width: auto; min-width: 0; padding-left: var(--s2); padding-right: var(--s2); font-size: var(--t-sub); }
+
+/* --- Карточки и строки списка --- */
+.card {
+  background: var(--group-bg);
+  border-radius: var(--r-lg);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s2);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.card:active { transform: scale(0.99); background: var(--surface-strong); }
+
+/* Заголовок строки — название слева, состояние справа. Раньше бейдж стоял
+   сразу за текстом, и в списке они прыгали по строке вслед за длиной названия. */
+/* Длинные списки — не стопка плашек, а сгруппированные строки с волосяными
+   разделителями, как список чатов в самом Telegram. На 628 позициях стопка
+   серых блоков не имеет ритма: все строки одинаково заметны, и глаз не за что
+   не цепляется. Разделители идут от края до края экрана — за это отвечают
+   отрицательные поля, а отступ содержимого возвращается изнутри строки. */
+.list {
+  margin: 0 calc(var(--gutter) * -1);
+  background: var(--group-bg);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+.list > .card {
+  position: relative;
+  background: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  min-height: 56px;
+  padding: 11px var(--gutter);
+  border-top: none;
+}
+/* Разделитель рисуем не рамкой строки, а линией внутри неё: в системе он
+   начинается от текста, а не от края экрана, и последняя строка группы его не
+   имеет вовсе. Рамкой так не получится — она либо на всю ширину, либо никак. */
+.list > .card + .card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--gutter);
+  right: 0;
+  height: 1px;
+  background: var(--hairline);
+}
+.list > .card:active { background: var(--surface); transform: none; }
+/* Строка списка ведёт на свой экран — говорим об этом так же, как разделы на
+   главной: уголком справа. */
+.list > .card[data-item-id]::after,
+.list > .card[data-defect-item]::after,
+.list > .card[data-order-id]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--gutter);
+  width: 7px;
+  height: 7px;
+  margin-top: -4px;
+  border-right: 2px solid var(--muted);
+  border-top: 2px solid var(--muted);
+  transform: rotate(45deg);
+  opacity: 0.5;
+}
+.list > .card[data-item-id],
+.list > .card[data-defect-item],
+.list > .card[data-order-id] { position: relative; padding-right: calc(var(--gutter) + 16px); }
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: var(--t-head);
+  line-height: var(--t-head-lh);
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+.card-title .badge { flex: none; }
+.card-title .badge:first-of-type { margin-left: auto; }
+.card-sub {
+  font-size: var(--t-foot);
+  line-height: var(--t-foot-lh);
+  color: var(--muted);
+  margin-top: 1px;
+}
+.card-sub:empty { display: none; }
+
+/* --- Бейджи состояния ---
+   Заливка сплошная, текст белый: так контраст не зависит от того, светлая тема
+   или тёмная. Нейтральные состояния («Списано», «Оформлен») не кричат — им
+   хватает приглушённой плашки. */
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  background: var(--surface-strong);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge--available, .badge--resolved { background: var(--success); color: #fff; }
+.badge--rented, .badge--in-repair { background: var(--warning); color: #fff; }
+.badge--open { background: var(--danger); color: #fff; }
+.badge--retired, .badge--closed { background: var(--surface-strong); color: var(--muted); }
+.badge--owner { background: var(--tg-button-color); color: var(--tg-button-text-color); }
+
+/* Действия над сотрудником: их до пяти, и в столбик они растягивают карточку
+   на экран. Складываем в ряды по месту. */
+.staff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.staff-actions .btn { width: auto; margin: 0; padding: 8px var(--s3); font-size: 13px; }
+
+/* Сводка по складу в панели: числа крупно, подпись мелко. Читается взглядом,
+   а не чтением — в этом весь смысл панели. */
+/* Два столбца, а не «сколько влезет»: на трёх подписи переносились на две
+   строки и плитки выходили разной высоты. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s2);
+  margin: var(--s3) 0;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 68px;
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-lg);
+  background: var(--group-bg);
+}
+.tile--warn { background: rgba(201, 42, 42, 0.12); }
+.tile-value { font-size: 26px; font-weight: 700; line-height: 1.05; letter-spacing: -0.5px; }
+.tile--warn .tile-value { color: var(--danger-line); }
+.tile-label { margin-top: 4px; font-size: 11px; color: var(--muted); }
+
+.error-box {
+  background: rgba(224, 49, 49, 0.13);
+  border-left: 3px solid var(--danger-line);
+  color: var(--ink);
+  border-radius: var(--r-sm);
+  padding: var(--s3) var(--s4);
+  font-size: 14px;
+  margin-bottom: var(--s3);
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: var(--s6) var(--s4);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Ряд фильтров-таблеток, прокручивается вбок, полосу прокрутки не показываем. */
+/* Фильтры переносятся на вторую строку, а не прокручиваются вбок: их два-три,
+   и уехавший за край список статусов выглядит обрезанным, а не прокручиваемым. */
+/* Два фильтра — одной строкой под поиском. Раньше они стояли НАД ним и на
+   узком экране переносились по одному в строку: три строки подряд отъедали у
+   списка полтора десятка позиций. Поровну и без переноса — так же, как система
+   раскладывает сегменты под строкой поиска. */
+.filters {
+  display: flex;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+.filters select {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  min-height: 40px;
+  /* Та же заливка и та же форма, что у поиска над ними: и поиск, и фильтры —
+     органы управления на фоне страницы, а не плашки поверх неё. Белыми они
+     читались приподнятыми, а серый поиск рядом — утопленным. */
+  padding: 6px 34px 6px 16px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--t-sub);
+  font-weight: 500;
+  background-position: right 12px center;
+}
+
+/* --- Кабинет на главной --- */
+.screen-user {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin: var(--s1) 0 var(--s5);
+}
+.screen-user span {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0;
+  margin-top: 2px;
+}
+
+/* Разделы кабинета — плитками. Строкой со стрелкой они читались как пункты
+   списка, а это кнопки: по ним бьют пальцем, часто в перчатке. Квадрат даёт
+   цель в полтора раза крупнее строки при том же месте на экране, а иконка
+   опознаётся раньше, чем прочитано слово. */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s3);
+  margin-bottom: var(--s5);
+}
+.tile-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-height: 96px;
+  padding: var(--s4);
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
+  background: var(--group-bg);
+  color: var(--ink);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.tile-btn:active { transform: scale(0.97); background: var(--surface-strong); }
+/* Плитка, которой ещё нечего открывать: пунктир вместо линии — то же самое, чем
+   в чертежах помечают «предусмотрено место». Гасить её целиком нельзя: тогда
+   она читается как сломанная. */
+.tile-btn--pending { border-style: dashed; border-color: var(--hairline); }
+.tile-btn--pending .tile-ico { stroke: var(--muted); }
+.tile-btn--pending .tile-name { color: var(--muted); }
+.tile-ico {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tile-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  /* «Инвентаризация» — самое длинное слово в приложении: переносим его, а не
+     ужимаем плитку и не режем многоточием. */
+  overflow-wrap: anywhere;
+}
+
+/* Ручной ввод на «Скане». Раньше это была приписка под кнопкой «Сканировать»
+   («Или введите номер вручную»), то есть запасной путь мелким шрифтом. Кнопка
+   ушла — дублировала повторный тап по вкладке, — и ввод занял её место: это
+   второй по частоте способ найти предмет, когда наклейка стёрлась. */
+.scan-manual {
+  max-width: 320px;
+  margin: var(--s6) auto 0;
+  text-align: center;
+}
+.scan-manual .field { text-align: left; }
+.scan-manual .field input { text-align: center; font-family: var(--font-mono); font-size: 22px; letter-spacing: 3px; }
+.scan-manual .hint { text-align: center; }
+.scan-manual-ico {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto var(--s4);
+  color: var(--muted);
+  opacity: 0.55;
+}
+.scan-manual-ico svg {
+  width: 100%; height: 100%;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round;
+}
+/* Когда предмет найден, форма ввода уходит на второй план: главное теперь —
+   подтвердить действие, а не искать следующий. */
+.scan-manual--tucked { margin-top: var(--s5); opacity: 0.75; }
+.scan-manual--tucked .scan-manual-ico { display: none; }
+
+.qr-wrap { display: flex; flex-direction: column; align-items: center; padding: var(--s5) 0; }
+.qr-wrap canvas { background: #fff; padding: var(--s3); border-radius: var(--r-md); box-shadow: var(--shadow-1); }
+.qr-id { font-family: var(--font-mono); font-size: 16px; margin-top: var(--s3); letter-spacing: 1px; }
+
+.section { margin-top: var(--s5); }
+/* Заголовок группы — как в системных настройках: прописные, приглушённые,
+   с отступом от края группы. */
+.section-title {
+  font-size: var(--t-foot);
+  line-height: var(--t-foot-lh);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+  margin-bottom: var(--s2);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-height: var(--tap);
+  padding: var(--s2) 0;
+}
+.toggle-row label { font-size: 15px; }
+.toggle-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
+
+/* Кнопка-замена Telegram MainButton вне Telegram (обычный браузер) */
+.fallback-main-button {
+  display: none;
+  position: fixed;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: calc(var(--tabbar-h) + var(--s2) + env(safe-area-inset-bottom, 0px));
+  z-index: 100;
+  width: auto;
+  box-shadow: var(--shadow-2);
+}
+
+/* --- Панель разделов ---
+   Иконки нарисованные, а не эмодзи: эмодзи выглядят по-разному на каждой
+   платформе, всегда цветные и не подхватывают цвет активной вкладки. */
+.tabbar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 90;
+  display: flex;
+  background: var(--group-bg);
+  border-top: 1px solid var(--hairline);
+  padding: 0 var(--s1);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+/* Метрики системные: высота 49, иконка 25, подпись 10. Жирность у активной
+   вкладки не меняем — система подсвечивает её только цветом, а скачок
+   насыщенности читался как дрожание подписи при переключении. */
+.tab {
+  flex: 1;
+  border: none;
+  background: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: var(--tabbar-h);
+  padding: 0;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: -0.1px;
+  color: var(--muted);
+  transition: color 0.12s ease;
+}
+.tab-ico { display: block; width: 25px; height: 25px; }
+.tab-ico svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tab--active { color: var(--accent); }
+.tab--active .tab-ico svg { stroke-width: 2.1; }
+.tab:active { opacity: 0.6; }
+
+/* Полоса с главным действием экрана. Раньше она липла к верху и при прокрутке
+   вставала вплотную под шапку: две панели слипались в один этаж посреди
+   экрана, а список обрубался об их непрозрачный край.
+   Теперь полоса уезжает вместе с содержимым, а действие не теряется — его
+   подхватывает круглая кнопка в правом нижнем углу (.fab ниже). */
+.sticky-bar {
+  margin: 0 0 var(--s2);
+}
+
+/* Круглая кнопка главного действия: появляется, когда полоса с ним уехала за
+   верх экрана. Так система держит «написать» в «Почте» — кружок над панелью
+   разделов, у большого пальца, не отъедающий у списка ни строки.
+   Тень здесь уместна и системе не противоречит: кнопка действительно висит
+   над содержимым, и без тени она читалась бы как дырка в списке. */
+.fab {
+  position: fixed;
+  right: var(--s4);
+  bottom: calc(var(--tabbar-h) + var(--s4) + env(safe-area-inset-bottom, 0px));
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  box-shadow: var(--shadow-2);
+  /* Прячем так, чтобы кнопка не ловила нажатия и не читалась скринридером,
+     пока её нет на экране. */
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.8);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+}
+.fab--on { opacity: 1; visibility: visible; transform: none; }
+.fab:active { transform: scale(0.92); }
+.fab svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+/* Скелетон загрузки: плашки в форме будущих карточек с бегущим блеском.
+   Без гифки — файл не нужен, и цвета сами следуют теме Telegram. */
+.skeleton { display: block; }
+.skeleton-card {
+  height: 68px;
+  border-radius: var(--r-md);
+  margin-bottom: var(--s2);
+  background: linear-gradient(90deg,
+    var(--surface) 25%,
+    var(--surface-strong) 37%,
+    var(--surface) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shine 1.3s ease-in-out infinite;
+}
+@keyframes skeleton-shine {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-card { animation: none; }
+  .btn, .card { transition: none; }
+}
+
+/* Свайп влево по строке открывает действие под ней */
+.swipe {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  margin-bottom: var(--s2);
+}
+.swipe-body {
+  position: relative;
+  z-index: 2;
+  background: var(--tg-bg-color);
+  transition: transform 0.18s ease;
+  will-change: transform;
+  /* Вертикальные жесты остаются браузеру и Telegram (прокрутка списка и
+     закрытие приложения свайпом вниз), горизонтальные забираем себе. */
+  touch-action: pan-y;
+}
+.swipe-body .card { margin-bottom: 0; }
+.swipe--dragging .swipe-body { transition: none; }
+.swipe-action {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 88px;
+  z-index: 1;
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s1);
+  cursor: pointer;
+}
+.swipe-action-ico { font-size: 20px; line-height: 1; }
+.pin-reset-form { margin-top: var(--s2); }
+
+/* Строка над списком: возраст данных и кнопка обновления. Возраст показываем
+   всегда — доверять кэшу можно только зная, насколько он свежий. */
+.refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin: var(--s1) 0 var(--s3);
+  min-height: 32px;
+}
+.refresh-age { font-size: 12px; color: var(--muted); }
+.refresh-btn {
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--tg-link-color);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+}
+.refresh-btn:active { background: var(--surface); }
+.refresh-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* QR во весь экран: единственный надёжный способ передать код с iPhone —
+   скачивание из мини-приложения Telegram часто блокируется вебвью. */
+.qr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s5);
+}
+.qr-overlay-inner { text-align: center; max-width: 460px; width: 100%; }
+.qr-overlay canvas { background: #fff; padding: var(--s3); border-radius: var(--r-md); max-width: 100%; }
+.qr-overlay-id {
+  font-family: var(--font-mono);
+  font-size: 24px; letter-spacing: 3px;
+  color: #fff; margin: var(--s4) 0 var(--s1);
+}
+.qr-overlay-caption { color: #bbb; font-size: 14px; margin-bottom: var(--s4); }
+
+/* --- Заказы --- */
+/* Подсказки при вводе. Список висит над содержимым: поднимать его выше липкой
+   панели с кнопками (20) обязательно, иначе она рисуется поверх, но ниже нижних
+   вкладок (100) — они должны оставаться доступными всегда. */
+.suggest-field { position: relative; z-index: 30; }
+.suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--tg-bg-color);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 28px -12px rgba(0, 0, 0, 0.45);
+}
+.suggest-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-height: 44px;
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+.suggest-item:first-child { border-top: none; }
+.suggest-item--active,
+.suggest-item:active { background: var(--surface-strong); }
+.suggest-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.suggest-meta { flex: 0 0 auto; font-size: 12px; color: var(--muted); }
+
+/* Номер заказа моноширинным: так десять цифр читаются и сверяются глазами.
+   Сам знак «№» из моноширинного шрифта исключён — в Menlo и подобных его нет,
+   и вместо знака рисовался слипшийся «Nº». */
+.order-no { font-family: var(--font-mono); letter-spacing: 0.5px; }
+.order-no-sign { font-family: var(--font-body); margin-right: 1px; }
+
+.order-line {
+  border-top: 1px solid var(--hairline);
+  padding: var(--s2) 0;
+}
+.order-line:first-of-type { border-top: none; padding-top: 0; }
+.order-line-name { font-size: 14px; font-weight: 500; }
+.order-line-qty { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.order-line-ok { font-size: 12px; color: var(--success); margin-top: 2px; }
+.order-line-warn { color: var(--warning-line); font-weight: 600; }
+.order-line-pick {
+  width: 100%;
+  margin-top: var(--s2);
+  min-height: 40px;
+  padding: 8px 34px 8px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline);
+  background-color: var(--tg-bg-color);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  background-position: right 10px center;
+}
+
+/* Позиция на руках с кнопкой приёма: имя слева, кнопка справа — сама строка
+   при этом остаётся такой же, как в составе заказа. */
+.order-line-btn {
+  width: auto;
+  margin: var(--s2) 0 0;
+  padding: 8px var(--s4);
+  font-size: 14px;
+}
+
+/* «Отменить сверку» стоит следом за «Завести новый экземпляр» и выглядит так
+   же. Отделяем линией и предупреждением: цена промаха — весь обход. */
+.inventory-drop {
+  margin-top: var(--s6);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--hairline);
+}
+.inventory-drop .hint { margin-top: 0; }
+
+/* Строка ненайденного с кнопкой «Нашёл»: имя слева, кнопка справа. Кнопка под
+   каждым из полусотни имён растянула бы список вдвое, а он и так длинный. */
+.inventory-miss { display: flex; align-items: center; gap: var(--s2); }
+.inventory-miss-main { flex: 1 1 auto; min-width: 0; }
+.inventory-miss .order-line-btn { flex: 0 0 auto; margin-top: 0; }
+
+/* Поле пересчёта у штучной позиции: узкое, рядом со строкой, а не во всю
+   ширину — это одно число, а не форма. */
+.inventory-qty {
+  width: 92px;
+  margin-top: var(--s2);
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--hairline);
+  background: var(--tg-bg-color);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  text-align: center;
+}
+
+/* Сколько по заказу уже отдано. Полоса нужна не ради украшения: «выдано 1 из
+   25» цифрами читается медленнее, чем видно глазом, что заказ едва начат. */
+.progress-line { font-size: 13px; font-weight: 600; margin-top: var(--s2); }
+.progress {
+  margin-top: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--tg-button-color);
+}
+
+/* Дописанное в заказ свободным полем: на складе это отдельная строка работы,
+   поэтому и выглядеть должна отдельно, а не сливаться с составом. */
+.order-extra {
+  margin-top: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--surface-strong);
+  font-size: 13px;
+}
+
+/* Предупреждения разбора: что не распознано. Их читают перед сохранением,
+   поэтому они не серые. */
+.order-warn {
+  border-radius: var(--r-sm);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s3);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--surface);
+  border-left: 3px solid var(--warning-line);
+}
+
+.order-raw { margin-top: var(--s3); font-size: 13px; color: var(--muted); }
+.order-raw summary { cursor: pointer; padding: var(--s2) 0; }
+.order-raw pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
+  font-size: 12px;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/* --- Этикетки ---
+   Этикетка целиком рисуется на canvas в разрешении принтера: одна и та же
+   картинка идёт и в предпросмотр, и в печать, и в файл. Размер задаётся в
+   миллиметрах — на печати это физический размер ленты, и всё, что в px,
+   уехало бы. Вся раскладка живёт в js/labels.js, здесь только рамка. */
+.label {
+  display: block;
+  background: #fff;
+  box-sizing: border-box;
+  border: 1px dashed var(--muted);   /* только на экране, при печати снимается */
+  border-radius: 2px;
+  margin: 0 var(--s2) var(--s2) 0;
+  image-rendering: pixelated;        /* модули кода — квадраты, не пятна */
+}
+#labels-preview { display: flex; flex-wrap: wrap; align-items: flex-start; }
+
+#labels-print-area { display: none; }
+
+@media print {
+  /* Печатаем только этикетки: панель разделов, кнопки и экраны в печать
+     попадать не должны. Размер страницы задаётся из js/labels.js под
+     выбранный формат этикетки. */
+  body.printing #app > *:not(#labels-print-area) { display: none !important; }
+  body.printing #labels-print-area { display: block !important; }
+  body.printing #app { padding: 0 !important; }
+
+  .label {
+    border: none;
+    margin: 0;
+    /* одна этикетка на страницу — так работает термопринтер этикеток */
+    page-break-after: always;
+    break-after: page;
+  }
+  .label:last-child { page-break-after: auto; break-after: auto; }
+}
+
+/* На широком экране мобильная вёрстка растягивается в полосу на весь монитор.
+   Ограничиваем ширину — читать длинные строки через весь экран невозможно. */
+@media (min-width: 720px) {
+  .screen { max-width: 680px; margin: 0 auto; }
+  .tabbar { justify-content: center; gap: var(--s6); }
+  .tab { flex: 0 0 96px; }
+  .fallback-main-button { left: 50%; transform: translateX(-50%); width: 360px; }
+}

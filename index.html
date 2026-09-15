@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Mifs Rent — учёт оборудования</title>
+<!-- ?v= у своих файлов — не украшение. Telegram держит мини-приложение в
+     собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
+     новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
+     при каждой выкладке, и веб-вью вынужден перечитать файл. -->
+<link rel="stylesheet" href="css/style.css?v=20260916e" />
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="js/vendor/qrcode-generator.js?v=20260916e"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- Шапка приложения.
+       Раньше здесь была пустая полоса: запас под шапку Telegram. Запас нужен
+       только когда шапка висит ПОВЕРХ содержимого (полноэкранный режим, Bot API
+       8.0), а в обычном режиме клиент рисует её над веб-вью — и полоса оставалась
+       просто дыркой в полсантиметра на каждом экране. Теперь место занято
+       вывеской, а запас считается по тому, что реально прислал клиент
+       (js/telegram.js).
+       «Настройки» здесь же маленькой кнопкой: попасть в них нужно любому
+       сотруднику — там смена своего PIN и выход, — а большой карточки на главной
+       они не заслуживают. -->
+  <header class="appbar" id="appbar">
+    <!-- «Назад» живёт в самой шапке, как в системе, и говорит, куда ведёт.
+         Нативная BackButton Telegram тоже включается роутером, но её легко не
+         заметить, а на клиентах старее Bot API 6.1 её нет вовсе. -->
+    <button class="nav-back" id="back-button" type="button">
+      <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4.5 7.5 12l7.5 7.5"/></svg>
+      <span id="back-label">Назад</span>
+    </button>
+    <div class="wordmark">
+      <span class="clap" aria-hidden="true"></span>
+      <span class="wordmark-text">
+        <span class="wordmark-name">Mifs<b>Rent</b></span>
+        <span class="wordmark-sub">Киноколледж #40</span>
+      </span>
+    </div>
+    <button class="icon-btn" id="appbar-settings" type="button" aria-label="Настройки" title="Настройки">
+      <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+  </header>
+
+  <!-- Экран: вход по PIN -->
+  <!-- Заголовка здесь нет: название стоит в шапке над всеми экранами, и второй
+       раз повторять его на входе незачем. -->
+  <div class="screen" id="screen-login">
+    <p class="hint" id="login-greeting">Учёт оборудования на складе</p>
+    <div id="login-error"></div>
+    <form id="login-form">
+      <div class="field">
+        <label for="login-input">Логин</label>
+        <input id="login-input" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+      </div>
+      <div class="field">
+        <label for="pin-input">PIN-код</label>
+        <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn" id="login-submit">Войти</button>
+    </form>
+
+  </div>
+
+  <!-- Экран: главное меню.
+       Заголовков на экранах с вкладкой внизу нет: панель разделов и так всё
+       время говорит, где вы находитесь, а заголовок отъедал первый экран —
+       на «Скане» он занимал место, где должна открываться камера. -->
+  <div class="screen" id="screen-home">
+    <div class="screen-user" id="home-user"></div>
+
+    <!-- Разделы из нижней панели здесь не дублируются — тут только то, чего в
+         ней нет. Плитками, а не строками со стрелкой: строка читается как
+         пункт списка, а это действия, по которым бьют пальцем в перчатке.
+         «Настройки» ушли в шапку маленькой кнопкой, «Сменить PIN» и «Выйти» —
+         внутрь настроек: оба про свою учётную запись, а не про склад. -->
+    <div class="menu-grid">
+      <button class="tile-btn" type="button" data-nav="inventory">
+        <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="m9 14 2 2 4-4"/></svg>
+        <span class="tile-name">Инвентаризация</span>
+      </button>
+      <button class="tile-btn" type="button" data-nav="labels">
+        <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.82 8.82a2 2 0 0 0 2.82 0l7.17-7.17a2 2 0 0 0 0-2.82z"/><circle cx="7" cy="7" r="1.4"/></svg>
+        <span class="tile-name">Этикетки</span>
+      </button>
+      <!-- Сайт проката. Стоит на главной всегда: место под него занято, и видно,
+           что такая дверь в системе есть. Пока адрес не задан в настройках,
+           плитка не молчит, а говорит, чего не хватает и кому это исправить. -->
+      <button class="tile-btn" type="button" id="home-site-card">
+        <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span class="tile-name">Сайт MifsRent</span>
+      </button>
+      <button class="tile-btn" type="button" data-nav="staff" id="home-staff-card" style="display:none;">
+        <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="tile-name">Сотрудники</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Экран: каталог оборудования -->
+  <div class="screen" id="screen-catalog">
+    <!-- Поиск первым, фильтры под ним одной строкой: так раскладывает их
+         система, и это экономит экрану полторы строки списка. -->
+    <div class="field" id="catalog-search-wrap">
+      <input type="search" id="catalog-search" placeholder="Поиск по названию или номеру"
+             autocapitalize="off" autocorrect="off" spellcheck="false" />
+    </div>
+    <div class="filters">
+      <select id="catalog-filter-category"></select>
+      <select id="catalog-filter-status"></select>
+    </div>
+    <!-- Кнопка стоит ДО списка: после него на 629 карточках её было не найти.
+         При прокрутке полоса уезжает, а действие подхватывает круглая кнопка
+         внизу справа (js/fab.js). -->
+    <div class="btn-row sticky-bar">
+      <button class="btn" id="catalog-add-toggle">+ Добавить</button>
+      <button class="btn btn--secondary" id="catalog-labels-btn">Этикетки</button>
+    </div>
+
+    <div id="catalog-add-form" style="display:none;" class="section">
+      <h2>Новое оборудование</h2>
+      <div id="catalog-add-error"></div>
+      <div class="field">
+        <label for="new-item-category">Категория</label>
+        <select id="new-item-category"></select>
+      </div>
+      <div class="field">
+        <label for="new-item-model">Модель</label>
+        <select id="new-item-model"></select>
+      </div>
+      <div class="field" id="new-model-wrap" style="display:none;">
+        <label for="new-item-name">Название новой модели</label>
+        <input id="new-item-name" type="text" />
+      </div>
+      <!-- Количество спрашиваем только у категорий, которые считаются кучей:
+           у камеры «сколько штук» смысла не имеет, у сэндбэгов — только оно. -->
+      <div class="field" id="new-item-qty-wrap" style="display:none;">
+        <label for="new-item-qty">Сколько штук</label>
+        <input id="new-item-qty" type="number" inputmode="numeric" min="1" step="1" value="1" />
+        <p class="hint">Личных номеров и QR у таких позиций нет — склад считает их количеством.
+        Если позиция уже заведена, это добавит к остатку.</p>
+      </div>
+      <div class="field" id="new-item-serial-wrap">
+        <label for="new-item-serial">Серийный номер</label>
+        <input id="new-item-serial" type="text" />
+      </div>
+      <div class="field" id="new-item-inventory-wrap">
+        <label for="new-item-inventory">Инвентарный номер</label>
+        <input id="new-item-inventory" type="text" />
+      </div>
+      <div class="field">
+        <label for="new-item-notes">Заметки о состоянии</label>
+        <textarea id="new-item-notes"></textarea>
+      </div>
+      <button class="btn" id="new-item-submit">Создать и получить QR</button>
+    </div>
+
+    <div id="catalog-qr-result" class="section" style="display:none;"></div>
+    <div class="refresh-row" id="catalog-refresh"></div>
+    <div class="list" id="catalog-list"></div>
+    <div id="catalog-more"></div>
+  </div>
+
+  <!-- Экран: сканирование -->
+  <div class="screen" id="screen-scan">
+    <!-- Виден только когда пришли с карточки заказа: по какому заказу идёт
+         выдача и что уже отсканировано за этот заход. -->
+    <div id="scan-order-bar"></div>
+    <div id="scan-error"></div>
+    <div id="scan-result"></div>
+    <!-- Кнопки «Сканировать» здесь нет намеренно: камера открывается при входе
+         на экран, а повторный тап по вкладке «Скан» открывает её снова. Кнопка
+         дублировала этот жест и занимала место главного действия. Освободившееся
+         место отдано ручному вводу — он нужен, когда наклейка стёрлась или
+         сканер в этой версии Telegram недоступен. -->
+    <div class="scan-manual" id="scan-manual-wrap">
+      <div class="scan-manual-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>
+      </div>
+      <div id="scan-no-camera"></div>
+      <div class="field">
+        <label for="scan-manual-input">Номер предмета</label>
+        <input type="text" id="scan-manual-input" inputmode="numeric" placeholder="010101" />
+      </div>
+      <button class="btn btn--secondary" id="scan-manual-submit">Найти</button>
+      <p class="hint" id="scan-manual-hint">Наведите камеру на QR — она открылась сама.
+      Чтобы открыть её снова, нажмите «Скан» в панели внизу.</p>
+    </div>
+  </div>
+
+  <!-- Экран: карточка предмета -->
+  <div class="screen" id="screen-item">
+    <h1 id="item-title">Оборудование</h1>
+    <div id="item-content"></div>
+  </div>
+
+  <!-- Экран: ремонт/дефекты -->
+  <div class="screen" id="screen-repair">
+    <div class="filters">
+      <select id="repair-filter-status">
+        <option value="all">Все</option>
+        <option value="Open">Открытые</option>
+        <option value="In Repair">В ремонте</option>
+        <option value="Resolved">Решённые</option>
+      </select>
+    </div>
+    <div class="refresh-row" id="repair-refresh"></div>
+    <div class="list" id="repair-list"></div>
+  </div>
+
+  <!-- Экран: заказы с сайта брони (раньше здесь были «Клиенты») -->
+  <div class="screen" id="screen-orders">
+    <div class="filters">
+      <select id="orders-filter-status">
+        <option value="Issued">Выданные</option>
+        <option value="overdue">Просроченные</option>
+        <option value="New">Оформленные</option>
+        <option value="Returned">Возвращённые</option>
+        <option value="all" selected>Все</option>
+      </select>
+    </div>
+    <div class="field">
+      <input type="search" id="orders-search" placeholder="Поиск по номеру, имени или телефону"
+             autocapitalize="off" autocorrect="off" spellcheck="false" />
+    </div>
+    <div class="sticky-bar"><button class="btn" id="orders-add-toggle">+ Новый заказ</button></div>
+    <div id="orders-add" class="section" style="display:none;"></div>
+    <div class="refresh-row" id="orders-refresh"></div>
+    <div class="list" id="orders-list"></div>
+  </div>
+
+  <!-- Экран: один заказ.
+       Раньше карточка раскрывалась внутри списка: из неё некуда было нажать
+       «назад», а обновление списка её схлопывало. Выдача и приём по заказу —
+       работа на несколько минут, ей нужен свой экран. -->
+  <div class="screen" id="screen-order">
+    <h1 id="order-title">Заказ</h1>
+    <div id="order-content"></div>
+  </div>
+
+  <!-- Экран: инвентаризация (сверка склада по QR) -->
+  <div class="screen" id="screen-inventory">
+    <h1>Инвентаризация</h1>
+    <div id="inventory-content"></div>
+  </div>
+
+  <!-- Экран: сотрудники (только для Admin) -->
+  <div class="screen" id="screen-staff">
+    <h1>Сотрудники</h1>
+    <div id="staff-owner-hint"></div>
+    <div id="staff-list"></div>
+    <button class="btn" id="staff-add-toggle">+ Добавить сотрудника</button>
+
+    <div id="staff-add-form" style="display:none;" class="section">
+      <h2>Новый сотрудник</h2>
+      <div id="staff-add-error"></div>
+      <div class="field">
+        <label for="new-staff-name">Имя</label>
+        <input id="new-staff-name" type="text" required />
+      </div>
+      <div class="field">
+        <label for="new-staff-login">Логин</label>
+        <input id="new-staff-login" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+      </div>
+      <div class="field">
+        <label for="new-staff-pin">PIN-код</label>
+        <input id="new-staff-pin" type="password" inputmode="numeric" pattern="[0-9]*" required />
+      </div>
+      <div class="field">
+        <label for="new-staff-role">Роль</label>
+        <select id="new-staff-role">
+          <option value="Warehouse Staff">Сотрудник склада</option>
+          <option value="Admin">Администратор</option>
+        </select>
+      </div>
+      <button class="btn" id="new-staff-submit">Добавить</button>
+    </div>
+  </div>
+
+  <!-- Экран: этикетки для термопринтера -->
+  <div class="screen" id="screen-labels">
+    <h1>Этикетки</h1>
+    <div id="labels-content"></div>
+  </div>
+
+  <!-- Экран: настройки системы (только администратор) -->
+  <div class="screen" id="screen-settings">
+    <h1>Настройки</h1>
+    <div id="settings-error"></div>
+    <div id="settings-content"></div>
+  </div>
+
+  <!-- Экран: смена своего PIN (доступен любой роли) -->
+  <div class="screen" id="screen-pin">
+    <h1>Смена PIN</h1>
+    <div id="pin-change-error"></div>
+    <p class="hint" id="pin-change-hint">Новый PIN — от 4 до 6 цифр.</p>
+    <div class="field">
+      <label for="pin-current">Текущий PIN</label>
+      <input id="pin-current" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" />
+    </div>
+    <div class="field">
+      <label for="pin-new">Новый PIN</label>
+      <input id="pin-new" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+    </div>
+    <div class="field">
+      <label for="pin-repeat">Новый PIN ещё раз</label>
+      <input id="pin-repeat" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+    </div>
+    <button class="btn" id="pin-change-submit">Сменить PIN</button>
+  </div>
+
+  <!-- Панель разделов: переход между разделами в один тап, без возврата на главную.
+       «Сотрудники» сюда не ставим — раздел админский и редкий, он на главной. -->
+  <!-- Иконки нарисованы, а не набраны эмодзи: эмодзи выглядят по-разному на
+       каждой платформе, всегда цветные и не подхватывают цвет активной вкладки. -->
+  <nav class="tabbar" id="tabbar" style="display:none;">
+    <button class="tab" data-tab="home"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5 12 2l9 7.5V21a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M9 22V13h6v9"/></svg></span>Главная</button>
+    <button class="tab" data-tab="catalog"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg></span>Каталог</button>
+    <button class="tab" data-tab="scan"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg></span>Скан</button>
+    <button class="tab" data-tab="repair"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>Ремонт</button>
+    <button class="tab" data-tab="orders"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a1 1 0 0 0 1 1h5"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span>Заказы</button>
+  </nav>
+
+  <!-- Круглая кнопка главного действия. Появляется, когда полоса с этим
+       действием уехала за верх экрана; что именно она делает — решает js/fab.js
+       по активному экрану. -->
+  <button class="fab" id="fab" type="button" aria-label="Добавить">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+  </button>
+
+  <!-- Сюда складываются этикетки на момент печати: у термопринтера этикеток
+       одна этикетка на страницу, поэтому печатаем только это, скрыв остальное. -->
+  <div id="labels-print-area"></div>
+
+</div>
+
+<script src="js/config.js?v=20260916e"></script>
+<script src="js/util.js?v=20260916e"></script>
+<script src="js/suggest.js?v=20260916e"></script>
+<script src="js/cache.js?v=20260916e"></script>
+<script src="js/mock-data.js?v=20260916e"></script>
+<script src="js/api.js?v=20260916e"></script>
+<script src="js/telegram.js?v=20260916e"></script>
+<script src="js/router.js?v=20260916e"></script>
+<script src="js/fab.js?v=20260916e"></script>
+<script src="js/qr.js?v=20260916e"></script>
+<script src="js/swipe.js?v=20260916e"></script>
+<script src="js/auth.js?v=20260916e"></script>
+<script src="js/catalog.js?v=20260916e"></script>
+<script src="js/scan.js?v=20260916e"></script>
+<script src="js/item.js?v=20260916e"></script>
+<script src="js/order.js?v=20260916e"></script>
+<script src="js/repair.js?v=20260916e"></script>
+<script src="js/orders.js?v=20260916e"></script>
+<script src="js/staff.js?v=20260916e"></script>
+<script src="js/settings.js?v=20260916e"></script>
+<script src="js/labels.js?v=20260916e"></script>
+<script src="js/inventory.js?v=20260916e"></script>
+<script src="js/pin.js?v=20260916e"></script>
+<script src="js/app.js?v=20260916e"></script>
+</body>
+</html>
