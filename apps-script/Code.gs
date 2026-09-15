@@ -2472,6 +2472,80 @@ function handleSettingsGet(payload, token) {
 // Что творится на складе одним взглядом: из чего состоит каталог, сколько на
 // руках, что просрочено и что сломано. Считается по тем же листам, которые всё
 // равно читаются — отдельного хранилища для этого заводить незачем.
+// ---------------------------------------------------------------------
+// Занятость по датам — то, на чём стоит бронь
+// ---------------------------------------------------------------------
+
+// Заказы, которые держат технику. Returned и Cancelled её отпустили.
+var BOOKING_STATUSES = ["New", "Issued"];
+
+/**
+ * Сколько единиц каждой модели свободно на интервале [from, to].
+ *
+ * Считается по тому, что уже записано: даты лежат в Orders, модель и
+ * количество — в OrderItems. Отдельной сущности «бронь» не нужно, и это
+ * важно: два места, где записано одно и то же, рано или поздно разойдутся.
+ *
+ * Даты в таблице хранятся как YYYY-MM-DD (parseRuDate приводит к этому виду),
+ * поэтому сравниваются строками — без разбора в Date и без часовых поясов,
+ * на которых такие расчёты обычно и ломаются.
+ *
+ * Интервалы пересекаются, когда заказ начался не позже конца нашего интервала
+ * и закончился не раньше его начала. День возврата считается занятым: вещь
+ * приносят в конце дня, и выдать её в этот же день другому нельзя.
+ *
+ * Возвращает { "CAM|01": {total, booked, free, model_name} }.
+ */
+function availabilityFor(from, to) {
+  var start = String(from || "").substring(0, 10);
+  var end = String(to || "").substring(0, 10) || start;
+  var out = {};
+
+  // Сколько единиц есть физически. Списанное не предлагаем.
+  readRows(getSheet(SHEETS.EQUIPMENT)).forEach(function (r) {
+    if (r.status === "Retired") return;
+    var key = r.category + "|" + (r.model_code === "" ? "" : pad2(Number(r.model_code)));
+    if (!out[key]) out[key] = { total: 0, booked: 0, free: 0, model_name: r.name };
+    out[key].total += itemQty(r);
+  });
+
+  var orders = {};
+  readRows(getSheet(SHEETS.ORDERS)).forEach(function (o) {
+    orders[String(o.order_id)] = o;
+  });
+
+  readRows(getSheet(SHEETS.ORDER_ITEMS)).forEach(function (line) {
+    var order = orders[String(line.order_id)];
+    if (!order) return;
+    if (BOOKING_STATUSES.indexOf(String(order.status)) === -1) return;
+    if (!bookingOverlaps(order, start, end)) return;
+    var key = line.category + "|" + (line.model_code === "" ? "" : pad2(Number(line.model_code)));
+    if (!out[key]) return;   // строка заказа, которую так и не сопоставили с каталогом
+    out[key].booked += Math.max(0, Number(line.qty) || 0);
+  });
+
+  for (var key in out) {
+    out[key].free = Math.max(0, out[key].total - out[key].booked);
+  }
+  return out;
+}
+
+// Пересекается ли заказ с интервалом.
+//
+// Отдельно про заказы без дат. Выданный без дат — это вещь, которая физически
+// на руках и неизвестно когда вернётся: считаем занятой всегда, иначе витрина
+// пообещает то, чего на полке нет. Новый без дат — наоборот, пропускаем:
+// заявка, заведённая копипастом без сроков, иначе заблокировала бы модель
+// навечно.
+function bookingOverlaps(order, start, end) {
+  var from = String(order.issue_date || "").substring(0, 10);
+  var to = String(order.return_date || "").substring(0, 10);
+  if (!from && !to) return String(order.status) === "Issued";
+  if (!from) return to >= start;
+  if (!to) return from <= end;
+  return from <= end && to >= start;
+}
+
 function warehouseSummary() {
   var today = new Date().toISOString().substring(0, 10);
   var out = {

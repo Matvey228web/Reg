@@ -1175,16 +1175,73 @@ check('сводка знает, сколько сотрудников',
   r.data.summary.staff === call('/staff/list', {}, ownerToken).data.length, r.data.summary);
 check('панель знает, кто главный', r.data.me.is_owner === true && String(r.data.owner.staff_id) === '1', r.data.me);
 
+console.log('\n== занятость по датам: ядро брони ==');
+// К этому месту прежний токен уже отозван проверками смены PIN и выхода —
+// берём действующий прямо из листа Staff, а не выдумываем новый логин.
+const liveToken = readRows(getSheet(SHEETS.STAFF))
+  .map(r => String(r.session_token || '')).filter(Boolean)[0];
+// Готовим чистую модель: три единицы одной модели и заказы поверх них.
+const availCat = 'LGT';
+const availIds = [];
+for (let i = 0; i < 3; i++) {
+  availIds.push(call('/item/create', { name: 'Arri SkyPanel S60', category: availCat }, liveToken).data.item_id);
+}
+const availModel = availCat + '|' + String(availIds[0]).substring(2, 4);
+const freeOn = (from, to) => {
+  const a = availabilityFor(from, to)[availModel];
+  return a ? a.free : null;
+};
+check('пока заказов нет — свободны все три', freeOn('2026-03-03', '2026-03-07') === 3,
+      availabilityFor('2026-03-03', '2026-03-07')[availModel]);
+
+// Заказ на 3–7 марта, две штуки.
+const ordersSheet = getSheet(SHEETS.ORDERS);
+const linesSheet = getSheet(SHEETS.ORDER_ITEMS);
+const bookId = nextId('order_id', maxIdIn(ordersSheet, 'order_id'));
+appendRow(ordersSheet, { order_id: bookId, order_no: 'B-1', status: 'New',
+                         issue_date: '2026-03-03', return_date: '2026-03-07',
+                         student_name: 'Тест', created_at: new Date().toISOString() });
+appendRow(linesSheet, { order_id: bookId, line_no: 1, raw_name: 'Arri SkyPanel S60',
+                        model_code: String(availIds[0]).substring(2, 4), category: availCat,
+                        qty: 2, issued_qty: 0 });
+
+check('внутри интервала занято две', freeOn('2026-03-04', '2026-03-05') === 1, freeOn('2026-03-04', '2026-03-05'));
+check('края интервала тоже заняты', freeOn('2026-03-07', '2026-03-09') === 1, freeOn('2026-03-07', '2026-03-09'));
+check('до заказа свободны все', freeOn('2026-03-01', '2026-03-02') === 3, freeOn('2026-03-01', '2026-03-02'));
+check('после заказа свободны все', freeOn('2026-03-08', '2026-03-10') === 3, freeOn('2026-03-08', '2026-03-10'));
+check('заказ целиком внутри запроса тоже считается', freeOn('2026-02-01', '2026-04-01') === 1,
+      freeOn('2026-02-01', '2026-04-01'));
+
+// Возвращённый заказ место отпускает.
+updateRow(ordersSheet, findRowByValue(ordersSheet, 'order_id', bookId).__row, { status: 'Returned' });
+check('возвращённый заказ не держит место', freeOn('2026-03-04', '2026-03-05') === 3,
+      freeOn('2026-03-04', '2026-03-05'));
+updateRow(ordersSheet, findRowByValue(ordersSheet, 'order_id', bookId).__row, { status: 'Cancelled' });
+check('отменённый тоже', freeOn('2026-03-04', '2026-03-05') === 3, freeOn('2026-03-04', '2026-03-05'));
+
+// Выданный без дат — вещь на руках, считаем занятой всегда.
+updateRow(ordersSheet, findRowByValue(ordersSheet, 'order_id', bookId).__row,
+          { status: 'Issued', issue_date: '', return_date: '' });
+check('выданный без дат занимает любой интервал', freeOn('2027-01-01', '2027-01-02') === 1,
+      freeOn('2027-01-01', '2027-01-02'));
+// А новый без дат — нет: иначе заявка без сроков заблокирует модель навсегда.
+updateRow(ordersSheet, findRowByValue(ordersSheet, 'order_id', bookId).__row, { status: 'New' });
+check('новый без дат ничего не держит', freeOn('2027-01-01', '2027-01-02') === 3,
+      freeOn('2027-01-01', '2027-01-02'));
+
+// Списанное не предлагаем.
+updateRow(ordersSheet, findRowByValue(ordersSheet, 'order_id', bookId).__row, { status: 'Cancelled' });
+const eqSheetAvail = getSheet(SHEETS.EQUIPMENT);
+updateRow(eqSheetAvail, findRowByValue(eqSheetAvail, 'item_id', availIds[0]).__row, { status: 'Retired' });
+check('списанная единица из наличия исчезла', freeOn('2026-03-04', '2026-03-05') === 2,
+      freeOn('2026-03-04', '2026-03-05'));
+
 console.log('\n== журнал сверки не теряет ведущий ноль ==');
 // Номер 010101 таблица охотно записывает числом 10101, и тогда поиск по номеру
 // в журнале не находит ничего. Лечится форматом «@» через TEXT_COLUMNS.
 const invItems = readRows(getSheet(SHEETS.EQUIPMENT));
 const zeroItem = invItems.filter(r => String(r.item_id).charAt(0) === '0')[0];
 check('в каталоге есть номер с ведущим нулём', !!zeroItem, invItems.slice(0, 3).map(r => r.item_id));
-// К этому месту прежний токен уже отозван проверками смены PIN и выхода —
-// берём действующий прямо из листа Staff, а не выдумываем новый логин.
-const liveToken = readRows(getSheet(SHEETS.STAFF))
-  .map(r => String(r.session_token || '')).filter(Boolean)[0];
 const invRes = call('/inventory/save', {
   scope: 'all',
   started_at: new Date().toISOString(),
