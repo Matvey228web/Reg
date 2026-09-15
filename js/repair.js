@@ -39,23 +39,47 @@ const RepairScreen = (() => {
       .sort((a, b) => new Date(b.reported_at) - new Date(a.reported_at))
       .map((d) => {
         const item = itemsById[d.item_id];
-        const resolveBlock = d.status !== "Resolved" ? `
-          <div class="section" style="margin-top:8px;">
+        const resolved = d.status === "Resolved";
+        const resolveBlock = !resolved ? `
+          <div class="section defect-form" style="margin-top:8px;">
             <textarea placeholder="Комментарий к решению" id="resolution-${d.defect_id}"></textarea>
             <button class="btn btn--secondary" data-resolve="${d.defect_id}" style="margin-top:6px;">Отметить решённым</button>
           </div>` : "";
+        // Чем кончился дефект. Закрытый без объяснения — это вопрос «а что с ним
+        // делали?», который потом задают вслух; данные для ответа приходят с
+        // бэкенда и раньше просто не показывались.
+        const resolvedBlock = resolved ? `
+          <div class="card-sub">Решён: ${formatDate(d.resolved_at)}</div>
+          <div class="card-sub">${d.resolution_notes
+            ? escapeHtml(d.resolution_notes)
+            : "Комментарий к решению не оставили"}</div>` : "";
+        const reporter = d.reported_by_name
+          ? ` · ${escapeHtml(d.reported_by_name)}` : "";
         return `
-          <div class="card">
+          <div class="card" data-defect-item="${escapeHtml(d.item_id)}">
             <div class="card-title">${escapeHtml(item ? item.name : d.item_id)} ${statusChip(d.status)}</div>
             <div class="card-sub">${escapeHtml(d.item_id)} · ${escapeHtml(STATUS_LABELS[d.severity] || d.severity)}</div>
             <div class="card-sub">${escapeHtml(d.description || "")}</div>
-            <div class="card-sub">Заявлен: ${formatDate(d.reported_at)}</div>
+            <div class="card-sub">Заявлен: ${formatDate(d.reported_at)}${reporter}</div>
+            ${resolvedBlock}
             ${resolveBlock}
           </div>`;
       }).join("");
 
     list.querySelectorAll("[data-resolve]").forEach((btn) => {
       btn.addEventListener("click", () => resolveDefect(btn.dataset.resolve));
+    });
+    // Карточка ведёт на предмет: из ремонта чаще всего нужно как раз это —
+    // посмотреть историю вещи и решить, выдавать ли её дальше.
+    list.querySelectorAll("[data-defect-item]").forEach((card) => {
+      card.addEventListener("click", () => {
+        Router.navigate("item", { itemId: card.dataset.defectItem });
+      });
+    });
+    // Форма решения живёт внутри карточки, поэтому её клики наружу не пускаем:
+    // иначе попытка напечатать комментарий уводила бы с экрана.
+    list.querySelectorAll(".defect-form").forEach((form) => {
+      form.addEventListener("click", (e) => e.stopPropagation());
     });
   }
 

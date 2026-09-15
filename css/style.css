@@ -364,6 +364,7 @@ select {
 /* Строка списка ведёт на свой экран — говорим об этом так же, как разделы на
    главной: уголком справа. */
 .list > .card[data-item-id]::after,
+.list > .card[data-defect-item]::after,
 .list > .card[data-order-id]::after {
   content: "";
   position: absolute;
@@ -378,6 +379,7 @@ select {
   opacity: 0.5;
 }
 .list > .card[data-item-id],
+.list > .card[data-defect-item],
 .list > .card[data-order-id] { position: relative; padding-right: calc(var(--gutter) + 16px); }
 
 .card-title {

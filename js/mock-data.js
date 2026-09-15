@@ -640,6 +640,7 @@ const MockAPI = {
           defect_id = MockStore.nextDefectId();
           MockStore.defects.push({
             defect_id, item_id: item.item_id, reported_by: staff_id,
+            reported_by_name: (MockStore.findStaffById(staff_id) || {}).full_name || "",
             related_transaction_id: tx.transaction_id,
             description: body.defect_description || "",
             severity: body.defect_severity || "Minor",
@@ -664,6 +665,7 @@ const MockAPI = {
         const defect_id = MockStore.nextDefectId();
         MockStore.defects.push({
           defect_id, item_id: item.item_id, reported_by: staff_id,
+          reported_by_name: (MockStore.findStaffById(staff_id) || {}).full_name || "",
           related_transaction_id: null, description: body.description || "",
           severity: body.severity || "Minor", status: "Open",
           reported_at: new Date().toISOString(), resolved_at: null, resolution_notes: "",
