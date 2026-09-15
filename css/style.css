@@ -176,6 +176,23 @@ html, body {
 }
 .appbar:not(.appbar--collapsed) { box-shadow: none; }
 
+/* Панели не обрубают содержимое непрозрачным краем, а размывают его под собой —
+   так система показывает, что список продолжается, а не кончился. Прозрачность
+   выводим из фона темы, чтобы не зашивать цвет; где размытия нет (старый
+   вебвью), панели остаются сплошными, и это по-прежнему рабочий вид. */
+@supports (backdrop-filter: blur(1px)) and (background: color-mix(in srgb, red 50%, transparent)) {
+  .appbar {
+    background: color-mix(in srgb, var(--page-bg) 82%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+  .tabbar {
+    background: color-mix(in srgb, var(--group-bg) 82%, transparent);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+}
+
 /* Заголовок экрана в шапке. Absolute и по центру — как в системе: он стоит по
    середине панели независимо от того, насколько длинная кнопка «назад» слева.
    Всплывает снизу вверх, ровно навстречу уезжающему крупному заголовку. */
@@ -853,20 +870,53 @@ select {
 .tab--active .tab-ico svg { stroke-width: 2.1; }
 .tab:active { opacity: 0.6; }
 
-/* Полоса с действием, которая не должна уезжать при прокрутке длинного списка.
-   Подложка лежит на самой полосе, а не на кнопке: иначе она перекрасила бы
-   кнопку в цвет фона. Отрицательные поля растягивают подложку до краёв экрана —
-   иначе список просвечивал бы в боковых отступах. */
+/* Полоса с главным действием экрана. Раньше она липла к верху и при прокрутке
+   вставала вплотную под шапку: две панели слипались в один этаж посреди
+   экрана, а список обрубался об их непрозрачный край.
+   Теперь полоса уезжает вместе с содержимым, а действие не теряется — его
+   подхватывает круглая кнопка в правом нижнем углу (.fab ниже). */
 .sticky-bar {
-  position: sticky;
-  /* Липнет не к верху экрана, а под шапку: шапка теперь тоже липкая, и без
-     этой поправки фильтры каталога уезжали бы ей под низ. */
-  top: calc(var(--safe-top) + var(--navbar-h));
-  z-index: 20;
-  margin: 0 calc(var(--gutter) * -1) var(--s2);
-  padding: var(--s2) var(--gutter) var(--s2);
-  background: var(--page-bg);
-  box-shadow: 0 8px 12px -10px rgba(0, 0, 0, 0.25);
+  margin: 0 0 var(--s2);
+}
+
+/* Круглая кнопка главного действия: появляется, когда полоса с ним уехала за
+   верх экрана. Так система держит «написать» в «Почте» — кружок над панелью
+   разделов, у большого пальца, не отъедающий у списка ни строки.
+   Тень здесь уместна и системе не противоречит: кнопка действительно висит
+   над содержимым, и без тени она читалась бы как дырка в списке. */
+.fab {
+  position: fixed;
+  right: var(--s4);
+  bottom: calc(var(--tabbar-h) + var(--s4) + env(safe-area-inset-bottom, 0px));
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  box-shadow: var(--shadow-2);
+  /* Прячем так, чтобы кнопка не ловила нажатия и не читалась скринридером,
+     пока её нет на экране. */
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.8);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+}
+.fab--on { opacity: 1; visibility: visible; transform: none; }
+.fab:active { transform: scale(0.92); }
+.fab svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
 }
 
 /* Скелетон загрузки: плашки в форме будущих карточек с бегущим блеском.

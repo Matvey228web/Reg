@@ -99,6 +99,8 @@ const Router = (() => {
     renderTabbar(name, pushed);
     window.scrollTo(0, 0);
     syncTitle();
+    // Круглая кнопка главного действия следит за полосой этого экрана.
+    if (typeof Fab !== "undefined") Fab.watch();
   }
 
   function navigate(name, params = {}) {
@@ -125,6 +127,7 @@ const Router = (() => {
   }
 
   function init() {
+    if (typeof Fab !== "undefined") Fab.init();
     var btn = document.getElementById("back-button");
     if (btn) btn.addEventListener("click", () => back());
     // Прокрутку слушаем через requestAnimationFrame: событие приходит чаще, чем

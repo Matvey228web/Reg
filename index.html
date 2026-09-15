@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20260916c" />
+<link rel="stylesheet" href="css/style.css?v=20260916d" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20260916c"></script>
+<script src="js/vendor/qrcode-generator.js?v=20260916d"></script>
 </head>
 <body>
 <div id="app">
@@ -113,8 +113,9 @@
       <input type="search" id="catalog-search" placeholder="Поиск по названию или номеру"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
     </div>
-    <!-- Кнопка стоит ДО списка и липнет при прокрутке: раньше она была после
-         списка и на 628 карточках уезжала под них — найти её было невозможно. -->
+    <!-- Кнопка стоит ДО списка: после него на 629 карточках её было не найти.
+         При прокрутке полоса уезжает, а действие подхватывает круглая кнопка
+         внизу справа (js/fab.js). -->
     <div class="btn-row sticky-bar">
       <button class="btn" id="catalog-add-toggle">+ Добавить</button>
       <button class="btn btn--secondary" id="catalog-labels-btn">Этикетки</button>
@@ -325,34 +326,42 @@
     <button class="tab" data-tab="orders"><span class="tab-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a1 1 0 0 0 1 1h5"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span>Заказы</button>
   </nav>
 
+  <!-- Круглая кнопка главного действия. Появляется, когда полоса с этим
+       действием уехала за верх экрана; что именно она делает — решает js/fab.js
+       по активному экрану. -->
+  <button class="fab" id="fab" type="button" aria-label="Добавить">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+  </button>
+
   <!-- Сюда складываются этикетки на момент печати: у термопринтера этикеток
        одна этикетка на страницу, поэтому печатаем только это, скрыв остальное. -->
   <div id="labels-print-area"></div>
 
 </div>
 
-<script src="js/config.js?v=20260916c"></script>
-<script src="js/util.js?v=20260916c"></script>
-<script src="js/suggest.js?v=20260916c"></script>
-<script src="js/cache.js?v=20260916c"></script>
-<script src="js/mock-data.js?v=20260916c"></script>
-<script src="js/api.js?v=20260916c"></script>
-<script src="js/telegram.js?v=20260916c"></script>
-<script src="js/router.js?v=20260916c"></script>
-<script src="js/qr.js?v=20260916c"></script>
-<script src="js/swipe.js?v=20260916c"></script>
-<script src="js/auth.js?v=20260916c"></script>
-<script src="js/catalog.js?v=20260916c"></script>
-<script src="js/scan.js?v=20260916c"></script>
-<script src="js/item.js?v=20260916c"></script>
-<script src="js/order.js?v=20260916c"></script>
-<script src="js/repair.js?v=20260916c"></script>
-<script src="js/orders.js?v=20260916c"></script>
-<script src="js/staff.js?v=20260916c"></script>
-<script src="js/settings.js?v=20260916c"></script>
-<script src="js/labels.js?v=20260916c"></script>
-<script src="js/inventory.js?v=20260916c"></script>
-<script src="js/pin.js?v=20260916c"></script>
-<script src="js/app.js?v=20260916c"></script>
+<script src="js/config.js?v=20260916d"></script>
+<script src="js/util.js?v=20260916d"></script>
+<script src="js/suggest.js?v=20260916d"></script>
+<script src="js/cache.js?v=20260916d"></script>
+<script src="js/mock-data.js?v=20260916d"></script>
+<script src="js/api.js?v=20260916d"></script>
+<script src="js/telegram.js?v=20260916d"></script>
+<script src="js/router.js?v=20260916d"></script>
+<script src="js/fab.js?v=20260916d"></script>
+<script src="js/qr.js?v=20260916d"></script>
+<script src="js/swipe.js?v=20260916d"></script>
+<script src="js/auth.js?v=20260916d"></script>
+<script src="js/catalog.js?v=20260916d"></script>
+<script src="js/scan.js?v=20260916d"></script>
+<script src="js/item.js?v=20260916d"></script>
+<script src="js/order.js?v=20260916d"></script>
+<script src="js/repair.js?v=20260916d"></script>
+<script src="js/orders.js?v=20260916d"></script>
+<script src="js/staff.js?v=20260916d"></script>
+<script src="js/settings.js?v=20260916d"></script>
+<script src="js/labels.js?v=20260916d"></script>
+<script src="js/inventory.js?v=20260916d"></script>
+<script src="js/pin.js?v=20260916d"></script>
+<script src="js/app.js?v=20260916d"></script>
 </body>
 </html>
