@@ -309,6 +309,15 @@ const InventoryScreen = (() => {
         <button class="btn" id="inventory-scan">Сканировать подряд</button>
         <button class="btn btn--secondary" id="inventory-finish">Завершить</button>
       </div>
+      <!-- Выход из сверки — здесь, а не под списком. Раньше «Отменить» лежала
+           после «Не найдено», и при сверке всего каталога до неё было пятьдесят
+           карточек прокрутки: человек просто не мог закрыть сверку и решал, что
+           приложение не обновилось. Управление сверкой не должно зависеть от
+           того, сколько в ней позиций. -->
+      <div class="btn-row btn-row--equal">
+        <button class="btn btn--secondary" id="inventory-reset">Сбросить отметки</button>
+        <button class="btn btn--outline-danger" id="inventory-cancel">Отменить сверку</button>
+      </div>
       ${lastMessage ? `<div id="inventory-last" class="hint">${escapeHtml(lastMessage)}</div>` : ""}
 
       <div class="field">
@@ -374,13 +383,9 @@ const InventoryScreen = (() => {
       </div>
 
       <div class="inventory-drop">
-        <div class="btn-row btn-row--equal">
-          <button class="btn btn--secondary" id="inventory-reset">Сбросить отметки</button>
-          <button class="btn btn--outline-danger" id="inventory-cancel">Отменить сверку</button>
-        </div>
-        <p class="hint">«Сбросить» обнуляет отмеченное, но оставляет область и
-        выборку — удобно, когда пересчитываешь заново ту же полку. «Отменить»
-        закрывает сверку целиком, и восстанавливать будет нечем.</p>
+        <p class="hint">«Сбросить отметки» наверху обнуляет отмеченное, но оставляет
+        область и выборку — удобно, когда пересчитываешь заново ту же полку.
+        «Отменить сверку» закрывает её целиком, и восстанавливать будет нечем.</p>
       </div>`;
 
     wireSession();
