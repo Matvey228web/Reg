@@ -57,7 +57,8 @@
      которой система рисует углы, — в CSS не получить: border-radius даёт дугу
      окружности. На радиусах до 16 разница неразличима, поэтому берём значения
      и единообразие, а не подделываем кривую. */
-  --r-xs: 6px; --r-sm: 10px; --r-md: 12px; --r-lg: 16px; --r-pill: 999px;
+  --r-xs: 6px; --r-sm: 10px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
+  --r-pill: 999px;
 
   /* Шкала Dynamic Type. Главное отличие от прежней вёрстки — body 17, а не 15:
      системный текст на айфоне именно такой, и рядом с ним наши 15 читались как
@@ -286,7 +287,10 @@ html, body {
 /* Кнопка-иконка: «Настройки» в шапке и всё, что по смыслу такое же. Рисунок
    36 px — чтобы поместиться в системные 44 точки высоты шапки и не упереться
    в её края, — а цель под палец растянута псевдоэлементом до полных 44:
-   на складе по кнопке бьют в перчатке. */
+   на складе по кнопке бьют в перчатке.
+   Круг, а не скруглённый квадрат: система рисует одиночные кнопки-иконки в
+   панелях кругом, и рамка им не нужна — их выделяет заливка. Рамка вдобавок
+   была бессмысленной на белом: плашка кнопки того же цвета, что и группа. */
 .icon-btn {
   position: relative;
   flex: none;
@@ -296,9 +300,9 @@ html, body {
   width: 36px;
   height: 36px;
   padding: 0;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  background: var(--group-bg);
+  border: none;
+  border-radius: 50%;
+  background: var(--surface);
   color: var(--ink);
   cursor: pointer;
 }
@@ -380,6 +384,10 @@ a { color: var(--tg-link-color); }
   border-color: var(--accent);
   outline: none;
 }
+/* Поиск система рисует капсулой — и в «Настройках», и в «Контактах». Форма
+   здесь работает как подпись: капсула читается как «сюда вводят запрос», а не
+   как ещё одно поле анкеты. */
+.field input[type="search"] { border-radius: var(--r-pill); padding-left: 16px; }
 .field textarea { resize: vertical; min-height: 96px; padding-top: 12px; }
 .field .hint { margin-top: var(--s2); margin-bottom: 0; }
 
@@ -397,35 +405,43 @@ select {
 /* --- Кнопки ---
    Главное действие — залитое акцентом, вторичное — приглушённая плашка с
    рамкой. До этого и то и другое было серым прямоугольником, и глазу не за что
-   было зацепиться. */
+   было зацепиться.
+   Форма — капсула. Скруглённый прямоугольник был формой кнопок до iOS 26;
+   в последней версии система скруглила элементы управления до капсулы, и
+   прямоугольник со скруглением 12 рядом с ней читается как «почти айфон».
+   Высота 50 — системная для главного действия во всю ширину.
+   Тени нет: системные кнопки плоские, тень выдаёт веб. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--s2);
   width: 100%;
-  min-height: var(--tap);
-  padding: 12px 18px;
-  border-radius: var(--r-md);
+  min-height: 50px;
+  padding: 13px 20px;
+  border-radius: var(--r-pill);
   border: 1px solid transparent;
   background: var(--accent);
   color: var(--on-accent);
   font-family: inherit;
-  font-size: 16px;
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
   font-weight: 600;
+  letter-spacing: -0.2px;
   text-align: center;
   cursor: pointer;
   margin-bottom: var(--s2);
-  box-shadow: var(--shadow-1);
   transition: transform 0.12s ease, opacity 0.12s ease;
 }
 .btn:active { transform: scale(0.985); }
-.btn:disabled { opacity: 0.45; box-shadow: none; cursor: default; transform: none; }
+.btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+/* Второй из трёх системных видов — тонированная кнопка: приглушённая заливка и
+   текст акцентом. Раньше вторичная кнопка была белой плашкой с рамкой и рядом
+   с полем ввода выглядела ровно как поле. */
 .btn--secondary {
-  background: var(--group-bg);
-  color: var(--ink);
-  border-color: var(--hairline);
-  box-shadow: none;
+  background: var(--surface);
+  color: var(--accent);
+  border-color: transparent;
 }
 .btn--danger { background: var(--danger); color: #fff; }
 /* Красное, но не залитое: «Выйти» — не разрушительное действие, а заметное.
@@ -461,12 +477,12 @@ select {
 .btn-row .btn { margin-bottom: var(--s2); }
 .btn-row .btn--secondary { flex: 0 1 auto; width: auto; padding-left: var(--s4); padding-right: var(--s4); }
 /* Равные по смыслу действия — равными долями. */
-.btn-row--equal .btn { flex: 1 1 0; width: auto; min-width: 0; padding-left: var(--s2); padding-right: var(--s2); font-size: 14px; }
+.btn-row--equal .btn { flex: 1 1 0; width: auto; min-width: 0; padding-left: var(--s2); padding-right: var(--s2); font-size: var(--t-sub); }
 
 /* --- Карточки и строки списка --- */
 .card {
   background: var(--group-bg);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-lg);
   padding: var(--s3) var(--s4);
   margin-bottom: var(--s2);
   transition: transform 0.12s ease, background 0.12s ease;
@@ -597,7 +613,7 @@ select {
   justify-content: center;
   min-height: 68px;
   padding: var(--s3) var(--s4);
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
   background: var(--group-bg);
 }
 .tile--warn { background: rgba(201, 42, 42, 0.12); }
@@ -682,8 +698,8 @@ select {
   gap: var(--s3);
   min-height: 96px;
   padding: var(--s4);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  border-radius: var(--r-xl);
   background: var(--group-bg);
   color: var(--ink);
   font-family: inherit;
@@ -695,7 +711,7 @@ select {
 /* Плитка, которой ещё нечего открывать: пунктир вместо линии — то же самое, чем
    в чертежах помечают «предусмотрено место». Гасить её целиком нельзя: тогда
    она читается как сломанная. */
-.tile-btn--pending { border-style: dashed; }
+.tile-btn--pending { border-style: dashed; border-color: var(--hairline); }
 .tile-btn--pending .tile-ico { stroke: var(--muted); }
 .tile-btn--pending .tile-name { color: var(--muted); }
 .tile-ico {
