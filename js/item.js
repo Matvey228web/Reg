@@ -99,11 +99,12 @@ const ItemScreen = (() => {
         </div>
         <div class="btn-row btn-row--equal">
           <button class="btn btn--secondary" id="item-qr-big">Во весь экран</button>
-          <button class="btn btn--secondary" id="item-qr-download">Скачать PNG</button>
+          <button class="btn btn--secondary" id="item-qr-download">Сохранить</button>
           <button class="btn btn--secondary" id="item-qr-label">Этикетка</button>
         </div>
-        <p class="hint">Внутри Telegram скачивание файла часто блокируется вебвью —
-        тогда откройте QR во весь экран и отсканируйте его вторым телефоном.</p>
+        <p class="hint">Скачать файл напрямую из Telegram нельзя — это ограничение
+        мессенджера. «Сохранить» откроет системный лист «Поделиться», а если его
+        нет — картинку пришлёт бот в чат склада.</p>
       </div>
 
       <div class="section">
@@ -143,9 +144,8 @@ const ItemScreen = (() => {
     // жила только на экране создания новой позиции.
     const qrCanvas = document.getElementById("item-qr-canvas");
     QR.render(qrCanvas, item.item_id, 8);
-    document.getElementById("item-qr-download").addEventListener("click", () => {
-      QR.downloadCanvas(qrCanvas, `${item.item_id}.png`);
-    });
+    const dl = document.getElementById("item-qr-download");
+    dl.addEventListener("click", () => saveImageFor(qrCanvas, `${item.item_id}.png`, item.name, dl));
     document.getElementById("item-qr-big").addEventListener("click", () => {
       QR.showFullscreen(item.item_id, item.name);
     });

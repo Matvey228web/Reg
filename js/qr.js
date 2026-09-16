@@ -68,6 +68,59 @@ const QR = (() => {
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   }
 
+  // --- Как отдать картинку человеку ---
+  //
+  // Одного способа не существует, и это не наша недоделка.
+  //
+  //   1. Обычный браузер — <a download>, файл падает в загрузки. Работает.
+  //   2. Внутри Telegram скачивание не работает вовсе: атрибут download вебвью
+  //      не поддерживает, и вместо сохранения он уходит по ссылке и показывает
+  //      голый файл без кнопки «назад». Удержание картинки тоже не работает —
+  //      системное меню «Сохранить в Фото» вебвью Telegram не показывает.
+  //      Остаётся системный лист «Поделиться» через navigator.share: оттуда
+  //      «Сохранить в Фото» есть.
+  //   3. Если и листа нет — картинку приносит бот в чат склада.
+  //
+  // Файл собираем СИНХРОННО из data-URL, а не через canvas.toBlob: toBlob
+  // асинхронный, и к моменту вызова share жест пользователя уже «протух» —
+  // iOS такой вызов отклоняет.
+  function canvasToFile(canvas, filename) {
+    try {
+      var bin = atob(canvas.toDataURL("image/png").split(",")[1]);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new File([bytes], filename, { type: "image/png" });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Возвращает, каким путём ушло: download | share | cancelled | bot.
+  // Вызывающий решает, что сказать человеку: у листа «Поделиться» своя
+  // обратная связь, а у бота её нет.
+  async function deliverCanvas(canvas, filename, title) {
+    if (!TG.isAvailable()) {
+      downloadCanvas(canvas, filename);
+      return "download";
+    }
+
+    var file = canvasToFile(canvas, filename);
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: title || filename });
+        return "share";
+      } catch (e) {
+        // Человек закрыл лист — это не ошибка и не повод дёргать бота.
+        if (e && e.name === "AbortError") return "cancelled";
+      }
+    }
+
+    await apiPost("/labels/send", {
+      files: [{ name: filename, png_base64: canvas.toDataURL("image/png").split(",")[1] }],
+    });
+    return "bot";
+  }
+
   // Картинка во весь экран. Отдельно от showFullscreen, потому что показываем
   // не QR, а готовую этикетку, и показываем именно <img>, а не <canvas>:
   // по картинке в вебвью работает долгое нажатие с системным «Сохранить в Фото»
@@ -75,7 +128,7 @@ const QR = (() => {
   // мини-приложения на устройство: атрибут download внутри Telegram не работает,
   // вебвью вместо сохранения уходит по ссылке и показывает голый файл без
   // кнопки «назад».
-  function showImage(canvas, title, note) {
+  function showImage(canvas, title, note, onSave) {
     const overlay = document.createElement("div");
     overlay.className = "qr-overlay";
     overlay.innerHTML = `
@@ -83,15 +136,17 @@ const QR = (() => {
         <img class="qr-overlay-img" alt="${escapeHtml(title || "")}" />
         ${title ? `<div class="qr-overlay-title">${escapeHtml(title)}</div>` : ""}
         ${note ? `<div class="qr-overlay-caption">${escapeHtml(note)}</div>` : ""}
-        <button class="btn" id="qr-overlay-close">Закрыть</button>
+        ${onSave ? `<button class="btn" id="qr-overlay-save">Сохранить картинку</button>` : ""}
+        <button class="btn btn--secondary" id="qr-overlay-close">Закрыть</button>
       </div>`;
     document.body.appendChild(overlay);
     overlay.querySelector(".qr-overlay-img").src = canvas.toDataURL("image/png");
 
     const close = () => overlay.remove();
     document.getElementById("qr-overlay-close").addEventListener("click", close);
-    // По самой картинке не закрываем: там живёт долгое нажатие, и случайный
-    // тап не должен убирать то, что человек собрался сохранять.
+    if (onSave) document.getElementById("qr-overlay-save").addEventListener("click", onSave);
+    // По самой картинке не закрываем: случайный тап не должен убирать то,
+    // что человек рассматривает.
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     return overlay;
   }
@@ -110,5 +165,6 @@ const QR = (() => {
     TG.closeScanQr();
   }
 
-  return { render, downloadCanvas, showFullscreen, showImage, scan, scanContinuous, stopScan };
+  return { render, downloadCanvas, deliverCanvas, showFullscreen, showImage,
+           scan, scanContinuous, stopScan };
 })();

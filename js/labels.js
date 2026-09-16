@@ -109,11 +109,12 @@ const LabelsScreen = (() => {
       Дешёвые принтеры этикеток с Bluetooth (Niimbot, Phomemo) из браузера печатать
       не умеют вообще — для них сохраните картинками и напечатайте из приложения
       принтера.</p>
-      <p class="hint">Нажмите на образец внизу — этикетка откроется крупно, и её
-      можно сохранить в фото долгим нажатием. Пачку «Сохранить картинками»
-      отправит бот в чат склада одним архивом: сохранять их по одной из Telegram
-      нельзя, это ограничение самого мессенджера. Печать из Telegram он тоже
-      блокирует — для неё откройте адрес приложения в Safari.</p>
+      <p class="hint">Нажмите на образец внизу — этикетка откроется крупно, и там
+      же кнопка «Сохранить картинку». Скачивать файлы из Telegram нельзя, это
+      ограничение мессенджера: кнопка откроет системный лист «Поделиться», а если
+      его нет — картинку пришлёт бот в чат склада. Пачку «Сохранить картинками»
+      бот присылает одним архивом. Печать из Telegram тоже заблокирована — для
+      неё откройте адрес приложения в Safari.</p>
       <div class="section-title">Размер в настоящую величину</div>
       <div class="size-row" id="labels-sizes"></div>
       <p class="hint">Нажмите на размер, чтобы взять его. Ряд прокручивается вбок:
@@ -213,12 +214,17 @@ const LabelsScreen = (() => {
   }
 
   function showLabel(item, size) {
+    const canvas = labelCanvas(item, size, caption(), FILE_SCALE);
+    // Кнопкой, а не «удерживайте картинку»: системное меню по долгому нажатию
+    // вебвью Telegram не показывает — подсказка обещала то, чего не бывает.
     QR.showImage(
-      labelCanvas(item, size, caption(), FILE_SCALE),
+      canvas,
       item.name + " · " + item.item_id,
       TG.isAvailable()
-        ? "Удерживайте картинку, чтобы сохранить её в фото или отправить."
-        : "Нажмите картинку правой кнопкой, чтобы сохранить.");
+        ? "Скачать напрямую из Telegram нельзя — кнопка откроет системный лист «Поделиться», а если его нет, картинку пришлёт бот."
+        : "",
+      () => saveImageFor(canvas, fileName(item, size), item.name,
+                         document.getElementById("qr-overlay-save")));
   }
 
   // Ряд размеров: одна и та же этикетка во всех форматах, в настоящую величину.
@@ -574,7 +580,9 @@ const LabelsScreen = (() => {
     }
 
     if (items.length === 1) {
-      showLabel(items[0], size);
+      const btn = document.getElementById("labels-save");
+      saveImageFor(labelCanvas(items[0], size, caption(), FILE_SCALE),
+                   fileName(items[0], size), items[0].name, btn);
       return;
     }
     sendToChat(size);

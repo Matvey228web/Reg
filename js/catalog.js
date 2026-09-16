@@ -255,14 +255,16 @@ const CatalogScreen = (() => {
         <canvas id="new-item-qr-canvas"></canvas>
         <div class="qr-id">${escapeHtml(itemId)}</div>
       </div>
-      <button class="btn" id="qr-download-btn">Скачать QR (PNG)</button>
-      <p class="hint">Распечатать этикетку можно с компьютера, открыв сохранённый файл, либо переслав его себе через Telegram.</p>
+      <button class="btn" id="qr-download-btn">Сохранить QR</button>
+      <p class="hint">Скачать файл напрямую из Telegram нельзя — это ограничение
+      мессенджера. Кнопка откроет системный лист «Поделиться», а если его нет —
+      картинку пришлёт бот в чат склада. Печатать этикетку удобнее с экрана
+      «Этикетки».</p>
     `;
     const canvas = document.getElementById("new-item-qr-canvas");
     QR.render(canvas, itemId, 8);
-    document.getElementById("qr-download-btn").addEventListener("click", () => {
-      QR.downloadCanvas(canvas, `${itemId}.png`);
-    });
+    const dl = document.getElementById("qr-download-btn");
+    dl.addEventListener("click", () => saveImageFor(canvas, `${itemId}.png`, itemId, dl));
   }
 
   function onShow() {

@@ -111,3 +111,29 @@ function skeleton(count = 4) {
     `<div class="skeleton-card"></div>`.repeat(count) +
     `</div>`;
 }
+
+// Отдать картинку человеку и сказать, чем кончилось. Сам выбор пути — в
+// QR.deliverCanvas: в браузере скачивание, внутри Telegram системный лист
+// «Поделиться», а если его нет — бот в чат склада.
+// Кнопку на время блокируем: за ботом идёт запрос в таблицу на 5–8 секунд,
+// и молчащая кнопка читается как зависшая.
+async function saveImageFor(canvas, filename, title, btn) {
+  const before = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Сохраняем…"; }
+  try {
+    const via = await QR.deliverCanvas(canvas, filename, title);
+    if (via === "bot") {
+      TG.hapticSuccess();
+      TG.showAlert("Скачать напрямую из Telegram нельзя — картинку прислал бот в чат склада.");
+    } else if (via === "share" || via === "download") {
+      TG.hapticSuccess();
+    }
+    return via;
+  } catch (err) {
+    TG.hapticError();
+    TG.showAlert(err.message || "Не получилось сохранить картинку");
+    return "error";
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = before; }
+  }
+}
