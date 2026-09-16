@@ -8,13 +8,18 @@
 const SettingsScreen = (() => {
   let data = null;   // { settings, categories, limits, maintenance }
 
+  // Подписи короткие: это названия строк, а не предложения. Объяснение к каждой
+  // приходит с бэкенда в limits и печатается пояснением под строкой — раньше
+  // предложение стояло подписью, занимало две строки и выдавливало значение
+  // за край. Подсказка в пустом поле нужна затем же: внутри группы у поля нет
+  // ни рамки, ни заливки, и пустое оно ничем не отличается от пустого места.
   const FIELDS = [
-    { key: "session_ttl_hours", label: "Сколько часов держать сотрудника в системе без повторного входа" },
-    { key: "max_login_attempts", label: "Сколько неверных PIN до блокировки входа" },
-    { key: "login_lock_minutes", label: "На сколько минут блокировать вход" },
-    { key: "import_source_id", label: "Идентификатор исходной таблицы для импорта", text: true },
-    { key: "notify_chat_id", label: "Чат склада для уведомлений бота", text: true },
-    { key: "site_url", label: "Адрес сайта проката", text: true },
+    { key: "session_ttl_hours", label: "Срок входа, часов" },
+    { key: "max_login_attempts", label: "Попыток до блокировки" },
+    { key: "login_lock_minutes", label: "Блокировка, минут" },
+    { key: "import_source_id", label: "Исходная таблица", text: true, ph: "идентификатор" },
+    { key: "notify_chat_id", label: "Чат склада", text: true, ph: "-1001234567890" },
+    { key: "site_url", label: "Сайт проката", text: true, ph: "https://" },
   ];
 
   async function load() {
@@ -105,18 +110,21 @@ const SettingsScreen = (() => {
         <button class="btn btn--secondary" id="settings-cat-add-toggle">+ Новая категория</button>
         <div id="settings-cat-form" style="display:none;" class="section">
           <div id="settings-cat-error"></div>
-          <div class="field">
-            <label for="settings-cat-code">Код — три латинские буквы</label>
-            <input id="settings-cat-code" type="text" maxlength="3" placeholder="BAT"
-                   autocapitalize="characters" autocorrect="off" spellcheck="false" />
-          </div>
-          <div class="field">
-            <label for="settings-cat-label">Название</label>
-            <input id="settings-cat-label" type="text" placeholder="Аккумуляторы" />
-          </div>
-          <div class="toggle-row">
-            <label for="settings-cat-new-qty">Считать количеством, без личных номеров</label>
-            <input type="checkbox" id="settings-cat-new-qty" />
+          <div class="form-group">
+            <div class="field">
+              <label for="settings-cat-code">Код</label>
+              <input id="settings-cat-code" type="text" maxlength="3" placeholder="BAT"
+                     autocapitalize="characters" autocorrect="off" spellcheck="false" />
+              <p class="hint">Три латинские буквы.</p>
+            </div>
+            <div class="field">
+              <label for="settings-cat-label">Название</label>
+              <input id="settings-cat-label" type="text" placeholder="Аккумуляторы" />
+            </div>
+            <div class="toggle-row">
+              <label for="settings-cat-new-qty">Считать количеством</label>
+              <input type="checkbox" id="settings-cat-new-qty" />
+            </div>
           </div>
           <p class="hint">«Количеством» — для того, на что не наклеить QR: мешки, флаги,
           струбцины, расходники. Такая позиция живёт одной строкой с остатком.
@@ -129,14 +137,17 @@ const SettingsScreen = (() => {
       <div class="section">
         <h2>Сроки и защита входа</h2>
         <div id="settings-fields-error"></div>
-        ${FIELDS.map((f) => `
-          <div class="field">
-            <label for="set-${f.key}">${escapeHtml(f.label)}</label>
-            <input id="set-${f.key}" type="${f.text ? "text" : "number"}"
-                   value="${escapeHtml(String(s[f.key] === undefined ? "" : s[f.key]))}"
-                   ${f.text ? 'autocapitalize="off" autocorrect="off" spellcheck="false"' : ""} />
-            ${hints[f.key] ? `<p class="hint">${escapeHtml(hints[f.key])}</p>` : ""}
-          </div>`).join("")}
+        <div class="form-group">
+          ${FIELDS.map((f) => `
+            <div class="field${f.text ? " field--stacked" : ""}">
+              <label for="set-${f.key}">${escapeHtml(f.label)}</label>
+              <input id="set-${f.key}" type="${f.text ? "text" : "number"}"
+                     value="${escapeHtml(String(s[f.key] === undefined ? "" : s[f.key]))}"
+                     ${f.ph ? `placeholder="${escapeHtml(f.ph)}"` : ""}
+                     ${f.text ? 'autocapitalize="off" autocorrect="off" spellcheck="false"' : ""} />
+              ${hints[f.key] ? `<p class="hint">${escapeHtml(hints[f.key])}</p>` : ""}
+            </div>`).join("")}
+        </div>
         <button class="btn" id="settings-save">Сохранить</button>
       </div>
 
@@ -222,13 +233,17 @@ const SettingsScreen = (() => {
       <div class="card">
         <div class="card-title">${escapeHtml(c.label)}${c.by_qty ? `<span class="badge">количеством</span>` : ""}</div>
         <div class="card-sub">${escapeHtml(c.code)} · номер ${escapeHtml(c.num)}</div>
-        <div class="field" style="margin-top:8px;">
-          <input type="text" data-cat-label="${escapeHtml(c.code)}" value="${escapeHtml(c.label)}" />
-        </div>
-        <div class="toggle-row">
-          <label for="cat-qty-${escapeHtml(c.code)}">Считать количеством, без личных номеров</label>
-          <input type="checkbox" id="cat-qty-${escapeHtml(c.code)}"
-                 data-cat-qty="${escapeHtml(c.code)}" ${c.by_qty ? "checked" : ""} />
+        <div class="form-group form-group--inset">
+          <div class="field">
+            <label for="cat-label-${escapeHtml(c.code)}">Название</label>
+            <input type="text" id="cat-label-${escapeHtml(c.code)}"
+                   data-cat-label="${escapeHtml(c.code)}" value="${escapeHtml(c.label)}" />
+          </div>
+          <div class="toggle-row">
+            <label for="cat-qty-${escapeHtml(c.code)}">Считать количеством</label>
+            <input type="checkbox" id="cat-qty-${escapeHtml(c.code)}"
+                   data-cat-qty="${escapeHtml(c.code)}" ${c.by_qty ? "checked" : ""} />
+          </div>
         </div>
         <button class="btn btn--secondary" data-cat-save="${escapeHtml(c.code)}" style="width:auto;">
           Сохранить

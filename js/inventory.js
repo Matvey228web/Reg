@@ -257,6 +257,7 @@ const InventoryScreen = (() => {
       <p class="hint">Сверка идёт по кэшу каталога и во время обхода не делает ни
       одного запроса — иначе каждый предмет стоил бы 5–8 секунд ожидания.
       Сканируйте подряд, окно сканера закрывать не нужно.</p>
+      <div class="form-group">
       <div class="field">
         <label for="inventory-scope">Что сверяем</label>
         <select id="inventory-scope">
@@ -275,6 +276,7 @@ const InventoryScreen = (() => {
         из области, и сходится склад или нет будет видно по ним. Полный обход на
         629 позиций — это вечер и шестьсот строк в журнале; двадцать случайных
         занимают десять минут и ловят ровно то же расхождение, если оно системное.</p>
+      </div>
       </div>
       <button class="btn" id="inventory-start">Начать сверку</button>`;
 
@@ -320,12 +322,14 @@ const InventoryScreen = (() => {
       </div>
       ${lastMessage ? `<div id="inventory-last" class="hint">${escapeHtml(lastMessage)}</div>` : ""}
 
-      <div class="field">
-        <label for="inventory-manual">Ввести номер руками</label>
-        <input type="text" id="inventory-manual" inputmode="numeric"
-               placeholder="${escapeHtml(lastCode || "010101")}" />
-        <button class="btn btn--secondary" id="inventory-add" style="margin-top:8px;">Отметить</button>
+      <div class="form-group">
+        <div class="field">
+          <label for="inventory-manual">Номер руками</label>
+          <input type="text" id="inventory-manual" inputmode="numeric"
+                 placeholder="${escapeHtml(lastCode || "010101")}" />
+        </div>
       </div>
+      <button class="btn btn--secondary" id="inventory-add">Отметить</button>
 
       ${byQtyFound().length ? `
       <div class="section">
@@ -436,6 +440,7 @@ const InventoryScreen = (() => {
     const bulk = categoryByQty(form.category);
     const isNew = form.model === "__new";
     return `
+      <div class="form-group">
       <div class="field">
         <label for="inventory-new-category">Категория</label>
         <select id="inventory-new-category">
@@ -474,6 +479,7 @@ const InventoryScreen = (() => {
         <label for="inventory-new-inventory">Инвентарный номер</label>
         <input type="text" id="inventory-new-inventory" value="${escapeHtml(form.inventory)}" />
       </div>`}
+      </div>
       <div id="inventory-new-error"></div>
       <p class="hint">Это единственное место сверки, которому нужна сеть: номер
       выдаёт таблица, придумать его на телефоне нельзя — иначе два человека за

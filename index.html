@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20260916h" />
+<link rel="stylesheet" href="css/style.css?v=20260916i" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20260916h"></script>
+<script src="js/vendor/qrcode-generator.js?v=20260916i"></script>
 </head>
 <body>
 <div id="app">
@@ -34,7 +34,19 @@
       <span id="back-label">Назад</span>
     </button>
     <div class="wordmark">
-      <span class="clap" aria-hidden="true"></span>
+      <!-- Лого Киноколледжа #40 с сайта колледжа (logo-basic.svg). Контуры — как
+           в исходнике, изменён только цвет: в файле он зашит зелёным #396439,
+           а нам нужен цвет темы Telegram. Поэтому заливка задана currentColor,
+           а сам цвет берётся из CSS (.logo-mark). Файл не подтягиваем из сети:
+           система должна работать сама по себе, и чужой домен в зависимостях
+           означал бы, что без него не откроется вывеска. -->
+      <svg class="logo-mark" viewBox="0 0 240 240" aria-hidden="true">
+        <path d="M122.23,228c-1.07,0-1.07,0-19.25-16.87c-9.36-8.69-22.35-20.8-38.6-35.99C35.76,148.37,8.36,122.65,8.3,122.59c-0.67-0.64-1.06-1.54-1.06-2.47c0-0.93,0.38-1.83,1.06-2.48l111.63-104.6c1.34-1.27,3.43-1.25,4.75,0.05c1.29,1.28,1.35,3.35,0.13,4.73c-37.63,42.39-50.75,76.52-53.83,85.75h51.29c1.63,0,3.04,1.16,3.35,2.76c0.31,1.6-0.55,3.2-2.06,3.82l-24.26,9.91l24.23,9.52c1.53,0.63,2.4,2.23,2.09,3.83c-0.31,1.6-1.72,2.76-3.35,2.76H71.22c2.99,9.26,15.89,43.74,53.56,86.08c1.03,1.16,1.2,2.8,0.42,4.09c-0.53,0.88-1.46,1.48-2.47,1.62C122.52,227.99,122.38,228,122.23,228z M122.62,15.9L122.62,15.9C122.62,15.9,122.62,15.9,122.62,15.9z"/>
+        <path d="M134.53,12.1V228h63V12.1H134.53z M143.49,21h9.04v9.04h-9.04V21z M143.49,38.48h9.04v9.04h-9.04V38.48z M143.49,57.35h9.04v9.04h-9.04V57.35z M188.97,112.99c0.52,0,0.98,0.37,1.08,0.89c0.1,0.51-0.18,1.03-0.66,1.23l-10.68,4.37l10.67,4.19c0.49,0.2,0.77,0.72,0.67,1.23c-0.1,0.51-0.55,0.88-1.08,0.88h-21.4c0.97,3.14,6.08,17.77,22.21,35.89c0.33,0.37,0.39,0.9,0.14,1.32c-0.17,0.29-0.47,0.48-0.8,0.52l-0.16,0.01c-0.7,0-46.16-42.81-46.62-43.24c-0.22-0.21-0.34-0.5-0.34-0.8c0-0.3,0.12-0.59,0.34-0.79l45.88-42.99c0.43-0.41,1.1-0.4,1.53,0.02c0.42,0.41,0.43,1.08,0.04,1.52c-16.11,18.15-21.32,32.63-22.32,35.76H188.97z"/>
+        <path d="M189.2,162.62l0.29,0.11l-0.42-0.25c0.07,0.06,0.12,0.1,0.15,0.12L189.2,162.62z"/>
+        <path d="M233.22,145.28c-0.4,0-26.54-24.61-26.8-24.86c-0.13-0.12-0.2-0.29-0.2-0.46c0-0.17,0.07-0.34,0.19-0.46l26.38-24.72c0.25-0.23,0.63-0.23,0.88,0.01c0.24,0.24,0.25,0.62,0.02,0.87c-9.26,10.43-12.26,18.76-12.83,20.56h12.36c0.3,0,0.56,0.21,0.62,0.51c0.06,0.29-0.1,0.59-0.38,0.71l-6.14,2.51l6.14,2.41c0.28,0.12,0.44,0.41,0.38,0.71c-0.06,0.29-0.32,0.51-0.62,0.51h-12.3c0.56,1.8,3.5,10.22,12.77,20.64c0.19,0.21,0.22,0.52,0.08,0.76c-0.1,0.16-0.27,0.28-0.46,0.3L233.22,145.28z M233.36,144.76l0.16,0.06l-0.24-0.15c0.04,0.03,0.07,0.06,0.09,0.07L233.36,144.76z"/>
+        <path d="M233.24,145.78h-0.02c-0.23,0-0.62,0-27.14-25c-0.23-0.21-0.36-0.51-0.36-0.82c0-0.31,0.13-0.6,0.35-0.82l26.38-24.72c0.44-0.42,1.13-0.41,1.57,0.02c0.43,0.42,0.45,1.11,0.05,1.56c-8.36,9.42-11.59,17.15-12.51,19.73h11.67c0.54,0,1.01,0.38,1.11,0.91c0.1,0.53-0.18,1.06-0.68,1.26l-4.99,2.04l4.97,1.95c0.51,0.21,0.8,0.74,0.69,1.27c-0.1,0.53-0.57,0.91-1.11,0.91h-11.61c0.89,2.59,4.07,10.39,12.45,19.8c0.34,0.38,0.39,0.92,0.13,1.35c-0.18,0.29-0.49,0.49-0.82,0.54L233.24,145.78z"/>
+      </svg>
       <span class="wordmark-text">
         <span class="wordmark-name">Mifs<b>Rent</b></span>
         <span class="wordmark-sub">Киноколледж #40</span>
@@ -52,13 +64,15 @@
     <p class="hint" id="login-greeting">Учёт оборудования на складе</p>
     <div id="login-error"></div>
     <form id="login-form">
-      <div class="field">
-        <label for="login-input">Логин</label>
-        <input id="login-input" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required />
-      </div>
-      <div class="field">
-        <label for="pin-input">PIN-код</label>
-        <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
+      <div class="form-group">
+        <div class="field">
+          <label for="login-input">Логин</label>
+          <input id="login-input" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required />
+        </div>
+        <div class="field">
+          <label for="pin-input">PIN-код</label>
+          <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
+        </div>
       </div>
       <button type="submit" class="btn" id="login-submit">Войти</button>
     </form>
@@ -124,37 +138,39 @@
     <div id="catalog-add-form" style="display:none;" class="section">
       <h2>Новое оборудование</h2>
       <div id="catalog-add-error"></div>
-      <div class="field">
-        <label for="new-item-category">Категория</label>
-        <select id="new-item-category"></select>
-      </div>
-      <div class="field">
-        <label for="new-item-model">Модель</label>
-        <select id="new-item-model"></select>
-      </div>
-      <div class="field" id="new-model-wrap" style="display:none;">
-        <label for="new-item-name">Название новой модели</label>
-        <input id="new-item-name" type="text" />
-      </div>
-      <!-- Количество спрашиваем только у категорий, которые считаются кучей:
-           у камеры «сколько штук» смысла не имеет, у сэндбэгов — только оно. -->
-      <div class="field" id="new-item-qty-wrap" style="display:none;">
-        <label for="new-item-qty">Сколько штук</label>
-        <input id="new-item-qty" type="number" inputmode="numeric" min="1" step="1" value="1" />
-        <p class="hint">Личных номеров и QR у таких позиций нет — склад считает их количеством.
-        Если позиция уже заведена, это добавит к остатку.</p>
-      </div>
-      <div class="field" id="new-item-serial-wrap">
-        <label for="new-item-serial">Серийный номер</label>
-        <input id="new-item-serial" type="text" />
-      </div>
-      <div class="field" id="new-item-inventory-wrap">
-        <label for="new-item-inventory">Инвентарный номер</label>
-        <input id="new-item-inventory" type="text" />
-      </div>
-      <div class="field">
-        <label for="new-item-notes">Заметки о состоянии</label>
-        <textarea id="new-item-notes"></textarea>
+      <div class="form-group">
+        <div class="field">
+          <label for="new-item-category">Категория</label>
+          <select id="new-item-category"></select>
+        </div>
+        <div class="field">
+          <label for="new-item-model">Модель</label>
+          <select id="new-item-model"></select>
+        </div>
+        <div class="field" id="new-model-wrap" style="display:none;">
+          <label for="new-item-name">Новая модель</label>
+          <input id="new-item-name" type="text" />
+        </div>
+        <!-- Количество спрашиваем только у категорий, которые считаются кучей:
+             у камеры «сколько штук» смысла не имеет, у сэндбэгов — только оно. -->
+        <div class="field" id="new-item-qty-wrap" style="display:none;">
+          <label for="new-item-qty">Сколько штук</label>
+          <input id="new-item-qty" type="number" inputmode="numeric" min="1" step="1" value="1" />
+          <p class="hint">Личных номеров и QR у таких позиций нет — склад считает их количеством.
+          Если позиция уже заведена, это добавит к остатку.</p>
+        </div>
+        <div class="field" id="new-item-serial-wrap">
+          <label for="new-item-serial">Серийный номер</label>
+          <input id="new-item-serial" type="text" />
+        </div>
+        <div class="field" id="new-item-inventory-wrap">
+          <label for="new-item-inventory">Инвентарный номер</label>
+          <input id="new-item-inventory" type="text" />
+        </div>
+        <div class="field field--stacked">
+          <label for="new-item-notes">Заметки о состоянии</label>
+          <textarea id="new-item-notes"></textarea>
+        </div>
       </div>
       <button class="btn" id="new-item-submit">Создать и получить QR</button>
     </div>
@@ -301,17 +317,19 @@
     <h1>Смена PIN</h1>
     <div id="pin-change-error"></div>
     <p class="hint" id="pin-change-hint">Новый PIN — от 4 до 6 цифр.</p>
-    <div class="field">
-      <label for="pin-current">Текущий PIN</label>
-      <input id="pin-current" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" />
-    </div>
-    <div class="field">
-      <label for="pin-new">Новый PIN</label>
-      <input id="pin-new" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
-    </div>
-    <div class="field">
-      <label for="pin-repeat">Новый PIN ещё раз</label>
-      <input id="pin-repeat" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+    <div class="form-group">
+      <div class="field">
+        <label for="pin-current">Текущий PIN</label>
+        <input id="pin-current" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" />
+      </div>
+      <div class="field">
+        <label for="pin-new">Новый PIN</label>
+        <input id="pin-new" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+      </div>
+      <div class="field">
+        <label for="pin-repeat">Ещё раз</label>
+        <input id="pin-repeat" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" />
+      </div>
     </div>
     <button class="btn" id="pin-change-submit">Сменить PIN</button>
   </div>
@@ -341,29 +359,29 @@
 
 </div>
 
-<script src="js/config.js?v=20260916h"></script>
-<script src="js/util.js?v=20260916h"></script>
-<script src="js/suggest.js?v=20260916h"></script>
-<script src="js/cache.js?v=20260916h"></script>
-<script src="js/mock-data.js?v=20260916h"></script>
-<script src="js/api.js?v=20260916h"></script>
-<script src="js/telegram.js?v=20260916h"></script>
-<script src="js/router.js?v=20260916h"></script>
-<script src="js/fab.js?v=20260916h"></script>
-<script src="js/qr.js?v=20260916h"></script>
-<script src="js/swipe.js?v=20260916h"></script>
-<script src="js/auth.js?v=20260916h"></script>
-<script src="js/catalog.js?v=20260916h"></script>
-<script src="js/scan.js?v=20260916h"></script>
-<script src="js/item.js?v=20260916h"></script>
-<script src="js/order.js?v=20260916h"></script>
-<script src="js/repair.js?v=20260916h"></script>
-<script src="js/orders.js?v=20260916h"></script>
-<script src="js/staff.js?v=20260916h"></script>
-<script src="js/settings.js?v=20260916h"></script>
-<script src="js/labels.js?v=20260916h"></script>
-<script src="js/inventory.js?v=20260916h"></script>
-<script src="js/pin.js?v=20260916h"></script>
-<script src="js/app.js?v=20260916h"></script>
+<script src="js/config.js?v=20260916i"></script>
+<script src="js/util.js?v=20260916i"></script>
+<script src="js/suggest.js?v=20260916i"></script>
+<script src="js/cache.js?v=20260916i"></script>
+<script src="js/mock-data.js?v=20260916i"></script>
+<script src="js/api.js?v=20260916i"></script>
+<script src="js/telegram.js?v=20260916i"></script>
+<script src="js/router.js?v=20260916i"></script>
+<script src="js/fab.js?v=20260916i"></script>
+<script src="js/qr.js?v=20260916i"></script>
+<script src="js/swipe.js?v=20260916i"></script>
+<script src="js/auth.js?v=20260916i"></script>
+<script src="js/catalog.js?v=20260916i"></script>
+<script src="js/scan.js?v=20260916i"></script>
+<script src="js/item.js?v=20260916i"></script>
+<script src="js/order.js?v=20260916i"></script>
+<script src="js/repair.js?v=20260916i"></script>
+<script src="js/orders.js?v=20260916i"></script>
+<script src="js/staff.js?v=20260916i"></script>
+<script src="js/settings.js?v=20260916i"></script>
+<script src="js/labels.js?v=20260916i"></script>
+<script src="js/inventory.js?v=20260916i"></script>
+<script src="js/pin.js?v=20260916i"></script>
+<script src="js/app.js?v=20260916i"></script>
 </body>
 </html>

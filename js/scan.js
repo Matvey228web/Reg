@@ -221,7 +221,7 @@ const ScanScreen = (() => {
     if (!box) return;
     if (mode === "checkout") {
       box.innerHTML = `
-        <div class="section">
+        <div class="section form-group">
           <div class="field">
             <label for="scan-order">Заказ</label>
             ${lockedOrder ? `
@@ -250,7 +250,7 @@ const ScanScreen = (() => {
             <input type="date" id="scan-return-date" />
             <p class="hint">Подставляется из заказа; можно поправить.</p>
           </div>
-          <div class="field">
+          <div class="field field--stacked">
             <label for="scan-notes">Заметки</label>
             <textarea id="scan-notes"></textarea>
           </div>
@@ -270,7 +270,7 @@ const ScanScreen = (() => {
       confirmButton("Подтвердить выдачу", submitCheckout);
     } else if (mode === "checkin") {
       box.innerHTML = `
-        <div class="section">
+        <div class="section form-group">
           ${currentItem.by_qty ? `
           <div class="field">
             <label for="scan-qty-in">Сколько принимаем</label>
@@ -282,8 +282,9 @@ const ScanScreen = (() => {
             <label for="scan-has-defect">Обнаружен дефект?</label>
             <input type="checkbox" id="scan-has-defect" />
           </div>
-          <div id="scan-defect-fields" style="display:none;">
-            <div class="field">
+        </div>
+        <div id="scan-defect-fields" class="form-group" style="display:none;">
+            <div class="field field--stacked">
               <label for="scan-defect-desc">Описание дефекта</label>
               <textarea id="scan-defect-desc"></textarea>
             </div>
@@ -295,8 +296,9 @@ const ScanScreen = (() => {
                 <option value="Out of Service">Не работает — снять с выдачи</option>
               </select>
             </div>
-          </div>
-          <div class="field">
+        </div>
+        <div class="form-group">
+          <div class="field field--stacked">
             <label for="scan-checkin-notes">Заметки</label>
             <textarea id="scan-checkin-notes"></textarea>
           </div>
@@ -307,8 +309,8 @@ const ScanScreen = (() => {
       confirmButton("Подтвердить приём", submitCheckin);
     } else if (mode === "defect") {
       box.innerHTML = `
-        <div class="section">
-          <div class="field">
+        <div class="section form-group">
+          <div class="field field--stacked">
             <label for="scan-standalone-desc">Описание дефекта</label>
             <textarea id="scan-standalone-desc"></textarea>
           </div>

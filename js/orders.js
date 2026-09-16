@@ -133,11 +133,13 @@ const OrdersScreen = (() => {
     return `
       <h2>Новый заказ</h2>
       <div id="orders-add-error"></div>
-      <div class="field">
-        <label for="orders-paste">Сообщение бота о заказе</label>
-        <textarea id="orders-paste" rows="6" placeholder="Заказ №1525686941&#10;1. GODOX OCTABOX 120: 0 (1 x 0.00)&#10;…"></textarea>
-        <p class="hint">Скопируйте сообщение из чата целиком — номер, состав и данные
-        разберутся сами. Сохранение произойдёт только после вашего подтверждения.</p>
+      <div class="form-group">
+        <div class="field field--stacked">
+          <label for="orders-paste">Сообщение бота о заказе</label>
+          <textarea id="orders-paste" rows="6" placeholder="Заказ №1525686941&#10;1. GODOX OCTABOX 120: 0 (1 x 0.00)&#10;…"></textarea>
+          <p class="hint">Скопируйте сообщение из чата целиком — номер, состав и данные
+          разберутся сами. Сохранение произойдёт только после вашего подтверждения.</p>
+        </div>
       </div>
       <button class="btn" id="orders-parse-btn">Разобрать</button>
       <button class="btn btn--secondary" id="orders-manual-btn">Завести вручную</button>`;
@@ -149,30 +151,34 @@ const OrdersScreen = (() => {
       <div id="orders-add-error"></div>
       <p class="hint">Состав здесь не заполняется: выдача пойдёт как «вне заказа»,
       это нормально. Если сообщение бота есть — лучше вставить его.</p>
-      <div class="field"><label for="mo-no">Номер заказа</label>
-        <input id="mo-no" type="text" inputmode="numeric" /></div>
-      <div class="field"><label for="mo-name">ФИО арендатора</label>
-        <input id="mo-name" type="text" /></div>
-      <div class="field"><label for="mo-phone">Телефон</label>
-        <input id="mo-phone" type="tel" placeholder="+7…" /></div>
-      <div class="field"><label for="mo-tg">Telegram</label>
-        <input id="mo-tg" type="text" placeholder="@ник" /></div>
-      <div class="toggle-row">
-        <label for="mo-minor">Арендатор несовершеннолетний</label>
-        <input id="mo-minor" type="checkbox" />
+      <div class="form-group">
+        <div class="field"><label for="mo-no">Номер заказа</label>
+          <input id="mo-no" type="text" inputmode="numeric" /></div>
+        <div class="field"><label for="mo-name">ФИО арендатора</label>
+          <input id="mo-name" type="text" /></div>
+        <div class="field"><label for="mo-phone">Телефон</label>
+          <input id="mo-phone" type="tel" placeholder="+7…" /></div>
+        <div class="field"><label for="mo-tg">Telegram</label>
+          <input id="mo-tg" type="text" placeholder="@ник" /></div>
+        <div class="toggle-row">
+          <label for="mo-minor">Несовершеннолетний</label>
+          <input id="mo-minor" type="checkbox" />
+        </div>
       </div>
-      <div id="mo-guardian" style="display:none;">
+      <div id="mo-guardian" class="form-group" style="display:none;">
         <div class="field"><label for="mo-gname">ФИО представителя</label>
           <input id="mo-gname" type="text" /></div>
-        <div class="field"><label for="mo-gphone">Телефон представителя</label>
+        <div class="field"><label for="mo-gphone">Его телефон</label>
           <input id="mo-gphone" type="tel" /></div>
       </div>
-      <div class="field"><label for="mo-issue">Дата выдачи</label>
-        <input id="mo-issue" type="date" /></div>
-      <div class="field"><label for="mo-return">Дата возврата</label>
-        <input id="mo-return" type="date" /></div>
-      <div class="field"><label for="mo-project">Проект</label>
-        <input id="mo-project" type="text" /></div>
+      <div class="form-group">
+        <div class="field"><label for="mo-issue">Дата выдачи</label>
+          <input id="mo-issue" type="date" /></div>
+        <div class="field"><label for="mo-return">Дата возврата</label>
+          <input id="mo-return" type="date" /></div>
+        <div class="field"><label for="mo-project">Проект</label>
+          <input id="mo-project" type="text" /></div>
+      </div>
       <button class="btn" id="orders-manual-submit">Создать заказ</button>
       <button class="btn btn--secondary" id="orders-back-to-paste">← К вставке сообщения</button>`;
   }

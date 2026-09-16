@@ -216,26 +216,21 @@ html, body {
 
 .wordmark { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; }
 
-/* Хлопушка, нарисованная границей и полосками: тема склада — кино, а картинку
-   ради этого возить незачем. */
-.clap {
-  position: relative;
+/* Лого колледжа. В исходном файле цвет зашит зелёным, у нас он должен идти за
+   темой Telegram — поэтому контуры заливаются currentColor, а цвет приходит
+   отсюда одной строкой и в тёмной теме становится светлым сам.
+   Размер квадратный: у логотипа viewBox 240×240, и он занимает его почти
+   целиком, так что подгонять пропорции не нужно. */
+.logo-mark {
   flex: none;
-  width: 30px;
-  height: 23px;
-  border: 1.6px solid var(--ink);
-  border-radius: var(--r-xs);
-  overflow: hidden;
+  /* 32 из 44 точек шапки: лого мелкое и подробное — арки, полоски, засечки, —
+     и на 28 середина заплывала в пятно. Больше не берём: тогда оно упрётся
+     в края полосы. */
+  width: 32px;
+  height: 32px;
+  color: var(--ink);
 }
-.clap::before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 8px;
-  border-bottom: 1.6px solid var(--ink);
-  background: repeating-linear-gradient(72deg,
-    var(--ink) 0 3.5px, transparent 3.5px 8px);
-}
+.logo-mark path { fill: currentColor; }
 
 .wordmark-text { min-width: 0; }
 .wordmark-name {
@@ -399,6 +394,165 @@ input[type="search"]:focus { background-color: var(--surface-strong); outline: n
    очистить поле можно выделением, а место в строке дороже. */
 input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
 .field textarea { resize: vertical; min-height: 96px; padding-top: 12px; }
+
+/* --- Сгруппированные строки формы ---
+   Так формы выглядят в системе: не столбик плашек с серой подписью над каждой,
+   а один скруглённый блок, где строка — это подпись слева и значение справа,
+   а строки разделены волосяной линией с отступом слева.
+   Вид задан здесь, в разметке достаточно обернуть подряд идущие .field
+   в .form-group — полей по проекту 55, и переписывать каждое было бы дорого.
+
+   Строка — сетка, а не флекс: пояснение .hint должно занимать вторую строку
+   целиком, а не ютиться рядом со значением. */
+.form-group {
+  background: var(--group-bg);
+  border-radius: var(--r-lg);
+  margin-bottom: var(--s3);
+}
+.form-group .field,
+.form-group .toggle-row {
+  position: relative;
+  display: grid;
+  /* Подпись переносится, если длинная, но значению всегда остаётся не меньше
+     72 точек: при простом auto/1fr длинная подпись выдавливала значение за
+     край строки и от «15» было видно «1». */
+  grid-template-columns: minmax(0, auto) minmax(72px, 1fr);
+  align-items: center;
+  column-gap: var(--s3);
+  min-height: 44px;
+  padding: 7px var(--s4);
+  margin: 0;
+}
+/* Разделитель — линией внутри строки, как в списке каталога: рамка строки
+   рисовалась бы по всей ширине, а система отступает слева на поле группы.
+   Первая строка линии не получает: над ней край блока. */
+.form-group .field + .field::before,
+.form-group .field + .toggle-row::before,
+.form-group .toggle-row + .field::before,
+.form-group .toggle-row + .toggle-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--s4);
+  right: 0;
+  height: 1px;
+  background: var(--hairline);
+}
+/* Подпись строки — обычный текст, не серый и не мельче основного: серым в
+   системе набрано пояснение, а не название строки. */
+.form-group .field label,
+.form-group .toggle-row label {
+  display: block;
+  margin: 0;
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  font-weight: 400;
+  color: var(--ink);
+}
+/* Значение — справа, без своей рамки и заливки: рамка внутри блока читалась бы
+   плашкой в плашке. */
+.form-group .field input,
+.form-group .field select,
+.form-group .field textarea {
+  width: auto;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+  text-align: right;
+}
+.form-group .field select {
+  padding-right: 20px;
+  background-position: right 0 center;
+  text-align: right;
+  /* Своей ширины у select нет — иначе длинное название модели растягивает
+     строку и подпись уезжает за край. */
+  max-width: 100%;
+}
+.form-group .field input::placeholder,
+.form-group .field textarea::placeholder { color: var(--muted); }
+.form-group .field input:focus,
+.form-group .field select:focus,
+.form-group .field textarea:focus { outline: none; }
+/* Стрелки-крутилку у числовых полей убираем: это примета браузера, в системе
+   число просто набирают. Внутри строки она вдобавок налезала на значение. */
+.form-group .field input[type="number"] { -moz-appearance: textfield; }
+.form-group .field input[type="number"]::-webkit-inner-spin-button,
+.form-group .field input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.form-group .field .hint {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+}
+/* Строка, где значение в строку не влезает: многострочная заметка и всё, что
+   набирают долго. Подпись сверху, поле на всю ширину под ней. */
+.form-group .field--stacked { grid-template-columns: 1fr; }
+.form-group .field--stacked label { margin-bottom: var(--s1); }
+.form-group .field--stacked input,
+.form-group .field--stacked textarea { width: 100%; text-align: left; }
+.form-group .field textarea { min-height: 66px; resize: none; }
+
+/* Переключатель вместо галочки. Системный размер — 51×31, кружок 27.
+   Включённое положение красим акцентом темы, а не зашитым системным зелёным:
+   в самом Telegram переключатели в мини-приложениях идут за акцентом, а зелёный
+   пришлось бы зашивать цветом и он выбивался бы из темы. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  position: relative;
+  width: 51px;
+  height: 31px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--surface-strong);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  transition: transform 0.2s ease;
+}
+input[type="checkbox"]:checked { background: var(--accent); }
+input[type="checkbox"]:checked::before { transform: translateX(20px); }
+/* Размер переключателю возвращаем явно: правило значения строки выше по
+   специфичности и сбрасывало ширину в auto — от капсулы 51×31 оставался один
+   кружок. */
+.form-group .field input[type="checkbox"],
+.form-group .toggle-row input[type="checkbox"] {
+  justify-self: end;
+  width: 51px;
+  height: 31px;
+}
+
+/* Группа внутри карточки — там фон уже белый, и второй белый блок поверх него
+   не читался бы. Поэтому здесь группа прозрачная, её держат только линии,
+   а боковые поля берём у карточки. */
+.form-group--inset {
+  background: none;
+  border-radius: 0;
+  margin: var(--s2) calc(var(--s4) * -1) 0;
+}
+.form-group--inset .field,
+.form-group--inset .toggle-row { padding-left: 0; padding-right: 0; margin: 0 var(--s4); }
+.form-group--inset .field + .field::before,
+.form-group--inset .field + .toggle-row::before,
+.form-group--inset .toggle-row + .field::before,
+.form-group--inset .toggle-row + .toggle-row::before { left: 0; }
 .field .hint { margin-top: var(--s2); margin-bottom: 0; }
 
 /* Своя стрелка у выпадающих списков: системная выглядит по-разному в каждом

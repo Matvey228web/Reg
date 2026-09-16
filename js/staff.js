@@ -168,10 +168,13 @@ const StaffScreen = (() => {
     const box = document.createElement("div");
     box.className = "pin-reset-form section";
     box.innerHTML = `
-      <div class="field">
-        <label>Новый PIN для ${escapeHtml(name)} (4–6 цифр)</label>
-        <input type="password" inputmode="numeric" pattern="[0-9]*" class="pin-reset-input" />
+      <div class="form-group form-group--inset">
+        <div class="field">
+          <label>Новый PIN</label>
+          <input type="password" inputmode="numeric" pattern="[0-9]*" class="pin-reset-input" />
+        </div>
       </div>
+      <p class="hint">Для ${escapeHtml(name)}, 4–6 цифр.</p>
       <button class="btn pin-reset-save" style="width:auto;">Сохранить</button>
       <button class="btn btn--secondary pin-reset-cancel" style="width:auto;">Отмена</button>
       <div class="pin-reset-error"></div>`;

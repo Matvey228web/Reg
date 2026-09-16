@@ -77,6 +77,7 @@ const LabelsScreen = (() => {
 
     box.innerHTML = `
       ${singleItemId ? `<p class="hint">Этикетка для одной позиции: ${escapeHtml(singleItemId)}.</p>` : ""}
+      <div class="form-group">
       <div class="field">
         <label for="labels-size">Размер этикетки</label>
         <select id="labels-size">
@@ -87,9 +88,10 @@ const LabelsScreen = (() => {
       <div class="field">
         <label for="labels-caption">Подпись на этикетке</label>
         <input type="text" id="labels-caption" value="${escapeHtml(caption())}" />
-        <p class="hint">Печатается на всех размерах мелкой строкой под номером.
-        На 30×50 и 40×60 рядом с ней помещается ещё и категория.</p>
       </div>
+      </div>
+      <p class="hint">Подпись печатается на всех размерах мелкой строкой под номером.
+      На 30×50 и 40×60 рядом с ней помещается ещё и категория.</p>
       ${singleItemId ? "" : `
       <div class="searchbar">
         <input type="search" id="labels-search" placeholder="Поиск по названию или номеру"

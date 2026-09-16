@@ -120,7 +120,8 @@ const ItemScreen = (() => {
         ${itemActions(item)}
         <button class="btn btn--secondary" id="item-report-defect-toggle">Сообщить о дефекте</button>
         <div id="item-defect-form" style="display:none;">
-          <div class="field">
+          <div class="form-group">
+          <div class="field field--stacked">
             <label for="item-defect-desc">Описание</label>
             <textarea id="item-defect-desc"></textarea>
           </div>
@@ -131,6 +132,7 @@ const ItemScreen = (() => {
               <option value="Major">Серьёзный — снять с выдачи</option>
               <option value="Out of Service">Не работает — снять с выдачи</option>
             </select>
+          </div>
           </div>
           <button class="btn" id="item-defect-submit">Сохранить дефект</button>
         </div>
