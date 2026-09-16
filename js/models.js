@@ -159,27 +159,42 @@ const ModelsScreen = (() => {
     } catch (err) {
       TG.hapticError();
       back();
+      // Блок с ошибкой стоит над всем списком: если категорию меняли в его
+      // середине, текст отрисуется выше экрана, и от отказа останется одна
+      // вибрация — «не работает, и непонятно почему». Поэтому причину сначала
+      // говорим окном, как и везде в приложении, а в блоке оставляем, чтобы
+      // можно было перечитать.
       showBoxError("models-error", err.message);
+      TG.showAlert(err.message);
+      const box = document.getElementById("models-error");
+      if (box && box.scrollIntoView) box.scrollIntoView({ block: "nearest" });
     } finally {
       select.disabled = false;
     }
   }
 
+  // Что сказать после переноса. Уложиться надо в 256 знаков — столько берёт
+  // окно Telegram, и на длинном тексте оно не появляется вовсе. Поэтому здесь
+  // только то, что человеку решает: что перенесли, сколько позиций тронуло и
+  // что этикетки недействительны. Образец из старых→новых номеров пришлось
+  // убрать: именно он разрывал лимит, а перечитать его в окне всё равно нельзя
+  // — новые номера видны в списке и на карточках.
   function resultText(res) {
+    const name = shorten(res.model_name, 60);
     const parts = [];
     parts.push(res.merged
-      ? `«${res.model_name}» слита с такой же моделью в «${categoryLabel(res.to)}».`
-      : `«${res.model_name}» перенесена в «${categoryLabel(res.to)}».`);
-    if (res.moved) {
-      parts.push(`Позиций: ${res.moved}, у всех новые номера.`);
-      const sample = (res.renames || []).slice(0, 3)
-        .map((r) => r.old + " → " + r.fresh).join("\n");
-      if (sample) parts.push(sample + ((res.renames || []).length > 3 ? "\n…" : ""));
-      parts.push("Этикетки этих позиций нужно напечатать заново.");
-    } else {
-      parts.push("Позиций у модели не было.");
-    }
+      ? `«${name}» слита с такой же моделью в «${categoryLabel(res.to)}».`
+      : `«${name}» перенесена в «${categoryLabel(res.to)}».`);
+    parts.push(res.moved
+      ? `Позиций: ${res.moved}, у всех новые номера. Этикетки этих позиций ` +
+        `нужно напечатать заново.`
+      : `Позиций у модели не было.`);
     return parts.join("\n\n");
+  }
+
+  function shorten(value, limit) {
+    const text = String(value || "");
+    return text.length <= limit ? text : text.slice(0, limit - 1) + "…";
   }
 
   function onShow() {

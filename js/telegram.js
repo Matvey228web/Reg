@@ -248,9 +248,21 @@ const TG = (() => {
     if (webApp && webApp.HapticFeedback) webApp.HapticFeedback.notificationOccurred("error");
   }
 
+  // Окно с сообщением. Лимит у него тот же, что у showPopup, — 256 знаков, и на
+  // длинном тексте клиент ОТКАЗЫВАЕТ, а не обрезает: окно просто не появляется.
+  // Текст сюда приходит с сервера, и его длину не проверяет ни один экран,
+  // поэтому режем здесь, в единственной точке. Пропавшее окно — это молчание,
+  // обрезанное — всё-таки ответ.
   function showAlert(message) {
-    if (webApp && webApp.showAlert) webApp.showAlert(message);
-    else alert(message);
+    var text = clipForPopup(message);
+    if (webApp && webApp.showAlert) webApp.showAlert(text);
+    else alert(text);
+  }
+
+  function clipForPopup(message) {
+    var text = String(message == null ? "" : message);
+    if (text.length <= POPUP_LIMIT) return text;
+    return text.slice(0, POPUP_LIMIT - 1).replace(/\s+\S*$/, "") + "…";
   }
 
   function showConfirm(message, cb) {
