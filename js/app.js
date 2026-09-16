@@ -57,6 +57,7 @@
   RepairScreen.init();
   OrdersScreen.init();
   StaffScreen.init();
+  ModelsScreen.init();
   PinScreen.init();
   SettingsScreen.init();
   LabelsScreen.init();

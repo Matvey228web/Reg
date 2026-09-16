@@ -98,7 +98,7 @@ const ItemScreen = (() => {
           <div class="qr-id">${escapeHtml(item.item_id)}</div>
         </div>
         <div class="btn-row btn-row--equal">
-          <button class="btn btn--secondary" id="item-qr-big">Во весь экран</button>
+          <button class="btn btn--secondary" id="item-qr-big">Этикетка крупно</button>
           <button class="btn btn--secondary" id="item-qr-download">Сохранить</button>
           <button class="btn btn--secondary" id="item-qr-label">Этикетка</button>
         </div>
@@ -144,10 +144,17 @@ const ItemScreen = (() => {
     // жила только на экране создания новой позиции.
     const qrCanvas = document.getElementById("item-qr-canvas");
     QR.render(qrCanvas, item.item_id, 8);
+    // Сохраняем и показываем этикетку, а не голый QR: наклеивают на вещь
+    // именно её, и «сохранил картинку, а там один код» — это не то, что нужно.
     const dl = document.getElementById("item-qr-download");
-    dl.addEventListener("click", () => saveImageFor(qrCanvas, `${item.item_id}.png`, item.name, dl));
+    dl.addEventListener("click", () => saveImageFor(
+      LabelsScreen.labelFor(item), LabelsScreen.labelFileName(item), item.name, dl));
     document.getElementById("item-qr-big").addEventListener("click", () => {
-      QR.showFullscreen(item.item_id, item.name);
+      // Тем же наложением, что на экране «Этикетки». Отсканировать вторым
+      // телефоном по ней можно так же — QR внутри.
+      QR.showImage(LabelsScreen.labelFor(item), item.name + " · " + item.item_id, "",
+        () => saveImageFor(LabelsScreen.labelFor(item), LabelsScreen.labelFileName(item),
+                           item.name, document.getElementById("qr-overlay-save")));
     });
     document.getElementById("item-qr-label").addEventListener("click", () => {
       Router.navigate("labels", { itemId: item.item_id });

@@ -984,6 +984,7 @@ function doPost(e) {
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
       case "/notify/test": data = handleNotifyTest(payload, token); break;
       case "/labels/send": data = handleLabelsSend(payload, token); break;
+      case "/model/move": data = handleModelMove(payload, token); break;
       case "/notify/overdue": data = handleNotifyOverdue(payload, token); break;
       case "/inventory/save": data = handleInventorySave(payload, token); break;
       case "/inventory/list": data = handleInventoryList(payload, token); break;
@@ -1122,6 +1123,143 @@ function handleModelsList(payload, token) {
     // по-разному, и сравнение строкой однажды промахнётся.
     return { category: r.category, model_code: pad2(Number(r.model_code)), model_name: r.model_name };
   }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
+}
+
+// Перенос модели в другую категорию.
+//
+// Правила раскладки при импорте угадывают категорию по словам в названии, и
+// часть моделей оседает не там. Поправить это в таблице руками нельзя: номер
+// вещи XXYYZZ начинается с номера категории, и правка одной ячейки рассогласует
+// номер с содержимым.
+//
+// Поэтому переносим С ПЕРЕНУМЕРАЦИЕЙ: вещи получают номера новой категории, и
+// номер остаётся честным. Это возможно только пока этикетки не напечатаны —
+// напечатанная этикетка со старым номером после такого переноса врёт. Когда
+// печать начнётся, здесь понадобится развилка «сохранить номера или
+// перенумеровать»; сейчас её нет намеренно, чтобы не давать выбор, за которым
+// стоит молчаливая порча данных.
+//
+// Номер вещи — ссылка: на него смотрят журнал выдач, дефекты и сверки. Поэтому
+// переписываем и их, иначе у вещи отвяжется вся история.
+function handleModelMove(payload, token) {
+  requireAdmin(token);
+  var from = String(payload.category || "").trim().toUpperCase();
+  var to = String(payload.to_category || "").trim().toUpperCase();
+  var code = payload.model_code;
+
+  if (!from || !to) throw apiError(400, "Укажите, какую модель и куда переносим");
+  if (from === to) throw apiError(400, "Модель уже в этой категории");
+
+  var cats = categories();
+  var fromCat = null;
+  var toCat = null;
+  cats.forEach(function (c) {
+    if (c.code === from) fromCat = c;
+    if (c.code === to) toCat = c;
+  });
+  if (!fromCat) throw apiError(404, "Категория, из которой переносим, не найдена");
+  if (!toCat) throw apiError(404, "Категория, в которую переносим, не найдена");
+
+  // Способ учёта должен совпадать. То же правило, что в handleCategoryUpdate:
+  // поштучная модель в категории «количеством» молча превратилась бы в «одну
+  // штуку из кучи», и обратно это уже не разобрать.
+  if (isTruthyCell(fromCat.by_qty) !== isTruthyCell(toCat.by_qty)) {
+    throw apiError(409, "У категорий разный способ учёта: одна считается " +
+      "количеством, другая — поштучно. Перенос превратил бы поштучные записи " +
+      "в количество или наоборот, и разобрать это обратно было бы нечем.");
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var modelsSheet = getSheet(SHEETS.MODELS);
+    var modelRows = readRows(modelsSheet);
+    var source = null;
+    for (var i = 0; i < modelRows.length; i++) {
+      if (modelRows[i].category === from && pad2(Number(modelRows[i].model_code)) === pad2(Number(code))) {
+        source = modelRows[i];
+        break;
+      }
+    }
+    if (!source) throw apiError(404, "Модель не найдена в этой категории");
+
+    // Была ли такая модель в целевой категории ДО переноса — смотрим заранее:
+    // findOrCreateModel её либо найдёт, либо создаст, и после вызова эти два
+    // случая уже не различить, а человеку разница важна — слияние это не то же
+    // самое, что переезд.
+    var needle = normalizeModelName(source.model_name);
+    var merged = modelRows.some(function (r) {
+      return r.category === to && normalizeModelName(r.model_name) === needle;
+    });
+    // findOrCreateModel заодно СЛИВАЕТ дубли: если такая модель в целевой
+    // категории уже есть, вернётся её код, и второй записи не появится.
+    var target = findOrCreateModel(to, source.model_name);
+
+    var eqSheet = getSheet(SHEETS.EQUIPMENT);
+    var items = readRows(eqSheet).filter(function (r) {
+      return r.category === from && pad2(Number(r.model_code)) === pad2(Number(code));
+    });
+
+    var renames = [];
+    items.forEach(function (item) {
+      var unit = nextUnitNumber(to, target.model_code);
+      var newId = buildItemId(to, target.model_code, unit);
+      renames.push({ old: String(item.item_id), fresh: newId });
+      updateRow(eqSheet, item.__row, {
+        item_id: newId,
+        category: to,
+        model_code: pad2(Number(target.model_code)),
+      });
+    });
+
+    // Ссылки в журналах — колонкой целиком: updateRow читает и пишет диапазон
+    // на каждую строку, и на сорока позициях это сотня обращений к листу.
+    var map = {};
+    renames.forEach(function (r) { map[r.old] = r.fresh; });
+    var touched = 0;
+    [SHEETS.TRANSACTIONS, SHEETS.DEFECTS, SHEETS.INVENTORY].forEach(function (name) {
+      touched += remapItemIds(getSheet(name), map);
+    });
+
+    // Строка модели переехала или слилась — старой в справочнике быть не должно.
+    modelsSheet.deleteRow(source.__row);
+
+    return {
+      ok: true,
+      model_name: source.model_name,
+      from: from,
+      to: to,
+      model_code: pad2(Number(target.model_code)),
+      merged: merged,
+      moved: renames.length,
+      journal_rows: touched,
+      renames: renames,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Подменяет номера вещей в колонке item_id по карте «старый → новый».
+// Возвращает, сколько строк тронуто.
+function remapItemIds(sheet, map) {
+  var last = sheet.getLastRow();
+  if (last < 2) return 0;
+  var headers = sheetHeaders(sheet);
+  var col = headers.indexOf("item_id") + 1;
+  if (col < 1) return 0;
+  var range = sheet.getRange(2, col, last - 1, 1);
+  var values = range.getValues();
+  var changed = 0;
+  for (var i = 0; i < values.length; i++) {
+    var v = String(values[i][0]);
+    if (map[v] !== undefined) {
+      values[i][0] = map[v];
+      changed++;
+    }
+  }
+  if (changed) range.setValues(values);
+  return changed;
 }
 
 function handleModelCreate(payload, token) {

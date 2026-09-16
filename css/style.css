@@ -367,7 +367,11 @@ a { color: var(--tg-link-color); }
   padding: 12px 14px;
   border-radius: var(--r-md);
   border: 1px solid var(--hairline);
-  background: var(--group-bg);
+  /* background-color, а не сокращённая запись: сокращённая стирает
+     background-image, а им у выпадающих списков нарисован шеврон. Из-за этого
+     ни один список внутри формы не показывал значок «раскрыть» — ни выбор
+     категории, ни модель, ни заказ на «Скане». */
+  background-color: var(--group-bg);
   color: var(--ink);
   font-family: inherit;
   font-size: 16px;   /* меньше 16px — и Safari на iPhone увеличивает страницу */
@@ -628,17 +632,17 @@ select {
   color: var(--accent);
   border-color: transparent;
 }
-.btn--danger { background: var(--danger); color: #fff; }
-/* Красное, но не залитое: «Выйти» — не разрушительное действие, а заметное.
-   Сплошная красная полоса во всю ширину кричала бы громче, чем удаление
-   сотрудника, которое рядом же залито красным по-настоящему. */
-.btn--outline-danger {
+/* Красное, но не залитое — и только так. Раньше их было два вида: залитое
+   «Удалить» и контурные «Выйти» с «Отменить сверку». Два имени для одного
+   смысла — это ровно то, из чего вырастает «почему тут залито, а там нет»;
+   к тому же сплошная красная полоса во всю ширину кричит громче, чем стоит
+   любое из этих действий. */
+.btn--danger {
   background: transparent;
   color: var(--danger-line);
   border-color: var(--danger-line);
-  box-shadow: none;
 }
-.btn--outline-danger:active { background: rgba(224, 49, 49, 0.1); }
+.btn--danger:active { background: rgba(224, 49, 49, 0.1); }
 
 /* Своя учётная запись в настройках: отделена линией, потому что всё выше — про
    склад, а это про вас. */
@@ -1021,6 +1025,14 @@ select {
    картинкой, и никто по нему не бьёт. */
 .label--tappable { cursor: pointer; transition: transform 0.12s ease; }
 .label--tappable:active { transform: scale(0.97); }
+
+/* Строка модели на экране «Модели». Название слева бывает длинным
+   («OSTERRIG SIRIUS 100CM») и по умолчанию съедает всю строку — списку
+   категорий оставалось сто точек, и в нём было видно «Осветител».
+   Поэтому список получает фиксированную ширину, а название переносится. */
+#models-content .field { grid-template-columns: minmax(0, 1fr) 132px; }
+#models-content .field label { white-space: normal; }
+#models-content .field select { padding-right: 24px; background-position: right 4px center; }
 
 /* Кнопка-замена Telegram MainButton вне Telegram (обычный браузер) */
 .fallback-main-button {

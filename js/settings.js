@@ -82,7 +82,7 @@ const SettingsScreen = (() => {
         <p class="hint">Вошли как ${escapeHtml(me.full_name || "—")}${
           me.full_name ? ` · ${escapeHtml(roleLabel(me))}` : ""}.</p>
         <button class="btn btn--secondary" id="settings-pin">Сменить свой PIN</button>
-        <button class="btn btn--outline-danger" id="settings-logout">Выйти</button>
+        <button class="btn btn--danger" id="settings-logout">Выйти</button>
       </div>`;
   }
 
@@ -108,6 +108,9 @@ const SettingsScreen = (() => {
         Название можно менять всегда.</p>
         <div id="settings-categories"></div>
         <button class="btn btn--secondary" id="settings-cat-add-toggle">+ Новая категория</button>
+        <!-- Модели — тот же справочник, только на уровень ниже: у каждой модели
+             своя категория, и после импорта часть лежит не там. -->
+        <button class="btn btn--secondary" id="settings-models">Модели по категориям</button>
         <div id="settings-cat-form" style="display:none;" class="section">
           <div id="settings-cat-error"></div>
           <div class="form-group">
@@ -371,6 +374,7 @@ const SettingsScreen = (() => {
   function bind() {
     const staffBtn = document.getElementById("settings-go-staff");
     if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
+    document.getElementById("settings-models").addEventListener("click", () => Router.navigate("models"));
     document.getElementById("settings-cat-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("settings-cat-form");
       form.style.display = form.style.display === "none" ? "block" : "none";

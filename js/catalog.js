@@ -233,7 +233,7 @@ const CatalogScreen = (() => {
       }
       const { item_id } = await apiPost("/item/create", payload);
       TG.hapticSuccess();
-      renderQrResult(item_id, name);
+      renderQrResult(item_id, name, category);
       document.getElementById("catalog-add-form").style.display = "none";
       loadModels();
       loadList({ force: true });
@@ -246,7 +246,9 @@ const CatalogScreen = (() => {
     }
   }
 
-  function renderQrResult(itemId, name) {
+  // Категория нужна этикетке: на размерах 30×50 и 40×60 она печатается
+  // строкой под номером.
+  function renderQrResult(itemId, name, category) {
     const box = document.getElementById("catalog-qr-result");
     box.style.display = "block";
     box.innerHTML = `
@@ -255,7 +257,7 @@ const CatalogScreen = (() => {
         <canvas id="new-item-qr-canvas"></canvas>
         <div class="qr-id">${escapeHtml(itemId)}</div>
       </div>
-      <button class="btn" id="qr-download-btn">Сохранить QR</button>
+      <button class="btn" id="qr-download-btn">Сохранить этикетку</button>
       <p class="hint">Скачать файл напрямую из Telegram нельзя — это ограничение
       мессенджера. Кнопка откроет системный лист «Поделиться», а если его нет —
       картинку пришлёт бот в чат склада. Печатать этикетку удобнее с экрана
@@ -264,7 +266,10 @@ const CatalogScreen = (() => {
     const canvas = document.getElementById("new-item-qr-canvas");
     QR.render(canvas, itemId, 8);
     const dl = document.getElementById("qr-download-btn");
-    dl.addEventListener("click", () => saveImageFor(canvas, `${itemId}.png`, itemId, dl));
+    // Этикетку, а не голый код: её и наклеивают на вещь.
+    const fresh = { item_id: itemId, name: name, category: category };
+    dl.addEventListener("click", () => saveImageFor(
+      LabelsScreen.labelFor(fresh), LabelsScreen.labelFileName(fresh), name, dl));
   }
 
   function onShow() {

@@ -16,7 +16,7 @@ const Router = (() => {
     login: "Вход", home: "Главная", catalog: "Каталог", scan: "Скан",
     repair: "Ремонт", orders: "Заказы", order: "Заказ", item: "Оборудование",
     inventory: "Инвентаризация", staff: "Сотрудники", labels: "Этикетки",
-    settings: "Настройки", pin: "Смена PIN",
+    settings: "Настройки", pin: "Смена PIN", models: "Модели",
   };
 
   // «Назад» показываем двумя способами сразу: своей кнопкой в шапке и нативной
@@ -41,7 +41,7 @@ const Router = (() => {
   // Экраны без своей вкладки подсвечивают вкладку раздела, из которого открыты,
   // чтобы на карточке предмета было видно, где ты находишься.
   const PARENT_TAB = { item: "catalog", labels: "catalog", order: "orders",
-                       staff: "home", settings: "home", pin: "home",
+                       staff: "home", settings: "home", pin: "home", models: "home",
                        inventory: "home" };
 
   // Панель разделов видна везде, кроме экрана входа; активная вкладка подсвечена.

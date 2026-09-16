@@ -616,7 +616,21 @@ const LabelsScreen = (() => {
     Router.register("labels", { onShow });
   }
 
+  // Этикетка для любой вещи, в выбранном на этом экране размере и с текущей
+  // подписью. Нужна карточке предмета и каталогу: они отдавали голый QR, а
+  // человеку нужна этикетка — та самая, которую он наклеит.
+  // Размер берём из хранилища через savedSize(), а не из переменной sizeKey:
+  // экран «Этикетки» мог быть ни разу не открыт, и переменная тогда пустая.
+  function labelFor(item) {
+    return labelCanvas(item, SIZES[savedSize()], caption(), FILE_SCALE);
+  }
+
+  function labelFileName(item) {
+    const size = SIZES[savedSize()];
+    return fileName(item, size);
+  }
+
   // Отрисовщик наружу: демо-лист с образцами печатается тем же кодом, что и
   // склад. Иначе «на демо было так» и «печатается вот так» однажды разойдутся.
-  return { init, SIZES, labelCanvas };
+  return { init, SIZES, labelCanvas, labelFor, labelFileName };
 })();

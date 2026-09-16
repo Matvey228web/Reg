@@ -719,6 +719,56 @@ const MockAPI = {
         return list.map((m) => ({ ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
       }
 
+      // Перенос модели. В моке важно воспроизвести именно перенумерацию и
+      // переписывание ссылок: если мок этого не делает, экран «Модели» в тестах
+      // выглядит работающим, а на живой таблице у вещей отвяжется история.
+      case "/model/move": {
+        MockStore.requireAdmin(token);
+        const from = String(body.category || "").toUpperCase();
+        const to = String(body.to_category || "").toUpperCase();
+        const code = String(body.model_code || "");
+        if (!from || !to) { const e = new Error("Укажите, какую модель и куда переносим"); e.status = 400; throw e; }
+        if (from === to) { const e = new Error("Модель уже в этой категории"); e.status = 400; throw e; }
+        const cats = mockCategories();
+        const fromCat = cats.find((c) => c.code === from);
+        const toCat = cats.find((c) => c.code === to);
+        if (!fromCat) { const e = new Error("Категория, из которой переносим, не найдена"); e.status = 404; throw e; }
+        if (!toCat) { const e = new Error("Категория, в которую переносим, не найдена"); e.status = 404; throw e; }
+        if (!!fromCat.by_qty !== !!toCat.by_qty) {
+          const e = new Error("У категорий разный способ учёта: одна считается количеством, " +
+            "другая — поштучно. Перенос превратил бы поштучные записи в количество или наоборот.");
+          e.status = 409; throw e;
+        }
+        const source = MockStore.models.find((m) => m.category === from && String(m.model_code) === code);
+        if (!source) { const e = new Error("Модель не найдена в этой категории"); e.status = 404; throw e; }
+
+        const merged = MockStore.models.some((m) => m.category === to && m.model_name === source.model_name);
+        const target = MockStore.findOrCreateModel(to, source.model_name);
+        const items = MockStore.equipment.filter((i) => i.category === from && String(i.model_code) === code);
+        const renames = items.map((item) => {
+          const fresh = MockStore.nextItemId(to, target.model_code);
+          const old = String(item.item_id);
+          item.item_id = fresh;
+          item.category = to;
+          item.model_code = target.model_code;
+          return { old, fresh };
+        });
+        let journalRows = 0;
+        renames.forEach(({ old, fresh }) => {
+          [MockStore.transactions, MockStore.defects, MockStore.inventories].forEach((rows) => {
+            (rows || []).forEach((row) => {
+              if (String(row.item_id) === old) { row.item_id = fresh; journalRows++; }
+            });
+          });
+        });
+        // Именно splice, а не переприсваивание: models — та же ссылка, что внутри
+        // MockStore, и подмена массива снаружи его не изменила бы.
+        MockStore.models.splice(MockStore.models.indexOf(source), 1);
+        return { ok: true, model_name: source.model_name, from, to,
+                 model_code: target.model_code, merged, moved: renames.length,
+                 journal_rows: journalRows, renames };
+      }
+
       case "/model/create": {
         MockStore.requireToken(token);
         return { ...MockStore.findOrCreateModel(body.category, body.model_name) };

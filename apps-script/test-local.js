@@ -1423,6 +1423,115 @@ updateRow(getSheet(SHEETS.META), flagRow.__row, { key: '', value: '' });
 r = call('/staff/create', { full_name: 'Матвей', login: 'matvey', pin: '4321' });
 check('после удаления отметки вручную самозагрузка снова доступна', r.ok === true, r);
 
+console.log('\n== перенос модели в другую категорию ==');
+// Номер вещи начинается с номера категории, поэтому переносим с перенумерацией.
+// Главное, что здесь проверяется: у вещи не отвязывается история — на номер
+// ссылаются журнал выдач, дефекты и сверки.
+const mvLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const mvToken = mvLogin.ok ? mvLogin.data.token : null;
+check('вход перед переносом', mvLogin.ok === true, mvLogin);
+
+// Заводим модель в «Камерах» и две её единицы.
+let mv = call('/item/create', { category: 'CAM', model_name: 'Гоупро Тест', serial_number: 'S1' }, mvToken);
+check('первая единица заведена', mv.ok === true, mv);
+const mvId1 = mv.ok ? mv.data.item_id : null;
+mv = call('/item/create', { category: 'CAM', model_name: 'Гоупро Тест', serial_number: 'S2' }, mvToken);
+const mvId2 = mv.ok ? mv.data.item_id : null;
+check('вторая единица заведена и номера соседние',
+  mvId1 && mvId2 && mvId1.slice(0, 4) === mvId2.slice(0, 4) && mvId1 !== mvId2, [mvId1, mvId2]);
+const mvCode = mvId1.slice(2, 4);
+
+// Выдаём первую и заводим ей дефект — чтобы было что отвязываться.
+const mvOrder = call('/order/create', {
+  order_no: '900900', student_name: 'Тестов Тест', student_phone: '+70000000000',
+  issue_date: '2026-09-01', return_date: '2026-09-10',
+}, mvToken);
+check('заказ для переноса создан', mvOrder.ok === true, mvOrder);
+mv = call('/transaction/checkout', {
+  item_id: mvId1, order_id: mvOrder.data.order_id, expected_return_at: '2026-09-10',
+}, mvToken);
+check('единица выдана', mv.ok === true, mv);
+mv = call('/defect/report', { item_id: mvId1, description: 'Тестовая царапина', severity: 'Minor' }, mvToken);
+check('дефект заведён', mv.ok === true, mv);
+
+const mvTxBefore = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.item_id) === mvId1).length;
+const mvDfBefore = readRows(getSheet(SHEETS.DEFECTS)).filter(r => String(r.item_id) === mvId1).length;
+check('в журналах есть строки на эту вещь', mvTxBefore > 0 && mvDfBefore > 0, [mvTxBefore, mvDfBefore]);
+
+// Переносим в «Объективы».
+mv = call('/model/move', { category: 'CAM', model_code: mvCode, to_category: 'LEN' }, mvToken);
+check('перенос прошёл', mv.ok === true, mv);
+check('перенесены обе единицы', mv.ok && mv.data.moved === 2, mv.data);
+const mvLenNum = categories().filter(c => c.code === 'LEN')[0].num;
+const mvFresh = mv.data.renames.map(r => r.fresh);
+check('новые номера начинаются с номера новой категории',
+  mvFresh.every(id => id.slice(0, 2) === mvLenNum), [mvFresh, mvLenNum]);
+check('старых номеров в каталоге не осталось',
+  readRows(getSheet(SHEETS.EQUIPMENT)).every(r => String(r.item_id) !== mvId1 && String(r.item_id) !== mvId2),
+  [mvId1, mvId2]);
+check('категория у вещей сменилась',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => mvFresh.indexOf(String(r.item_id)) !== -1)
+    .every(r => r.category === 'LEN'));
+check('строки модели в прежней категории больше нет',
+  readRows(getSheet(SHEETS.MODELS)).every(r => !(r.category === 'CAM' && pad2(Number(r.model_code)) === mvCode)));
+
+// Самое важное: история не отвязалась.
+const mvNewId1 = mv.data.renames.filter(r => r.old === mvId1)[0].fresh;
+check('журнал выдач переписан на новый номер',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.item_id) === mvNewId1).length === mvTxBefore,
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.item_id) === mvNewId1).length);
+check('дефекты переписаны на новый номер',
+  readRows(getSheet(SHEETS.DEFECTS)).filter(r => String(r.item_id) === mvNewId1).length === mvDfBefore);
+check('на старый номер в журналах ссылок не осталось',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).every(r => String(r.item_id) !== mvId1) &&
+  readRows(getSheet(SHEETS.DEFECTS)).every(r => String(r.item_id) !== mvId1));
+check('сколько строк журналов тронуто — сказано', mv.data.journal_rows >= mvTxBefore + mvDfBefore, mv.data.journal_rows);
+r = call('/item/lookup', { item_id: mvNewId1 }, mvToken);
+check('карточка по новому номеру открывается с историей',
+  r.ok === true && r.data.open_defects.length === mvDfBefore, r.ok && r.data.open_defects.length);
+
+// Новая единица после переноса получает номер, который ещё не занят.
+mv = call('/item/create', { category: 'LEN', model_name: 'Гоупро Тест', serial_number: 'S3' }, mvToken);
+check('следующая единица не столкнулась с перенесёнными',
+  mv.ok === true && mvFresh.indexOf(mv.data.item_id) === -1, [mv.ok && mv.data.item_id, mvFresh]);
+
+console.log('-- отказы --');
+r = call('/model/move', { category: 'LEN', model_code: '01', to_category: 'LEN' }, mvToken);
+check('в ту же категорию не переносим', r.ok === false && r.status === 400, r);
+r = call('/model/move', { category: 'LEN', model_code: '99', to_category: 'CAM' }, mvToken);
+check('несуществующая модель — 404', r.ok === false && r.status === 404, r);
+r = call('/model/move', { category: 'LEN', model_code: '01', to_category: 'ZZZ' }, mvToken);
+check('несуществующая категория — 404', r.ok === false && r.status === 404, r);
+// GRP считается количеством, CAM — поштучно.
+r = call('/model/move', { category: 'CAM', model_code: '01', to_category: 'GRP' }, mvToken);
+check('в категорию с другим способом учёта — отказ',
+  r.ok === false && r.status === 409 && /количеством/.test(String(r.error)), r);
+// Своего сотрудника, а не «ивана» из проверок выше: его токен к этому месту
+// уже отозван, и проверка в if молча не выполнялась — то есть её не было.
+const mvStaffNew = call('/staff/create', {
+  full_name: 'Складмен Переноса', login: 'movecheck', pin: '5555', role: 'Warehouse Staff',
+}, mvToken);
+check('сотрудник склада для проверки прав заведён', mvStaffNew.ok === true, mvStaffNew);
+const mvStaffLogin = call('/auth/login', { login: 'movecheck', pin: '5555' });
+check('он вошёл', mvStaffLogin.ok === true, mvStaffLogin);
+r = call('/model/move', { category: 'LEN', model_code: '01', to_category: 'CAM' },
+         mvStaffLogin.ok ? mvStaffLogin.data.token : 'нет-токена');
+check('сотруднику склада перенос запрещён', r.ok === false && r.status === 403, r);
+
+console.log('-- слияние дублей --');
+// Та же модель уже есть в целевой категории: должна слиться, а не задвоиться.
+mv = call('/item/create', { category: 'CAM', model_name: 'Двойник Тест', serial_number: 'D1' }, mvToken);
+const mvDupCam = mv.ok ? mv.data.item_id.slice(2, 4) : null;
+mv = call('/item/create', { category: 'LEN', model_name: 'Двойник Тест', serial_number: 'D2' }, mvToken);
+check('одноимённые модели заведены в двух категориях', mv.ok === true, mv);
+const mvLenBefore = readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length;
+mv = call('/model/move', { category: 'CAM', model_code: mvDupCam, to_category: 'LEN' }, mvToken);
+check('перенос-слияние прошёл', mv.ok === true, mv);
+check('система сказала, что это слияние', mv.ok && mv.data.merged === true, mv.data);
+check('в целевой категории моделей не прибавилось',
+  readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length === mvLenBefore,
+  readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length);
+
 console.log('\n== карточку предмета без входа не прочитать ==');
 // Адрес веб-приложения не секрет, а номера напечатаны на этикетках: без
 // проверки токена кто угодно перебрал бы 010101, 010102… и вычитал склад.

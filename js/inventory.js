@@ -318,7 +318,7 @@ const InventoryScreen = (() => {
            того, сколько в ней позиций. -->
       <div class="btn-row btn-row--equal">
         <button class="btn btn--secondary" id="inventory-reset">Сбросить отметки</button>
-        <button class="btn btn--outline-danger" id="inventory-cancel">Отменить сверку</button>
+        <button class="btn btn--danger" id="inventory-cancel">Отменить сверку</button>
       </div>
       ${lastMessage ? `<div id="inventory-last" class="hint">${escapeHtml(lastMessage)}</div>` : ""}
 
