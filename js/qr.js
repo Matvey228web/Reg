@@ -68,6 +68,34 @@ const QR = (() => {
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   }
 
+  // Картинка во весь экран. Отдельно от showFullscreen, потому что показываем
+  // не QR, а готовую этикетку, и показываем именно <img>, а не <canvas>:
+  // по картинке в вебвью работает долгое нажатие с системным «Сохранить в Фото»
+  // и «Поделиться», по холсту — нет. Это единственный способ достать файл из
+  // мини-приложения на устройство: атрибут download внутри Telegram не работает,
+  // вебвью вместо сохранения уходит по ссылке и показывает голый файл без
+  // кнопки «назад».
+  function showImage(canvas, title, note) {
+    const overlay = document.createElement("div");
+    overlay.className = "qr-overlay";
+    overlay.innerHTML = `
+      <div class="qr-overlay-inner">
+        <img class="qr-overlay-img" alt="${escapeHtml(title || "")}" />
+        ${title ? `<div class="qr-overlay-title">${escapeHtml(title)}</div>` : ""}
+        ${note ? `<div class="qr-overlay-caption">${escapeHtml(note)}</div>` : ""}
+        <button class="btn" id="qr-overlay-close">Закрыть</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector(".qr-overlay-img").src = canvas.toDataURL("image/png");
+
+    const close = () => overlay.remove();
+    document.getElementById("qr-overlay-close").addEventListener("click", close);
+    // По самой картинке не закрываем: там живёт долгое нажатие, и случайный
+    // тап не должен убирать то, что человек собрался сохранять.
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    return overlay;
+  }
+
   // scan(onResult): onResult(code | null, error | null)
   function scan(onResult) {
     TG.scanQr("Наведите камеру на QR-код оборудования", onResult);
@@ -82,5 +110,5 @@ const QR = (() => {
     TG.closeScanQr();
   }
 
-  return { render, downloadCanvas, showFullscreen, scan, scanContinuous, stopScan };
+  return { render, downloadCanvas, showFullscreen, showImage, scan, scanContinuous, stopScan };
 })();

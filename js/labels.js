@@ -109,8 +109,11 @@ const LabelsScreen = (() => {
       Дешёвые принтеры этикеток с Bluetooth (Niimbot, Phomemo) из браузера печатать
       не умеют вообще — для них сохраните картинками и напечатайте из приложения
       принтера.</p>
-      <p class="hint">И печать, и сохранение файлов Telegram внутри себя блокирует.
-      На телефоне откройте адрес приложения в Safari, а не в Telegram.</p>
+      <p class="hint">Нажмите на образец внизу — этикетка откроется крупно, и её
+      можно сохранить в фото долгим нажатием. Пачку «Сохранить картинками»
+      отправит бот в чат склада одним архивом: сохранять их по одной из Telegram
+      нельзя, это ограничение самого мессенджера. Печать из Telegram он тоже
+      блокирует — для неё откройте адрес приложения в Safari.</p>
       <div class="section-title">Как будет выглядеть</div>
       <div id="labels-preview"></div>`;
 
@@ -186,6 +189,32 @@ const LabelsScreen = (() => {
     return canvas;
   }
 
+  // Образец в списке нажимается: на экране этикетка размером 30×40 мм, и ни
+  // номер, ни подпись на ней не разобрать. Открываем её во весь экран в печатном
+  // разрешении — там же её и сохраняют долгим нажатием.
+  function previewNode(item, size) {
+    const node = labelNode(item, size, PREVIEW_SCALE);
+    node.classList.add("label--tappable");
+    node.setAttribute("role", "button");
+    node.setAttribute("tabindex", "0");
+    node.setAttribute("title", "Показать крупно");
+    const open = () => showLabel(item, size);
+    node.addEventListener("click", open);
+    node.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+    return node;
+  }
+
+  function showLabel(item, size) {
+    QR.showImage(
+      labelCanvas(item, size, caption(), FILE_SCALE),
+      item.name + " · " + item.item_id,
+      TG.isAvailable()
+        ? "Удерживайте картинку, чтобы сохранить её в фото или отправить."
+        : "Нажмите картинку правой кнопкой, чтобы сохранить.");
+  }
+
   function drawPreview(list) {
     const box = document.getElementById("labels-preview");
     const size = SIZES[sizeKey];
@@ -194,7 +223,7 @@ const LabelsScreen = (() => {
       box.innerHTML = `<p class="empty">Ничего не найдено</p>`;
       return;
     }
-    list.forEach((item) => box.appendChild(labelNode(item, size, PREVIEW_SCALE)));
+    list.forEach((item) => box.appendChild(previewNode(item, size)));
   }
 
   function print() {
@@ -255,6 +284,7 @@ const LabelsScreen = (() => {
   // рисунок делается втрое подробнее: лазерный принтер печатает мельче ленты.
   const DOTS_PER_MM = 8;
   const PREVIEW_SCALE = 2;   // экран: чтобы не рябило на плотных дисплеях
+  const FILE_SCALE = 1;      // файл: ровно печатное разрешение, 8 точек на мм
   const PRINT_SCALE = 3;     // ~609 dpi, кратно 203 — модули остаются целыми
   const QUIET = 4;           // пустое поле вокруг кода, в модулях
   const MAX_AT_ONCE = 30;
@@ -464,24 +494,72 @@ const LabelsScreen = (() => {
     return rows;
   }
 
+  // Сохранение идёт двумя разными путями, и это не прихоть.
+  //
+  // В обычном браузере работает <a download>: файлы просто падают в загрузки.
+  //
+  // Внутри Telegram атрибут download не поддерживается — вебвью вместо
+  // сохранения УХОДИТ по ссылке и показывает голый файл без кнопки «назад».
+  // Поэтому там его не трогаем вовсе: одну этикетку показываем во весь экран
+  // (сохраняется долгим нажатием), пачку отправляет бот в чат склада одним
+  // архивом. Прямого сохранения пачки из мини-приложения не существует:
+  // WebApp.downloadFile умеет только https-адреса, а наши этикетки рисуются
+  // на устройстве и адреса не имеют.
+  function fileName(item, size) {
+    return "mifs-" + item.item_id + "-" + size.w + "x" + size.h + "mm.png";
+  }
+
   function saveImages() {
     if (!items.length) {
       TG.showAlert("Нечего сохранять: под фильтры ничего не попало");
       return;
     }
     if (items.length > MAX_AT_ONCE) {
-      TG.showAlert("Сразу столько файлов браузер не отдаст. Сузьте фильтры до " +
+      TG.showAlert("Сразу столько файлов не отдать. Сузьте фильтры до " +
         MAX_AT_ONCE + " позиций — или печатайте кнопкой «Печать».");
       return;
     }
     const size = SIZES[sizeKey];
-    // По одному файлу с паузой: браузеры глушат пачку скачиваний подряд.
-    items.forEach((item, index) => {
-      setTimeout(() => {
-        QR.downloadCanvas(labelCanvas(item, size, caption(), 1),
-          "mifs-" + item.item_id + "-" + size.w + "x" + size.h + "mm.png");
-      }, index * 300);
-    });
+
+    if (!TG.isAvailable()) {
+      // По одному файлу с паузой: браузеры глушат пачку скачиваний подряд.
+      items.forEach((item, index) => {
+        setTimeout(() => {
+          QR.downloadCanvas(labelCanvas(item, size, caption(), FILE_SCALE), fileName(item, size));
+        }, index * 300);
+      });
+      return;
+    }
+
+    if (items.length === 1) {
+      showLabel(items[0], size);
+      return;
+    }
+    sendToChat(size);
+  }
+
+  async function sendToChat(size) {
+    const btn = document.getElementById("labels-save");
+    const before = btn ? btn.textContent : "";
+    // Молчащая кнопка на запросе в 5–8 секунд читается как зависшая — это мы
+    // уже проходили на «Завершить» в сверке.
+    if (btn) { btn.disabled = true; btn.textContent = "Отправляем…"; }
+    try {
+      const files = items.map((item) => ({
+        name: fileName(item, size),
+        // Только сами данные, без приставки data:image/png;base64,
+        png_base64: labelCanvas(item, size, caption(), FILE_SCALE)
+          .toDataURL("image/png").split(",")[1],
+      }));
+      const res = await apiPost("/labels/send", { files });
+      TG.hapticSuccess();
+      TG.showAlert(res.message || "Отправлено в чат склада.");
+    } catch (err) {
+      TG.hapticError();
+      TG.showAlert(err.message || "Не получилось отправить");
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = before; }
+    }
   }
 
   function init() {

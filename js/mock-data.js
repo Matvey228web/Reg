@@ -941,6 +941,31 @@ const MockAPI = {
         return { ok: true, message: "Сообщение отправлено — проверьте чат." };
       }
 
+      // Отправка этикеток ботом. Мок проверяет ровно то, что проверяет бэкенд:
+      // список не пуст, файлы не пустые и их не больше тридцати. Самой отправки
+      // здесь нет — она живёт в Apps Script и требует токена бота.
+      case "/labels/send": {
+        MockStore.requireToken(token);
+        const files = body.files || [];
+        if (!files.length) {
+          const e = new Error("Нечего отправлять: список файлов пуст.");
+          e.status = 400; throw e;
+        }
+        if (files.length > 30) {
+          const e = new Error("Сразу больше 30 этикеток не отправляем. Сузьте фильтры и повторите.");
+          e.status = 400; throw e;
+        }
+        const empty = files.filter((f) => !f.png_base64);
+        if (empty.length) {
+          const e = new Error("Файл «" + (empty[0].name || "без имени") + "» пришёл пустым.");
+          e.status = 400; throw e;
+        }
+        return { ok: true, count: files.length,
+                 message: files.length === 1
+                   ? "Этикетка отправлена в чат склада."
+                   : files.length + " этикеток отправлены в чат склада одним архивом." };
+      }
+
       case "/notify/overdue": {
         MockStore.requireAdmin(token);
         return { overdue: 1, sent: true, message: "Просроченные заказы — 1" };

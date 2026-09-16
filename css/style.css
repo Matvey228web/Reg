@@ -1017,6 +1017,11 @@ select {
 .toggle-row label { font-size: 15px; }
 .toggle-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
 
+/* Образец этикетки нажимается — открывается крупно. Без этого он выглядит
+   картинкой, и никто по нему не бьёт. */
+.label--tappable { cursor: pointer; transition: transform 0.12s ease; }
+.label--tappable:active { transform: scale(0.97); }
+
 /* Кнопка-замена Telegram MainButton вне Telegram (обычный браузер) */
 .fallback-main-button {
   display: none;
@@ -1231,11 +1236,37 @@ select {
   padding: var(--s5);
 }
 .qr-overlay-inner { text-align: center; max-width: 460px; width: 100%; }
+/* Этикетка во весь экран — картинкой: по ней работает долгое нажатие с
+   системным «Сохранить в Фото». Белая подложка обязательна: этикетка печатается
+   чёрным по белому, и на тёмном фоне наложения без неё видно было бы только
+   рамку. Пиксели не сглаживаем — увеличенный QR должен остаться резким, иначе
+   по картинке его не отсканируешь. */
+.qr-overlay-img {
+  display: block;
+  max-width: 100%;
+  max-height: 62vh;
+  margin: 0 auto;
+  background: #fff;
+  padding: var(--s3);
+  border-radius: var(--r-md);
+  image-rendering: pixelated;
+}
 .qr-overlay canvas { background: #fff; padding: var(--s3); border-radius: var(--r-md); max-width: 100%; }
 .qr-overlay-id {
   font-family: var(--font-mono);
   font-size: 24px; letter-spacing: 3px;
   color: #fff; margin: var(--s4) 0 var(--s1);
+}
+/* Подпись под этикеткой — обычным текстом. Соседний .qr-overlay-id набран
+   моноширинным в 24 пункта: он для голого номера под QR, а название вещи
+   такими буквами не помещается в ширину экрана. */
+.qr-overlay-title {
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  font-weight: 600;
+  color: #fff;
+  margin: var(--s4) 0 var(--s1);
+  padding: 0 var(--s2);
 }
 .qr-overlay-caption { color: #bbb; font-size: 14px; margin-bottom: var(--s4); }
 

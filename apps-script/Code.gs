@@ -983,6 +983,7 @@ function doPost(e) {
       case "/staff/set-role": data = handleStaffSetRole(payload, token); break;
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
       case "/notify/test": data = handleNotifyTest(payload, token); break;
+      case "/labels/send": data = handleLabelsSend(payload, token); break;
       case "/notify/overdue": data = handleNotifyOverdue(payload, token); break;
       case "/inventory/save": data = handleInventorySave(payload, token); break;
       case "/inventory/list": data = handleInventoryList(payload, token); break;
@@ -2296,6 +2297,89 @@ function tgSend(text, chatIdOverride) {
   } catch (e) {
     return { ok: false, reason: "network", error: String(e) };
   }
+}
+
+// Отправка файла. Отдельно от tgSend, потому что sendDocument — это multipart,
+// а не JSON: тело собирает сам UrlFetchApp из объекта с блобом.
+function tgSendDocument(blob, caption, chatIdOverride) {
+  var token = botToken();
+  var chatId = String(chatIdOverride || notifyChatId());
+  if (!token) return { ok: false, reason: "no-token" };
+  if (!chatId) return { ok: false, reason: "no-chat" };
+  try {
+    var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendDocument", {
+      method: "post",
+      payload: { chat_id: chatId, caption: String(caption || ""), document: blob },
+      muteHttpExceptions: true,
+    });
+    var body = JSON.parse(res.getContentText() || "{}");
+    return body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
+  } catch (e) {
+    return { ok: false, reason: "network", error: String(e) };
+  }
+}
+
+// Этикетки из мини-приложения. Сохранить файл прямо на устройство из вебвью
+// Telegram нельзя — атрибут download там не работает, — поэтому пачку забирает
+// бот и кладёт в чат склада одним архивом. Картинки рисует телефон, сюда
+// приходят готовые PNG в base64.
+var LABELS_MAX_FILES = 30;
+var LABELS_MAX_BYTES = 8 * 1024 * 1024;   // запас: sendDocument держит 50 МБ
+
+function handleLabelsSend(payload, token) {
+  checkAuth(token);
+  var files = payload && payload.files;
+  if (!files || !files.length) throw apiError(400, "Нечего отправлять: список файлов пуст.");
+  if (files.length > LABELS_MAX_FILES) {
+    throw apiError(400, "Сразу больше " + LABELS_MAX_FILES + " этикеток не отправляем. " +
+      "Сузьте фильтры и повторите.");
+  }
+
+  var blobs = [];
+  var total = 0;
+  for (var i = 0; i < files.length; i++) {
+    var name = String(files[i].name || ("label-" + (i + 1) + ".png"));
+    var data = String(files[i].png_base64 || "");
+    if (!data) throw apiError(400, "Файл «" + name + "» пришёл пустым.");
+    var bytes;
+    try {
+      bytes = Utilities.base64Decode(data);
+    } catch (e) {
+      throw apiError(400, "Файл «" + name + "» повреждён при передаче.");
+    }
+    total += bytes.length;
+    if (total > LABELS_MAX_BYTES) {
+      throw apiError(400, "Слишком много данных за раз. Сузьте фильтры и повторите.");
+    }
+    blobs.push(Utilities.newBlob(bytes, "image/png", name));
+  }
+
+  // Одна этикетка уходит картинкой, несколько — архивом: тридцать отдельных
+  // сообщений подряд в чате склада никому не нужны.
+  var one = blobs.length === 1;
+  var payloadBlob = one
+    ? blobs[0]
+    : Utilities.zip(blobs, "mifs-labels-" + new Date().toISOString().substring(0, 10) + ".zip");
+  var caption = one
+    ? "Этикетка: " + blobs[0].getName()
+    : "Этикетки, " + blobs.length + " шт.";
+
+  var res = tgSendDocument(payloadBlob, caption);
+  if (res.ok) {
+    return { ok: true, count: blobs.length,
+             message: one ? "Этикетка отправлена в чат склада."
+                          : blobs.length + " этикеток отправлены в чат склада одним архивом." };
+  }
+  if (res.reason === "no-token") {
+    throw apiError(400, "Токен бота не задан. Apps Script → Project Settings → " +
+      "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
+  }
+  if (res.reason === "no-chat") {
+    throw apiError(400, "Не указан чат: впишите числовой id чата склада в настройках " +
+      "и сохраните.");
+  }
+  throw apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
+    ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
 }
 
 // Тихая отправка: всё, что зовётся по ходу работы склада, идёт через неё.

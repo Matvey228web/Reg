@@ -187,6 +187,36 @@ global.Utilities = {
     return Array.from(buf).map(b => (b > 127 ? b - 256 : b));
   },
   getUuid: () => crypto.randomUUID(),
+  base64Decode(str) {
+    return Array.from(Buffer.from(String(str), 'base64')).map(b => (b > 127 ? b - 256 : b));
+  },
+  newBlob(bytes, type, name) {
+    const buf = Buffer.from(bytes.map(b => (b < 0 ? b + 256 : b)));
+    return { _buf: buf, _type: type, _name: name,
+             getName() { return this._name; }, getBytes() { return Array.from(this._buf); } };
+  },
+  // Настоящий zip не нужен: проверяем, что архив собирается из всех блобов и
+  // получает имя. Содержимое архива Telegram проверит сам.
+  zip(blobs, name) {
+    return { _zip: blobs, _name: name, getName() { return this._name; },
+             getBytes() { return [].concat(...blobs.map(b => b.getBytes())); } };
+  },
+};
+
+// Подставная сеть: наружу из тестов ничего не уходит, но видно, что ушло бы.
+const sent = [];
+global.UrlFetchApp = {
+  fetch(url, opts) {
+    sent.push({ url, opts });
+    return { getContentText: () => JSON.stringify({ ok: true, result: {} }) };
+  },
+};
+let scriptProps = {};
+global.PropertiesService = {
+  getScriptProperties: () => ({
+    getProperty: (k) => (k in scriptProps ? scriptProps[k] : null),
+    setProperty: (k, v) => { scriptProps[k] = v; },
+  }),
 };
 global.ContentService = {
   MimeType: { JSON: 'JSON', TEXT: 'TEXT' },
@@ -1392,6 +1422,56 @@ check('отметка bootstrap_done стоит в Meta', !!flagRow, flagRow);
 updateRow(getSheet(SHEETS.META), flagRow.__row, { key: '', value: '' });
 r = call('/staff/create', { full_name: 'Матвей', login: 'matvey', pin: '4321' });
 check('после удаления отметки вручную самозагрузка снова доступна', r.ok === true, r);
+
+console.log('\n== этикетки уходят ботом ==');
+// Сохранить файл прямо на устройство из вебвью Telegram нельзя, поэтому пачку
+// забирает бот. Проверяем разбор входа и то, что уходит в Telegram.
+// Входим заново: к этому месту прежние токены уже отозваны сменой PIN, выходом
+// и чисткой листа Staff в проверках выше.
+const labelLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+check('вход перед отправкой этикеток', labelLogin.ok === true, labelLogin);
+const labelToken = labelLogin.ok ? labelLogin.data.token : null;
+const png = Buffer.from('PNG-заглушка').toString('base64');
+
+scriptProps = {};
+r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
+check('без токена бота — понятный отказ, а не молчание',
+  r.ok === false && /TELEGRAM_BOT_TOKEN/.test(String(r.error)), r);
+
+scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+metaSet('setting_notify_chat_id', '');
+r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
+check('без чата — тоже понятный отказ', r.ok === false && /id чата/.test(String(r.error)), r);
+
+metaSet('setting_notify_chat_id', '-1001234567890');
+sent.length = 0;
+r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
+check('одна этикетка уходит', r.ok === true && r.data.count === 1, r);
+check('ушла именно в sendDocument', /\/sendDocument$/.test(sent[0].url), sent[0] && sent[0].url);
+check('чат взят из настроек', sent[0].opts.payload.chat_id === '-1001234567890', sent[0].opts.payload.chat_id);
+check('картинка дошла целой',
+  Buffer.from(sent[0].opts.payload.document.getBytes().map(b => (b < 0 ? b + 256 : b)))
+    .toString() === 'PNG-заглушка',
+  sent[0].opts.payload.document.getName());
+
+sent.length = 0;
+r = call('/labels/send', { files: [
+  { name: 'a.png', png_base64: png }, { name: 'b.png', png_base64: png },
+] }, labelToken);
+check('несколько этикеток уходят одним архивом',
+  r.ok === true && r.data.count === 2 && /\.zip$/.test(sent[0].opts.payload.document.getName()),
+  sent[0] && sent[0].opts.payload.document.getName());
+
+r = call('/labels/send', { files: [] }, labelToken);
+check('пустой список отклонён', r.ok === false && r.status === 400, r);
+r = call('/labels/send', { files: [{ name: 'a.png', png_base64: '' }] }, labelToken);
+check('пустой файл отклонён', r.ok === false && /пустым/.test(String(r.error)), r);
+r = call('/labels/send', {
+  files: Array.from({ length: 31 }, (_, i) => ({ name: i + '.png', png_base64: png })),
+}, labelToken);
+check('больше тридцати за раз не берём', r.ok === false && /30/.test(String(r.error)), r);
+r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, 'чужой-токен');
+check('без входа этикетки не отправить', r.ok === false && r.status === 401, r);  // недействительная сессия — 401, не 403
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
