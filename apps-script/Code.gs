@@ -953,6 +953,7 @@ function doPost(e) {
       case "/public/catalog": data = handlePublicCatalog(payload); break;
       case "/item/lookup": data = handleItemLookup(payload, token); break;
       case "/item/create": data = handleItemCreate(payload, token); break;
+      case "/item/numbers": data = handleItemNumbers(payload, token); break;
       case "/transaction/checkout": data = handleTransactionCheckout(payload, token); break;
       case "/transaction/checkin": data = handleTransactionCheckin(payload, token); break;
       case "/defect/report": data = handleDefectReport(payload, token); break;
@@ -1109,6 +1110,98 @@ function handleItemLookup(payload, token) {
   result.qty_free = result.qty - result.qty_out;
   result.by_qty = categoryByQty(item.category);
   return result;
+}
+
+// Исправление заводского и инвентарного номера у конкретной вещи.
+//
+// Зачем эндпоинт, а не правка в таблице руками: опечатку в номере находят уже
+// после того, как вещь заведена, и в таблице её «поправят» в любой ячейке —
+// в том числе в соседней строке или у другой вещи. Здесь же правка идёт по
+// номеру вещи, под замком, и проверяется на главное — что такой номер не
+// занят кем-то ещё.
+//
+// Почему проверка на занятость обязательна: по этим номерам технику ищут,
+// когда она пропала, а повторный импорт исходной таблицы считает одинаковый
+// заводской номер одной и той же вещью (см. seenSerial в importInventory) и
+// вторую строку молча пропускает. То есть дубль — это не «некрасиво», а
+// потерянная единица техники.
+//
+// Номер вещи (item_id) здесь не меняется: он собран из категории и модели, и
+// меняется только переносом модели (/model/move) — иначе номер разойдётся с
+// содержимым.
+function handleItemNumbers(payload, token) {
+  requireAdmin(token);
+  var itemId = String(payload.item_id || "").trim();
+  if (!itemId) throw apiError(400, "Не сказано, какой вещи править номера");
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.EQUIPMENT);
+    var rows = readRows(sheet);
+    var item = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].item_id) === itemId) { item = rows[i]; break; }
+    }
+    if (!item) throw apiError(404, "Предмет не найден");
+
+    // У позиции с учётом количеством одна строка на всю полку: личного номера
+    // у неё нет по устройству, и заводской номер на ней означал бы, что вся
+    // полка — одна вещь.
+    if (categoryByQty(item.category)) {
+      throw apiError(409, "Это позиция с учётом количеством — одна строка на всю " +
+        "полку. Личных номеров у неё нет, вписывать их некуда.");
+    }
+
+    // Пришло только то, что прислали: пустая строка — это «стереть», а
+    // отсутствие поля — «не трогать». Иначе правка одного номера обнуляла бы
+    // второй.
+    var next = {};
+    ["serial_number", "inventory_number"].forEach(function (field) {
+      if (!Object.prototype.hasOwnProperty.call(payload, field)) return;
+      // Только пробелы по краям: чистилку импорта (importCleanSerial) здесь
+      // применять нельзя — она выбрасывает всё короче пяти знаков и без цифр,
+      // а человек, вписывающий номер руками, вписывает его осознанно.
+      next[field] = String(payload[field] == null ? "" : payload[field]).trim();
+    });
+    if (!Object.prototype.hasOwnProperty.call(next, "serial_number") &&
+        !Object.prototype.hasOwnProperty.call(next, "inventory_number")) {
+      throw apiError(400, "Нечего править: ни заводского, ни инвентарного номера не прислано");
+    }
+
+    var LABELS = { serial_number: "заводской", inventory_number: "инвентарный" };
+    for (var field in next) {
+      if (!next[field]) continue;
+      var taken = rows.filter(function (r) {
+        return String(r.item_id) !== itemId &&
+               String(r[field] || "").trim().toLowerCase() === next[field].toLowerCase();
+      })[0];
+      if (taken) {
+        throw apiError(409, "Такой " + LABELS[field] + " номер уже стоит у вещи " +
+          String(taken.item_id) + " («" + String(taken.name || "") + "»). Два одинаковых " +
+          "номера — это потерянная вещь: по ним ищут технику, и повторный импорт " +
+          "считает их одной и той же.");
+      }
+    }
+
+    var changed = {};
+    for (var f in next) {
+      if (String(item[f] || "") !== next[f]) changed[f] = { was: String(item[f] || ""), now: next[f] };
+    }
+    if (Object.keys(changed).length) updateRow(sheet, item.__row, next);
+
+    return {
+      item_id: itemId,
+      name: String(item.name || ""),
+      serial_number: Object.prototype.hasOwnProperty.call(next, "serial_number")
+        ? next.serial_number : String(item.serial_number || ""),
+      inventory_number: Object.prototype.hasOwnProperty.call(next, "inventory_number")
+        ? next.inventory_number : String(item.inventory_number || ""),
+      changed: changed,
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function handleModelsList(payload, token) {

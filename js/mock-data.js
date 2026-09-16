@@ -530,6 +530,55 @@ const MockAPI = {
         return { item_id, qty };
       }
 
+      // Исправление номеров у конкретной вещи. Настоящая версия —
+      // handleItemNumbers в Code.gs, там же и объяснение, почему дубль номера
+      // отклоняется, а не просто подсвечивается.
+      case "/item/numbers": {
+        MockStore.requireAdmin(token);
+        const id = String(body.item_id || "").trim();
+        if (!id) { const e = new Error("Не сказано, какой вещи править номера"); e.status = 400; throw e; }
+        const item = MockStore.findItem(id);
+        if (!item) { const e = new Error("Предмет не найден"); e.status = 404; throw e; }
+        if (mockByQty(item.category)) {
+          const e = new Error("Это позиция с учётом количеством — одна строка на всю " +
+            "полку. Личных номеров у неё нет, вписывать их некуда.");
+          e.status = 409; throw e;
+        }
+        const next = {};
+        ["serial_number", "inventory_number"].forEach((f) => {
+          if (!Object.prototype.hasOwnProperty.call(body, f)) return;
+          next[f] = String(body[f] == null ? "" : body[f]).trim();
+        });
+        if (!Object.keys(next).length) {
+          const e = new Error("Нечего править: ни заводского, ни инвентарного номера не прислано");
+          e.status = 400; throw e;
+        }
+        const labels = { serial_number: "заводской", inventory_number: "инвентарный" };
+        Object.keys(next).forEach((f) => {
+          if (!next[f]) return;
+          const taken = MockStore.equipment.find((r) => String(r.item_id) !== id &&
+            String(r[f] || "").trim().toLowerCase() === next[f].toLowerCase());
+          if (taken) {
+            const e = new Error("Такой " + labels[f] + " номер уже стоит у вещи " +
+              taken.item_id + " («" + (taken.name || "") + "»). Два одинаковых номера — " +
+              "это потерянная вещь: по ним ищут технику, и повторный импорт считает их " +
+              "одной и той же.");
+            e.status = 409; throw e;
+          }
+        });
+        const changed = {};
+        Object.keys(next).forEach((f) => {
+          const was = String(item[f] || "");
+          if (was !== next[f]) { changed[f] = { was, now: next[f] }; item[f] = next[f]; }
+        });
+        return {
+          item_id: id, name: item.name || "",
+          serial_number: String(item.serial_number || ""),
+          inventory_number: String(item.inventory_number || ""),
+          changed,
+        };
+      }
+
       case "/transaction/checkout": {
         const staff_id = MockStore.requireToken(token);
         const item = MockStore.findItem(body.item_id);

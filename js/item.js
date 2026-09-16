@@ -55,6 +55,96 @@ const ItemScreen = (() => {
       </div>`;
   }
 
+  // Исправление номеров — администратору. Опечатку в заводском или
+  // инвентарном номере находят уже после того, как вещь заведена и уехала в
+  // таблицу, и до сих пор единственным выходом было править ячейку руками —
+  // мимо всех проверок, в том числе проверки на дубль.
+  //
+  // Номер вещи (XXYYZZ) здесь не правится: он собран из категории и модели, и
+  // меняется только переносом модели, вместе с перенумерацией.
+  //
+  // У позиций с учётом количеством формы нет вовсе: там одна строка на всю
+  // полку, личных номеров у неё не бывает.
+  function numbersForm(item) {
+    const me = Auth.getSession() || {};
+    if (me.role !== "Admin" || item.by_qty) return "";
+    return `
+      <button class="btn btn--secondary" id="item-numbers-toggle">Исправить номера</button>
+      <div id="item-numbers-form" style="display:none;">
+        <div class="form-group">
+        <div class="field">
+          <label for="item-serial">Заводской №</label>
+          <input type="text" id="item-serial" value="${escapeHtml(item.serial_number || "")}"
+                 placeholder="как на корпусе" autocapitalize="characters" autocorrect="off"
+                 spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="item-inventory">Инвентарный №</label>
+          <input type="text" id="item-inventory" value="${escapeHtml(item.inventory_number || "")}"
+                 placeholder="как в описи" autocapitalize="characters" autocorrect="off"
+                 spellcheck="false" />
+        </div>
+        </div>
+        <p class="hint">Номер вещи ${escapeHtml(item.item_id)} не изменится — он собран из
+        категории и модели. Пустое поле стирает номер. Занятый номер система не примет:
+        по этим номерам ищут технику, и повторный импорт считает одинаковые номера
+        одной и той же вещью.</p>
+        <div id="item-numbers-error"></div>
+        <button class="btn" id="item-numbers-submit">Сохранить номера</button>
+      </div>`;
+  }
+
+  function bindNumbers(item) {
+    const toggle = document.getElementById("item-numbers-toggle");
+    if (!toggle) return;
+    toggle.addEventListener("click", () => {
+      const form = document.getElementById("item-numbers-form");
+      form.style.display = form.style.display === "none" ? "block" : "none";
+    });
+    document.getElementById("item-numbers-submit").addEventListener("click", async () => {
+      const serial = document.getElementById("item-serial").value.trim();
+      const inventory = document.getElementById("item-inventory").value.trim();
+      // Сверяем здесь же: запрос к таблице — это 5–8 секунд, и тратить их,
+      // чтобы услышать «ничего не изменилось», незачем.
+      if (serial === String(item.serial_number || "") &&
+          inventory === String(item.inventory_number || "")) {
+        TG.showAlert("Номера не изменились");
+        return;
+      }
+      const btn = document.getElementById("item-numbers-submit");
+      btn.disabled = true;
+      showBoxError("item-numbers-error", "");
+      try {
+        const res = await apiPost("/item/numbers", {
+          item_id: item.item_id, serial_number: serial, inventory_number: inventory,
+        });
+        TG.hapticSuccess();
+        // Каталог ищет и по этим номерам — правим прямо в кэше, чтобы поиск не
+        // врал до следующего обновления и чтобы не перечитывать весь склад.
+        Cache.patch("equipment", "item_id", item.item_id, {
+          serial_number: res.serial_number, inventory_number: res.inventory_number,
+        });
+        TG.showAlert(numbersResultText(res));
+        load();
+      } catch (err) {
+        TG.hapticError();
+        showBoxError("item-numbers-error", err.message);
+        TG.showAlert(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  function numbersResultText(res) {
+    const LABELS = { serial_number: "Заводской", inventory_number: "Инвентарный" };
+    const lines = Object.keys(res.changed || {}).map((f) => {
+      const c = res.changed[f];
+      return LABELS[f] + " №: " + (c.was ? `${c.was} → ` : "") + (c.now || "стёрт");
+    });
+    return lines.length ? "Исправлено.\n\n" + lines.join("\n") : "Номера не изменились";
+  }
+
   function render(item, history) {
     document.getElementById("item-title").textContent = item.name;
     const content = document.getElementById("item-content");
@@ -137,6 +227,7 @@ const ItemScreen = (() => {
           </div>
           <button class="btn" id="item-defect-submit">Сохранить дефект</button>
         </div>
+        ${numbersForm(item)}
       </div>
     `;
 
@@ -193,6 +284,8 @@ const ItemScreen = (() => {
         btn.disabled = false;
       }
     });
+
+    bindNumbers(item);
   }
 
   function onShow(params) {

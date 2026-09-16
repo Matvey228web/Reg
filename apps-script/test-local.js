@@ -1588,5 +1588,90 @@ check('больше тридцати за раз не берём', r.ok === fals
 r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, 'чужой-токен');
 check('без входа этикетки не отправить', r.ok === false && r.status === 401, r);  // недействительная сессия — 401, не 403
 
+console.log('\n== исправление номеров у вещи ==');
+// Опечатку в заводском номере находят, когда вещь уже в таблице. Главное, что
+// здесь проверяется: номер вещи не трогается, а дубль номера не проходит —
+// по этим номерам ищут технику, и повторный импорт считает одинаковые номера
+// одной и той же вещью.
+const numLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const numToken = numLogin.ok ? numLogin.data.token : null;
+check('вход перед правкой номеров', numLogin.ok === true, numLogin);
+
+let num = call('/item/create', {
+  category: 'CAM', model_name: 'Номерная Тест', serial_number: 'SN-ПЕРВЫЙ', inventory_number: 'ИНВ-1',
+}, numToken);
+check('вещь с номерами заведена', num.ok === true, num);
+const numId = num.ok ? num.data.item_id : null;
+num = call('/item/create', {
+  category: 'CAM', model_name: 'Номерная Тест', serial_number: 'SN-ЗАНЯТ', inventory_number: 'ИНВ-2',
+}, numToken);
+const numOther = num.ok ? num.data.item_id : null;
+check('вторая вещь для проверки дубля заведена', !!numOther, num);
+
+num = call('/item/numbers', { item_id: numId, serial_number: 'SN-ИСПРАВЛЕН' }, numToken);
+check('заводской номер исправлен', num.ok === true && num.data.serial_number === 'SN-ИСПРАВЛЕН', num);
+check('сказано, что именно изменилось',
+  num.ok && num.data.changed.serial_number &&
+  num.data.changed.serial_number.was === 'SN-ПЕРВЫЙ' &&
+  num.data.changed.serial_number.now === 'SN-ИСПРАВЛЕН', num.data);
+check('второй номер не тронут: его не присылали',
+  num.ok && num.data.inventory_number === 'ИНВ-1' && !num.data.changed.inventory_number, num.data);
+let numRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0];
+check('в таблице лежит исправленный номер', numRow && numRow.serial_number === 'SN-ИСПРАВЛЕН', numRow);
+check('номер вещи не изменился', numRow && String(numRow.item_id) === numId, numRow);
+
+num = call('/item/numbers', { item_id: numId, serial_number: '  SN-С-ПРОБЕЛАМИ  ' }, numToken);
+check('пробелы по краям срезаны', num.ok === true && num.data.serial_number === 'SN-С-ПРОБЕЛАМИ', num);
+// Чистилка импорта выбрасывает всё короче пяти знаков и без цифр. Человек,
+// вписывающий номер руками, вписывает его осознанно — здесь она не работает.
+num = call('/item/numbers', { item_id: numId, serial_number: 'АБ' }, numToken);
+check('короткий номер принят как есть', num.ok === true && num.data.serial_number === 'АБ', num);
+
+num = call('/item/numbers', { item_id: numId, serial_number: 'SN-ЗАНЯТ' }, numToken);
+check('занятый заводской номер не принят',
+  num.ok === false && num.status === 409 && num.error.indexOf(numOther) !== -1, num);
+num = call('/item/numbers', { item_id: numId, serial_number: 'sn-занят' }, numToken);
+check('занятость проверяется без учёта регистра', num.ok === false && num.status === 409, num);
+num = call('/item/numbers', { item_id: numId, inventory_number: 'ИНВ-2' }, numToken);
+check('занятый инвентарный номер не принят', num.ok === false && num.status === 409, num);
+numRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0];
+check('после отказа в таблице ничего не поменялось',
+  numRow && numRow.serial_number === 'АБ' && numRow.inventory_number === 'ИНВ-1', numRow);
+
+num = call('/item/numbers', { item_id: numId, serial_number: 'АБ' }, numToken);
+check('свой же номер занятым не считается', num.ok === true, num);
+num = call('/item/numbers', { item_id: numId, inventory_number: '' }, numToken);
+check('пустое поле стирает номер',
+  num.ok === true && num.data.inventory_number === '' &&
+  num.data.changed.inventory_number.was === 'ИНВ-1', num);
+
+num = call('/item/numbers', { item_id: numId }, numToken);
+check('без номеров — понятный отказ, а не молчаливая запись',
+  num.ok === false && num.status === 400, num);
+num = call('/item/numbers', { item_id: '999999', serial_number: 'X' }, numToken);
+check('несуществующая вещь — 404', num.ok === false && num.status === 404, num);
+
+// У полки с учётом количеством одна строка на все штуки: личного номера нет.
+num = call('/item/create', { category: 'GRP', model_name: 'Мешки Тест', qty: 5 }, numToken);
+check('полка с учётом количеством заведена', num.ok === true, num);
+const numBulkId = num.ok ? num.data.item_id : null;
+num = call('/item/numbers', { item_id: numBulkId, serial_number: 'SN-ПОЛКА' }, numToken);
+check('полке номер не вписать',
+  num.ok === false && num.status === 409 && /количеством/.test(String(num.error)), num);
+
+const numStaff = call('/staff/create', {
+  full_name: 'Складмен Номеров', login: 'numcheck', pin: '7777', role: 'Warehouse Staff',
+}, numToken);
+check('сотрудник склада для проверки прав заведён', numStaff.ok === true, numStaff);
+const numStaffLogin = call('/auth/login', { login: 'numcheck', pin: '7777' });
+check('он вошёл', numStaffLogin.ok === true, numStaffLogin);
+num = call('/item/numbers', { item_id: numId, serial_number: 'SN-ЧУЖОЙ' },
+           numStaffLogin.ok ? numStaffLogin.data.token : 'нет-токена');
+check('сотруднику склада правка номеров запрещена', num.ok === false && num.status === 403, num);
+num = call('/item/numbers', { item_id: numId, serial_number: 'SN-ЧУЖОЙ' }, 'чужой-токен');
+check('без входа номера не исправить', num.ok === false && num.status === 401, num);
+numRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0];
+check('после всех отказов номер остался прежним', numRow && numRow.serial_number === 'АБ', numRow);
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
