@@ -474,7 +474,10 @@ const MockAPI = {
                  settings: { ...mockSettings }, categories: mockCategories() };
       }
 
+      // Токен обязателен — как и в Apps Script: адрес веб-приложения не секрет,
+      // а номера напечатаны на этикетках, и без проверки склад читался перебором.
       case "/item/lookup": {
+        MockStore.requireToken(token);
         const item = MockStore.findItem(body.item_id);
         if (!item) {
           const err = new Error("Предмет не найден");

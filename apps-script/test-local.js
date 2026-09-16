@@ -352,7 +352,7 @@ console.log('\n== выдача / приём ==');
 const clientId = call('/client/create', { client_name: 'ООО Реклама', project_name: 'Ролик' }, token).data.client_id;
 r = call('/transaction/checkout', { item_id: itemId, client_id: clientId, notes: 'на 3 дня' }, token);
 check('выдача прошла', r.ok === true, r);
-r = call('/item/lookup', { item_id: itemId });
+r = call('/item/lookup', { item_id: itemId }, token);
 check('статус стал Rented', r.ok && r.data.status === 'Rented', r.data && r.data.status);
 check('current_transaction подтянулась', r.ok && r.data.current_transaction !== null);
 r = call('/transaction/checkout', { item_id: itemId, client_id: clientId }, token);
@@ -360,7 +360,7 @@ check('повторная выдача отклонена (409)', r.ok === false
 
 r = call('/transaction/checkin', { item_id: itemId, has_defect: true, defect_description: 'Царапина', defect_severity: 'Major' }, token);
 check('приём с дефектом прошёл', r.ok === true && r.data.defect_id === 1, r);
-r = call('/item/lookup', { item_id: itemId });
+r = call('/item/lookup', { item_id: itemId }, token);
 check('статус стал In Repair', r.ok && r.data.status === 'In Repair', r.data && r.data.status);
 check('current_transaction очищена', r.ok && r.data.current_transaction === null);
 check('дефект виден как открытый', r.ok && r.data.open_defects.length === 1);
@@ -368,7 +368,7 @@ check('дефект виден как открытый', r.ok && r.data.open_def
 console.log('\n== закрытие дефекта возвращает предмет в строй ==');
 r = call('/defect/resolve', { defect_id: 1, status: 'Resolved', resolution_notes: 'Отполировали' }, token);
 check('дефект закрыт', r.ok === true, r);
-r = call('/item/lookup', { item_id: itemId });
+r = call('/item/lookup', { item_id: itemId }, token);
 check('статус вернулся в Available', r.ok && r.data.status === 'Available', r.data && r.data.status);
 
 console.log('\n== история ==');
@@ -494,7 +494,7 @@ console.log('\n== номер не теряет ведущий ноль ==');
 const eqAfter = readRows(getSheet(SHEETS.EQUIPMENT));
 const first = eqAfter[0];
 check('item_id остался строкой с ведущим нулём', first.item_id === '010101', first.item_id);
-const lookedUp = call('/item/lookup', { item_id: '010101' });
+const lookedUp = call('/item/lookup', { item_id: '010101' }, token);
 check('предмет находится по своему номеру', lookedUp.ok === true, lookedUp);
 
 console.log('\n== порядок колонок в листе может не совпадать со схемой ==');
@@ -544,7 +544,7 @@ const addedId = call('/item/create', { name: 'Sony Burano 8k', category: 'CAM' }
 const addedRow = readRows(eqTail).filter(r => r.name === 'Sony Burano 8k')[0];
 check('item_id записан строкой с ведущим нулём', addedRow.item_id === addedId && /^0\d{5}$/.test(String(addedRow.item_id)),
   addedRow.item_id);
-const addedLookup = call('/item/lookup', { item_id: addedId });
+const addedLookup = call('/item/lookup', { item_id: addedId }, token);
 check('добавленный предмет находится по номеру', addedLookup.ok === true, addedLookup);
 check('model_code добавленного предмета остался двузначным',
   String(addedRow.model_code).length === 2, addedRow.model_code);
@@ -603,7 +603,7 @@ check('новому клиенту тоже достаётся свободны�
 console.log('\n== дефект снимает с выдачи по серьёзности, одинаково на всех путях ==');
 // Раньше приём с дефектом всегда уводил в ремонт, а отдельная заявка — только
 // при «не работает»: серьёзная поломка оставляла технику доступной к выдаче.
-const status = (id) => call('/item/lookup', { item_id: id }).data.status;
+const status = (id) => call('/item/lookup', { item_id: id }, token).data.status;
 const dItem = call('/item/create', { name: 'Aputure 600d', category: 'LGT' }, token).data.item_id;
 
 r = call('/defect/report', { item_id: dItem, description: 'Царапина на корпусе', severity: 'Minor' }, token);
@@ -616,13 +616,13 @@ check('новый статус вернулся в ответе заявки', r
 check('предмет в ремонте выдать нельзя',
   call('/transaction/checkout', { item_id: dItem, client_id: clientId }, token).status === 409);
 
-const majorDefect = call('/item/lookup', { item_id: dItem })
+const majorDefect = call('/item/lookup', { item_id: dItem }, token)
   .data.open_defects.filter(d => d.severity === 'Major')[0];
 r = call('/defect/resolve', { defect_id: majorDefect.defect_id, resolution_notes: 'Починили' }, token);
 check('серьёзный дефект закрыт', r.ok === true, r);
 check('предмет снова доступен, хотя царапина ещё открыта', status(dItem) === 'Available', status(dItem));
 check('незначительный дефект остался в открытых',
-  call('/item/lookup', { item_id: dItem }).data.open_defects.length === 1);
+  call('/item/lookup', { item_id: dItem }, token).data.open_defects.length === 1);
 
 call('/defect/report', { item_id: dItem, description: 'Не включается', severity: 'Out of Service' }, token);
 check('«не работает» снимает с выдачи', status(dItem) === 'In Repair', status(dItem));
@@ -730,14 +730,14 @@ check('повторное заведение пополняет ту же стр
 check('на складе одна строка сэндбэгов',
   readRows(getSheet(SHEETS.EQUIPMENT)).filter(e => e.name === 'SANDBAG BIG').length === 1);
 
-r = call('/item/lookup', { item_id: bagId });
+r = call('/item/lookup', { item_id: bagId }, token);
 check('карточка отдаёт количество и остаток',
   r.ok && r.data.qty === 25 && r.data.qty_out === 0 && r.data.qty_free === 25 && r.data.by_qty === true,
   r.data);
 
 r = call('/transaction/checkout', { item_id: bagId, qty: 4 }, token);
 check('выдали четыре штуки', r.ok === true && r.data.qty === 4, r);
-r = call('/item/lookup', { item_id: bagId });
+r = call('/item/lookup', { item_id: bagId }, token);
 check('остаток уменьшился, позиция осталась доступной',
   r.ok && r.data.qty_out === 4 && r.data.qty_free === 21 && r.data.status === 'Available', r.data);
 
@@ -759,14 +759,14 @@ check('принять больше, чем на руках, нельзя (409)',
 
 // Когда выдали всё — позиция занята; вернули одну — снова доступна.
 call('/transaction/checkout', { item_id: bagId, qty: 22 }, token);
-r = call('/item/lookup', { item_id: bagId });
+r = call('/item/lookup', { item_id: bagId }, token);
 check('выдали всё — позиция «в аренде»', r.ok && r.data.status === 'Rented' && r.data.qty_free === 0, r.data);
 call('/transaction/checkin', { item_id: bagId, qty: 1 }, token);
-r = call('/item/lookup', { item_id: bagId });
+r = call('/item/lookup', { item_id: bagId }, token);
 check('вернули одну — снова доступна', r.ok && r.data.status === 'Available' && r.data.qty_free === 1, r.data);
 
 // Поштучная техника количеством не считается.
-r = call('/item/lookup', { item_id: itemId });
+r = call('/item/lookup', { item_id: itemId }, token);
 check('обычная камера остаётся поштучной', r.ok && r.data.by_qty === false && r.data.qty === 1, r.data);
 
 console.log('\n== способ учёта категории ==');
@@ -1422,6 +1422,12 @@ check('отметка bootstrap_done стоит в Meta', !!flagRow, flagRow);
 updateRow(getSheet(SHEETS.META), flagRow.__row, { key: '', value: '' });
 r = call('/staff/create', { full_name: 'Матвей', login: 'matvey', pin: '4321' });
 check('после удаления отметки вручную самозагрузка снова доступна', r.ok === true, r);
+
+console.log('\n== карточку предмета без входа не прочитать ==');
+// Адрес веб-приложения не секрет, а номера напечатаны на этикетках: без
+// проверки токена кто угодно перебрал бы 010101, 010102… и вычитал склад.
+r = call('/item/lookup', { item_id: '010101' });
+check('без токена карточка не отдаётся', r.ok === false && r.status === 401, r);
 
 console.log('\n== этикетки уходят ботом ==');
 // Сохранить файл прямо на устройство из вебвью Telegram нельзя, поэтому пачку

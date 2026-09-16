@@ -951,7 +951,7 @@ function doPost(e) {
       // перед таблицей (кэш и ограничение частоты); сюда наружу не уходит
       // ничего, по чему можно опознать конкретную единицу техники.
       case "/public/catalog": data = handlePublicCatalog(payload); break;
-      case "/item/lookup": data = handleItemLookup(payload); break;
+      case "/item/lookup": data = handleItemLookup(payload, token); break;
       case "/item/create": data = handleItemCreate(payload, token); break;
       case "/transaction/checkout": data = handleTransactionCheckout(payload, token); break;
       case "/transaction/checkin": data = handleTransactionCheckin(payload, token); break;
@@ -1073,7 +1073,14 @@ function handleAuthLogin(payload) {
   };
 }
 
-function handleItemLookup(payload) {
+// Токен обязателен. Раньше его тут не спрашивали, и это была дыра: адрес
+// веб-приложения не секрет — он лежит в js/config.js и уезжает в браузер
+// каждому, — а номера шестизначные и напечатаны на этикетках открыто. То есть
+// кто угодно мог перебрать 010101, 010102… и вычитать весь склад вместе с тем,
+// кто что взял и какие заметки оставил. Оба наших вызова идут после входа,
+// и токен у них есть всегда.
+function handleItemLookup(payload, token) {
+  checkAuth(token);
   var itemId = String(payload.item_id || "").trim();
   var sheet = getSheet(SHEETS.EQUIPMENT);
   var item = findRowByValue(sheet, "item_id", itemId);

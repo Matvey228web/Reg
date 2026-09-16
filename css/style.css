@@ -1445,7 +1445,63 @@ select {
   margin: 0 var(--s2) var(--s2) 0;
   image-rendering: pixelated;        /* модули кода — квадраты, не пятна */
 }
-#labels-preview { display: flex; flex-wrap: wrap; align-items: flex-start; }
+/* Ряд размеров: одна и та же этикетка во всех форматах, в настоящем масштабе.
+   Список в форме показывает выбранный размер словами, а здесь его видно —
+   насколько 20×30 мельче 40×60, словами не объяснить.
+   Выключка по нижнему краю: так разная высота читается сравнением предметов,
+   поставленных на стол, а не сбоем вёрстки.
+   Четыре этикетки в настоящем масштабе — это 120 мм, в экран они не помещаются
+   принципиально, поэтому ряд прокручивается вбок. Уменьшать нельзя: тогда
+   «настоящий масштаб» перестаёт быть настоящим, а он тут и есть смысл. */
+.size-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s4);
+  overflow-x: auto;
+  margin: 0 calc(var(--gutter) * -1) var(--s3);
+  padding: var(--s2) var(--gutter) var(--s1);
+  scrollbar-width: none;
+}
+.size-row::-webkit-scrollbar { display: none; }
+.size-card {
+  flex: none;
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.size-card .label { margin: 0 auto; }
+.size-card-name {
+  display: block;
+  margin-top: var(--s1);
+  font-size: var(--t-caption);
+  line-height: var(--t-caption-lh);
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* Выбранный — сплошной рамкой акцента вместо пунктира и подписью акцентом.
+   Обводкой, а не рамкой: рамка сдвинула бы содержимое на пиксель и этикетка
+   прыгала бы при выборе. */
+.size-card--on .label { border-style: solid; border-color: var(--accent); outline: 1px solid var(--accent); }
+.size-card--on .size-card-name { color: var(--accent); font-weight: 600; }
+.size-card:active .label { opacity: 0.6; }
+
+/* Образцы — тоже в строку, а не в перенос: при переносе третий уезжал вниз
+   и выглядел лишним, хотя это такой же пример, как первые два. */
+#labels-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  overflow-x: auto;
+  margin: 0 calc(var(--gutter) * -1);
+  padding: var(--s1) var(--gutter) var(--s2);
+  scrollbar-width: none;
+}
+#labels-preview::-webkit-scrollbar { display: none; }
+#labels-preview .label { flex: none; margin: 0; }
 
 #labels-print-area { display: none; }
 

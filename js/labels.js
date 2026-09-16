@@ -114,6 +114,11 @@ const LabelsScreen = (() => {
       отправит бот в чат склада одним архивом: сохранять их по одной из Telegram
       нельзя, это ограничение самого мессенджера. Печать из Telegram он тоже
       блокирует — для неё откройте адрес приложения в Safari.</p>
+      <div class="section-title">Размер в настоящую величину</div>
+      <div class="size-row" id="labels-sizes"></div>
+      <p class="hint">Нажмите на размер, чтобы взять его. Ряд прокручивается вбок:
+      четыре этикетки в настоящую величину — это 12 сантиметров, в экран они
+      не помещаются.</p>
       <div class="section-title">Как будет выглядеть</div>
       <div id="labels-preview"></div>`;
 
@@ -175,6 +180,7 @@ const LabelsScreen = (() => {
     document.getElementById("labels-count").textContent =
       `К печати: ${items.length} ${plural(items.length, "этикетка", "этикетки", "этикеток")}` +
       ` · ${size.w}×${size.h} мм`;
+    drawSizes(items[0]);
     drawPreview(items.slice(0, 3));
   }
 
@@ -213,6 +219,42 @@ const LabelsScreen = (() => {
       TG.isAvailable()
         ? "Удерживайте картинку, чтобы сохранить её в фото или отправить."
         : "Нажмите картинку правой кнопкой, чтобы сохранить.");
+  }
+
+  // Ряд размеров: одна и та же этикетка во всех форматах, в настоящую величину.
+  // Рисуем первую позицию из отобранных — брать разные предметы в ряд сравнения
+  // размеров нельзя, иначе непонятно, что именно меняется от карточки к карточке.
+  function drawSizes(sample) {
+    const box = document.getElementById("labels-sizes");
+    if (!box) return;
+    box.innerHTML = "";
+    if (!sample) return;
+    Object.keys(SIZES).forEach((key) => {
+      const size = SIZES[key];
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "size-card" + (key === sizeKey ? " size-card--on" : "");
+      card.dataset.size = key;
+      card.setAttribute("aria-pressed", key === sizeKey ? "true" : "false");
+      card.appendChild(labelNode(sample, size, PREVIEW_SCALE));
+      const name = document.createElement("span");
+      name.className = "size-card-name";
+      name.textContent = size.label + " мм";
+      card.appendChild(name);
+      card.addEventListener("click", () => pickSize(key));
+      box.appendChild(card);
+    });
+  }
+
+  function pickSize(key) {
+    if (!SIZES[key] || key === sizeKey) return;
+    sizeKey = key;
+    try { localStorage.setItem(SIZE_KEY, sizeKey); } catch { /* не критично */ }
+    // Список в форме — та же настройка, и он должен показывать то же самое.
+    const select = document.getElementById("labels-size");
+    if (select) select.value = key;
+    TG.hapticSuccess();
+    recount();
   }
 
   function drawPreview(list) {
