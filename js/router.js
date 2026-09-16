@@ -108,6 +108,16 @@ const Router = (() => {
     if (typeof Fab !== "undefined") Fab.init();
     var btn = document.getElementById("back-button");
     if (btn) btn.addEventListener("click", () => back());
+    // Блок поиска нажимается целиком. Поле занимает строку, но по краям блока
+    // остаются его поля-отступы: тап по ним раньше не делал ничего, и карточка
+    // выглядела цельной, а нажималась только серединой.
+    document.addEventListener("click", function (e) {
+      if (!e.target || !e.target.closest) return;
+      var box = e.target.closest(".searchbar");
+      if (!box || e.target.closest("input, select, button, textarea, a")) return;
+      var input = box.querySelector('input[type="search"]');
+      if (input) input.focus();
+    });
     document.querySelectorAll("#tabbar [data-tab]").forEach(function (el) {
       // Вкладка — это и есть навигация, поэтому стек сбрасываем: «назад»
       // нужен только внутри раздела (например, из карточки предмета).

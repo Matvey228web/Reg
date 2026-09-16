@@ -92,7 +92,7 @@ const LabelsScreen = (() => {
       </div>
       ${singleItemId ? "" : `
       <div class="searchbar">
-        <input type="search" id="labels-search" placeholder="Название или номер"
+        <input type="search" id="labels-search" placeholder="Поиск по названию или номеру"
                autocapitalize="off" autocorrect="off" spellcheck="false" />
         <div class="filters">
           <select id="labels-filter-category"></select>

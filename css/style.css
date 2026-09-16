@@ -372,6 +372,18 @@ a { color: var(--tg-link-color); }
    Цвет лупы зашит средне-серым: это ровно системный secondaryLabel, он читается
    и на белом, и на тёмном, а взять currentColor внутрь data-URI нельзя. */
 input[type="search"] {
+  /* Поле живёт и внутри .field, и внутри .searchbar, поэтому собственные
+     размеры задаём здесь, а не наследуем от родителя. Без ширины оно
+     оставалось узким — треть блока, — и остальная карточка не нажималась.
+     Кегль ровно 16: любое текстовое поле мельче Safari на айфоне обязан
+     приблизить при фокусе, и страница прыгала на каждый тап по поиску. */
+  width: 100%;
+  min-height: var(--tap);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.3;
+  color: var(--ink);
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
   border-color: transparent;
   background-color: var(--surface);
@@ -381,7 +393,8 @@ input[type="search"] {
   background-size: 17px 17px;
   padding-left: 38px;
 }
-input[type="search"]:focus { background-color: var(--surface-strong); }
+input[type="search"]::placeholder { color: var(--muted); }
+input[type="search"]:focus { background-color: var(--surface-strong); outline: none; }
 /* Системный крестик очистки в вебките серый и на капсуле смотрится чужеродно;
    очистить поле можно выделением, а место в строке дороже. */
 input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
