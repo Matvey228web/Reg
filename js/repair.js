@@ -27,7 +27,7 @@ const RepairScreen = (() => {
 
   function render(defects) {
     const list = document.getElementById("repair-list");
-    const status = document.getElementById("repair-filter-status").value;
+    const status = segmentedValue("repair-filter-status");
     const shown = status === "all" ? defects : defects.filter((d) => d.status === status);
 
     if (!shown.length) {
@@ -139,11 +139,12 @@ const RepairScreen = (() => {
   }
 
   function init() {
-    document.getElementById("repair-filter-status").addEventListener("change", () => {
+    bindSegmented("repair-filter-status", () => {
       const cached = Cache.items(CACHE);
       if (cached) render(cached);   // фильтр — локально, без запроса
       else loadList();
     });
+    Pull.register("repair", () => loadList({ force: true }));
     Router.register("repair", { onShow });
   }
 

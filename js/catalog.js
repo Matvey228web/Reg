@@ -309,6 +309,7 @@ const CatalogScreen = (() => {
     document.getElementById("new-item-category").addEventListener("change", loadModels);
     document.getElementById("new-item-model").addEventListener("change", toggleNewModel);
     document.getElementById("new-item-submit").addEventListener("click", submitNewItem);
+    Pull.register("catalog", () => loadList({ force: true }));
     Router.register("catalog", { onShow });
   }
 

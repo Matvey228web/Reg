@@ -32,7 +32,7 @@ const OrdersScreen = (() => {
   // ---- список ----
 
   function matches(order) {
-    const status = document.getElementById("orders-filter-status").value;
+    const status = segmentedValue("orders-filter-status");
     if (status === "overdue") {
       if (!isOverdue(order)) return false;
     } else if (status !== "all" && order.status !== status) {
@@ -366,14 +366,15 @@ const OrdersScreen = (() => {
     });
     // Подсказывает и номер, и арендатора, и ник, и позицию из состава заказа.
     Suggest.attach("orders-search", (q) => Suggest.orders(Cache.items(CACHE) || [], q));
-    ["orders-filter-status", "orders-search"].forEach((id) => {
-      const el = document.getElementById(id);
-      const event = id === "orders-search" ? "input" : "change";
-      el.addEventListener(event, () => {
-        const cached = Cache.items(CACHE);
-        if (cached) render(cached);
-      });
-    });
+    // Поиск — поле, фильтр — сегменты: события у них разные, и общий цикл по
+    // именам больше не годится.
+    const refilter = () => {
+      const cached = Cache.items(CACHE);
+      if (cached) render(cached);
+    };
+    document.getElementById("orders-search").addEventListener("input", refilter);
+    bindSegmented("orders-filter-status", refilter);
+    Pull.register("orders", () => loadList({ force: true }));
     Router.register("orders", { onShow });
   }
 

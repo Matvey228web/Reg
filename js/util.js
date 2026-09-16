@@ -137,3 +137,30 @@ async function saveImageFor(canvas, filename, title, btn) {
     if (btn) { btn.disabled = false; btn.textContent = before; }
   }
 }
+
+// --- Сегментированный контроль ---
+// Значение живёт в разметке (класс на выбранной кнопке), а не в скрытом поле:
+// скрытое поле рядом с видимыми кнопками — это два органа управления на одну
+// настройку, и однажды они разъезжаются.
+function segmentedValue(id) {
+  const on = document.querySelector("#" + id + " .segmented-item--on");
+  return on ? on.dataset.value : "";
+}
+
+function bindSegmented(id, onChange) {
+  const box = document.getElementById(id);
+  if (!box) return;
+  box.addEventListener("click", (e) => {
+    const btn = e.target.closest(".segmented-item");
+    if (!btn || btn.classList.contains("segmented-item--on")) return;
+    box.querySelectorAll(".segmented-item").forEach((b) => {
+      b.classList.remove("segmented-item--on");
+      b.setAttribute("aria-selected", "false");
+    });
+    btn.classList.add("segmented-item--on");
+    btn.setAttribute("aria-selected", "true");
+    // Выбранный сегмент мог быть за краем прокрученной полосы.
+    if (btn.scrollIntoView) btn.scrollIntoView({ block: "nearest", inline: "nearest" });
+    onChange(btn.dataset.value);
+  });
+}

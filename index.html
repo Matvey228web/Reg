@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20260916n" />
+<link rel="stylesheet" href="css/style.css?v=20260916p" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20260916n"></script>
+<script src="js/vendor/qrcode-generator.js?v=20260916p"></script>
 </head>
 <body>
 <div id="app">
@@ -216,15 +216,14 @@
 
   <!-- Экран: ремонт/дефекты -->
   <div class="screen" id="screen-repair">
-    <div class="searchbar">
-      <div class="filters">
-        <select id="repair-filter-status">
-        <option value="all">Все</option>
-        <option value="Open">Открытые</option>
-        <option value="In Repair">В ремонте</option>
-          <option value="Resolved">Решённые</option>
-        </select>
-      </div>
+    <!-- Сегменты, а не список: вариантов четыре, и все видны сразу.
+         Карточки блока поиска здесь нет — искать в дефектах нечему, и белая
+         рамка вокруг одной полосы читалась бы пустой. -->
+    <div class="segmented" id="repair-filter-status" role="tablist">
+      <button class="segmented-item segmented-item--on" type="button" data-value="all" role="tab" aria-selected="true">Все</button>
+      <button class="segmented-item" type="button" data-value="Open" role="tab" aria-selected="false">Открытые</button>
+      <button class="segmented-item" type="button" data-value="In Repair" role="tab" aria-selected="false">В ремонте</button>
+      <button class="segmented-item" type="button" data-value="Resolved" role="tab" aria-selected="false">Решённые</button>
     </div>
     <div class="refresh-row" id="repair-refresh"></div>
     <div class="list" id="repair-list"></div>
@@ -235,14 +234,14 @@
     <div class="searchbar">
       <input type="search" id="orders-search" placeholder="Поиск по номеру, имени или телефону"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
-      <div class="filters">
-        <select id="orders-filter-status">
-          <option value="Issued">Выданные</option>
-          <option value="overdue">Просроченные</option>
-          <option value="New">Оформленные</option>
-          <option value="Returned">Возвращённые</option>
-          <option value="all" selected>Все</option>
-        </select>
+      <!-- Пять сегментов в узкий экран влезают не всегда — полоса
+           прокручивается вбок, кегль не уменьшаем. -->
+      <div class="segmented" id="orders-filter-status" role="tablist">
+        <button class="segmented-item segmented-item--on" type="button" data-value="all" role="tab" aria-selected="true">Все</button>
+        <button class="segmented-item" type="button" data-value="Issued" role="tab" aria-selected="false">Выданные</button>
+        <button class="segmented-item" type="button" data-value="overdue" role="tab" aria-selected="false">Просроченные</button>
+        <button class="segmented-item" type="button" data-value="New" role="tab" aria-selected="false">Оформленные</button>
+        <button class="segmented-item" type="button" data-value="Returned" role="tab" aria-selected="false">Возвращённые</button>
       </div>
     </div>
     <div class="sticky-bar"><button class="btn" id="orders-add-toggle">+ Новый заказ</button></div>
@@ -367,30 +366,31 @@
 
 </div>
 
-<script src="js/config.js?v=20260916n"></script>
-<script src="js/util.js?v=20260916n"></script>
-<script src="js/suggest.js?v=20260916n"></script>
-<script src="js/cache.js?v=20260916n"></script>
-<script src="js/mock-data.js?v=20260916n"></script>
-<script src="js/api.js?v=20260916n"></script>
-<script src="js/telegram.js?v=20260916n"></script>
-<script src="js/router.js?v=20260916n"></script>
-<script src="js/fab.js?v=20260916n"></script>
-<script src="js/qr.js?v=20260916n"></script>
-<script src="js/swipe.js?v=20260916n"></script>
-<script src="js/auth.js?v=20260916n"></script>
-<script src="js/catalog.js?v=20260916n"></script>
-<script src="js/scan.js?v=20260916n"></script>
-<script src="js/item.js?v=20260916n"></script>
-<script src="js/order.js?v=20260916n"></script>
-<script src="js/repair.js?v=20260916n"></script>
-<script src="js/orders.js?v=20260916n"></script>
-<script src="js/staff.js?v=20260916n"></script>
-<script src="js/models.js?v=20260916n"></script>
-<script src="js/settings.js?v=20260916n"></script>
-<script src="js/labels.js?v=20260916n"></script>
-<script src="js/inventory.js?v=20260916n"></script>
-<script src="js/pin.js?v=20260916n"></script>
-<script src="js/app.js?v=20260916n"></script>
+<script src="js/config.js?v=20260916p"></script>
+<script src="js/util.js?v=20260916p"></script>
+<script src="js/suggest.js?v=20260916p"></script>
+<script src="js/cache.js?v=20260916p"></script>
+<script src="js/mock-data.js?v=20260916p"></script>
+<script src="js/api.js?v=20260916p"></script>
+<script src="js/telegram.js?v=20260916p"></script>
+<script src="js/router.js?v=20260916p"></script>
+<script src="js/fab.js?v=20260916p"></script>
+<script src="js/qr.js?v=20260916p"></script>
+<script src="js/swipe.js?v=20260916p"></script>
+<script src="js/pull.js?v=20260916p"></script>
+<script src="js/auth.js?v=20260916p"></script>
+<script src="js/catalog.js?v=20260916p"></script>
+<script src="js/scan.js?v=20260916p"></script>
+<script src="js/item.js?v=20260916p"></script>
+<script src="js/order.js?v=20260916p"></script>
+<script src="js/repair.js?v=20260916p"></script>
+<script src="js/orders.js?v=20260916p"></script>
+<script src="js/staff.js?v=20260916p"></script>
+<script src="js/models.js?v=20260916p"></script>
+<script src="js/settings.js?v=20260916p"></script>
+<script src="js/labels.js?v=20260916p"></script>
+<script src="js/inventory.js?v=20260916p"></script>
+<script src="js/pin.js?v=20260916p"></script>
+<script src="js/app.js?v=20260916p"></script>
 </body>
 </html>

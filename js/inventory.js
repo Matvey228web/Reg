@@ -529,7 +529,8 @@ const InventoryScreen = (() => {
     wireMissing();
     wireCreate();
     document.getElementById("inventory-reset").addEventListener("click", () => {
-      TG.showConfirm("Обнулить отмеченное? Область и выборка останутся.", (yes) => {
+      TG.confirmDestructive("Обнулить отмеченное?",
+        "Область и выборка останутся — пропадут только отметки.", "Обнулить", (yes) => {
         if (!yes) return;
         session.found = {};
         session.unknown = [];
@@ -541,7 +542,9 @@ const InventoryScreen = (() => {
       });
     });
     document.getElementById("inventory-cancel").addEventListener("click", () => {
-      TG.showConfirm("Отменить сверку? Всё, что отсканировано, пропадёт.", (yes) => {
+      TG.confirmDestructive("Отменить сверку?",
+        "Всё, что отсканировано, пропадёт. В журнал ничего не запишется.",
+        "Отменить сверку", (yes) => {
         if (!yes) return;
         session = null;
         resetTransient();

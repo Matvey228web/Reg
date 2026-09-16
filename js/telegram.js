@@ -112,6 +112,13 @@ const TG = (() => {
     return !!webApp;
   }
 
+  // Версию спрашиваем через свою обёртку: у старых клиентов самого метода
+  // isVersionAtLeast может не быть, и прямой вызов упал бы.
+  function atLeast(version) {
+    if (!webApp || typeof webApp.isVersionAtLeast !== "function") return false;
+    try { return !!webApp.isVersionAtLeast(version); } catch (e) { return false; }
+  }
+
   function hasScanQr() {
     return !!(webApp && typeof webApp.showScanQrPopup === "function");
   }
@@ -251,8 +258,57 @@ const TG = (() => {
     else cb(confirm(message));
   }
 
+  // Подтверждение разрушительного действия. В системе такое окно называет
+  // действие словом и красит его красным — «Удалить», а не «ОК»; у showConfirm
+  // кнопки нейтральные и без имени.
+  //
+  // Два ограничения, из-за которых нельзя просто заменить вызовы:
+  //   showPopup появился в Bot API 6.2 — на клиентах старее его нет;
+  //   сообщение в нём не длиннее 256 знаков, и на длинном он ОТКАЗЫВАЕТ,
+  //   а не обрезает. Поэтому в обоих случаях тихо уходим в showConfirm:
+  //   нейтральное окно хуже красного, но несравнимо лучше молчания.
+  var POPUP_LIMIT = 256;
+
+  function confirmDestructive(title, message, actionText, cb) {
+    var fits = String(message || "").length <= POPUP_LIMIT &&
+               String(title || "").length <= 64;
+    if (!webApp || !webApp.showPopup || !atLeast("6.2") || !fits) {
+      showConfirm((title ? title + "\n\n" : "") + message, cb);
+      return;
+    }
+    try {
+      webApp.showPopup({
+        title: title,
+        message: message,
+        buttons: [
+          { id: "cancel", type: "cancel" },
+          { id: "go", type: "destructive", text: actionText },
+        ],
+      }, function (id) { cb(id === "go"); });
+    } catch (e) {
+      // Клиент мог отказать и по другой причине — лучше нейтральное окно,
+      // чем действие, которое нечем подтвердить.
+      showConfirm((title ? title + "\n\n" : "") + message, cb);
+    }
+  }
+
+  // Вертикальный свайп вниз закрывает мини-приложение. Свой жест «потянуть
+  // для обновления» без этого будет закрывать приложение вместо обновления —
+  // и выглядеть как падение. Возвращаем, получилось ли: жест ставится только
+  // при true.
+  function lockVerticalSwipes() {
+    if (!webApp || !webApp.disableVerticalSwipes || !atLeast("7.7")) return false;
+    try {
+      webApp.disableVerticalSwipes();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   return {
     init, getUser, getInitData, isAvailable, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
-    mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm, openLink,
+    mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm,
+    confirmDestructive, lockVerticalSwipes, openLink,
   };
 })();

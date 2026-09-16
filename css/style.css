@@ -1026,6 +1026,88 @@ select {
 .label--tappable { cursor: pointer; transition: transform 0.12s ease; }
 .label--tappable:active { transform: scale(0.97); }
 
+/* Индикатор «потянуть для обновления». Висит над содержимым у самого верха и
+   выезжает вместе с пальцем; крутится, пока идёт запрос — а он стоит 5–8 секунд,
+   и без вращения жест выглядел бы как «ничего не произошло». */
+.pull-indicator {
+  position: fixed;
+  top: calc(var(--safe-top) + var(--navbar-h));
+  left: 50%;
+  margin-left: -14px;
+  z-index: 70;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--group-bg);
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.2s ease;
+}
+.pull-indicator--on { opacity: 1; }
+.pull-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--hairline);
+  border-top-color: var(--accent);
+}
+/* Порог пройден — кольцо целиком акцентом: видно, что можно отпускать. */
+.pull-indicator--ready .pull-spinner { border-color: var(--accent); }
+.pull-indicator--spin .pull-spinner { animation: pull-spin 0.7s linear infinite; }
+@keyframes pull-spin { to { transform: rotate(360deg); } }
+
+/* --- Сегментированный контроль ---
+   Выпадающий список хорош на десятке вариантов. Там, где их четыре, система
+   рисует сегменты: все варианты видны сразу, выбор — один тап, а не тап,
+   прокрутка колеса и подтверждение.
+   Дорожка — приглушённая капсула, выбранный сегмент приподнят плашкой цвета
+   группы. Тень мягкая и маленькая: она здесь единственное, что отличает
+   «нажато» от «не нажато», и на тёмной теме без неё плашка сливается. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  height: 32px;
+  padding: 2px;
+  margin-bottom: var(--s3);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  /* Пять сегментов в узкий экран не всегда влезают. Уменьшать кегль ради
+     «влезло» нельзя — 13 и так нижняя граница читаемого, — поэтому полоса
+     прокручивается вбок. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.segmented::-webkit-scrollbar { display: none; }
+.segmented-item {
+  flex: 1 0 auto;
+  min-width: 0;
+  padding: 0 var(--s3);
+  border: none;
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--t-foot);
+  line-height: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.segmented-item--on {
+  background: var(--group-bg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
+}
+.segmented-item:active:not(.segmented-item--on) { background: var(--surface-strong); }
+/* Внутри блока поиска полоса стоит под полем и своего нижнего отступа не
+   получает — его уже держит сам блок. */
+.searchbar .segmented { margin-bottom: 0; margin-top: var(--s2); }
+
 /* Строка модели на экране «Модели». Название слева бывает длинным
    («OSTERRIG SIRIUS 100CM») и по умолчанию съедает всю строку — списку
    категорий оставалось сто точек, и в нём было видно «Осветител».
@@ -1165,6 +1247,7 @@ select {
   100% { background-position: 0 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .pull-indicator--spin .pull-spinner { animation: none; }
   .skeleton-card { animation: none; }
   .btn, .card { transition: none; }
 }

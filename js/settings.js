@@ -90,7 +90,17 @@ const SettingsScreen = (() => {
     const pin = document.getElementById("settings-pin");
     if (pin) pin.addEventListener("click", () => Router.navigate("pin"));
     const out = document.getElementById("settings-logout");
-    if (out) out.addEventListener("click", () => Auth.logout());
+    // Раньше выход происходил молча с одного тапа, а кнопка стоит рядом со
+    // «Сменить свой PIN» — промахнуться легко, а обратно только через логин
+    // и PIN, которые сотрудник может и не помнить.
+    if (out) {
+      out.addEventListener("click", () => {
+        TG.confirmDestructive("Выйти из системы?",
+          "Чтобы вернуться, понадобятся логин и PIN.", "Выйти", (yes) => {
+            if (yes) Auth.logout();
+          });
+      });
+    }
   }
 
   function render() {
