@@ -91,13 +91,13 @@ const LabelsScreen = (() => {
         На 30×50 и 40×60 рядом с ней помещается ещё и категория.</p>
       </div>
       ${singleItemId ? "" : `
-      <div class="field">
-        <input type="search" id="labels-search" placeholder="Поиск по названию или номеру"
+      <div class="searchbar">
+        <input type="search" id="labels-search" placeholder="Название или номер"
                autocapitalize="off" autocorrect="off" spellcheck="false" />
-      </div>
-      <div class="filters">
-        <select id="labels-filter-category"></select>
-        <select id="labels-filter-status"></select>
+        <div class="filters">
+          <select id="labels-filter-category"></select>
+          <select id="labels-filter-status"></select>
+        </div>
       </div>`}
       <div id="labels-count" class="hint"></div>
       <button class="btn" id="labels-print">Печать</button>

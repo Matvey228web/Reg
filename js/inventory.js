@@ -365,8 +365,8 @@ const InventoryScreen = (() => {
         ${s.missing.length ? `
         <p class="hint">«Нашёл» отмечает позицию без сканирования — для вещей, с
         которых отвалилась наклейка. Считается по кэшу, запросов ноль.</p>
-        <div class="field">
-          <input type="search" id="inventory-missing-filter" placeholder="Поиск по названию или номеру"
+        <div class="searchbar">
+          <input type="search" id="inventory-missing-filter" placeholder="Название или номер"
                  value="${escapeHtml(missingFilter)}" />
         </div>` : ""}
         <div id="inventory-missing-list">${missingListHtml(s.missing)}</div>
