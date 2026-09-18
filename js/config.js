@@ -35,7 +35,7 @@ const CONFIG = {
     { code: "CNS", num: "07", label: "Расходники" },
     { code: "SUP", num: "08", label: "Штативы и поддержка" },
     { code: "MOD", num: "09", label: "Модификаторы света" },
-    { code: "MON", num: "10", label: "Мониторы и видеотракт" },
+    { code: "MON", num: "10", label: "Мониторы и трансляция" },
     { code: "RIG", num: "11", label: "Обвес камеры" },
     { code: "FLT", num: "12", label: "Фильтры" },
     { code: "PWR", num: "13", label: "Питание" },
