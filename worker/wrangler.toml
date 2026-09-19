@@ -1,0 +1,17 @@
+name = "mifs-rent-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Адрес веб-приложения Apps Script (тот же, что раньше стоял в js/config.js).
+# Это не секрет: он всё равно уходил в браузер каждого сотрудника.
+UPSTREAM_URL = "https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec"
+# "0" — отключить кэш целиком, не выкладывая новую версию. Правится в панели
+# Cloudflare: Workers → mifs-rent-api → Settings → Variables.
+CACHE_ENABLED = "1"
+
+# Хранилище кэша. id подставляется при создании:
+#   npx wrangler kv namespace create CACHE
+[[kv_namespaces]]
+binding = "CACHE"
+id = "PLACEHOLDER"

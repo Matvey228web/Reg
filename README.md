@@ -1,74 +1,67 @@
+# Mifs Rent — учёт оборудования с QR-кодами
 
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Sklad Scan</title>
-    <script src="https://unpkg.com/html5-qrcode"></script>
-    <style>
-        button { width: 100%; padding: 20px; margin: 10px 0; font-size: 18px; cursor: pointer; }
-        #reader { width: 100%; }
-        .active-btn { background-color: #4CAF50; color: white; }
-    </style>
-</head>
-<body>
-    <div id="menu">
-        <button onclick="setMode('Выдача')">📤 Выдача</button>
-        <button onclick="setMode('Приемка')">📥 Приемка</button>
-        <button onclick="setMode('Дефект')">⚠️ Дефект</button>
-    </div>
+Telegram Mini App для учёта оборудования на складе проката кино-техники. Сотрудники сканируют QR-код на единице оборудования прямо внутри Telegram (нативный сканер, без установки отдельного приложения) и оформляют выдачу, приём или дефект.
 
-    <div id="scanner-container" style="display:none;">
-        <h2 id="current-mode"></h2>
-        <div id="reader"></div>
-        <button onclick="stopScanner()">Отмена</button>
-    </div>
+## Возможности
 
-    <script>
-        let currentMode = "";
-        const html5QrCode = new Html5Qrcode("reader");
+- Каталог оборудования с генерацией QR-кода на каждую единицу
+- Выдача/приём (аренда) с привязкой к клиенту/проекту
+- Учёт клиентов/проектов и истории их аренд
+- Дефекты/ремонт: заявка при приёме или вручную, доска ремонта
+- Регистрация сотрудников прямо в приложении (первый администратор — самостоятельно при первом запуске, остальные — через экран «Сотрудники»), без ручного хэширования PIN
 
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('menu').style.display = 'none';
-            document.getElementById('scanner-container').style.display = 'block';
-            document.getElementById('current-mode').innerText = "Режим: " + mode;
-            startScanner();
-        }
+## Стек
 
-        function startScanner() {
-            html5QrCode.start(
-                { facingMode: "environment" }, 
-                { fps: 10, qrbox: 250 },
-                qrCodeMessage => {
-                    sendData(qrCodeMessage);
-                    html5QrCode.stop();
-                }
-            ).catch(err => alert("Ошибка камеры: " + err));
-        }
+- **Фронтенд**: чистые HTML/CSS/JS без сборки, один файл `index.html` со экранами-«вкладками», работает как Telegram Mini App (`telegram-web-app.js`)
+- **Сканирование QR**: нативный сканер Telegram (`Telegram.WebApp.showScanQrPopup`)
+- **Бэкенд**: Google Sheets (хранение данных) + Google Apps Script Web App (вся бизнес-логика одним файлом, `apps-script/Code.gs`). Собственного сервера в репозитории нет — только один Google-аккаунт
+- **Хостинг**: любой статический HTTPS-хостинг без привязки к GitHub (Netlify Drop, Cloudflare Pages — см. `SETUP.md`)
 
-        async function sendData(itemId) {
-            // URL твоего Webhook в Latenode или Albato
-            const webhookUrl = "https://your-webhook-link.com";
-            
-            const response = await fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: itemId,
-                    action: currentMode,
-                    timestamp: new Date().toISOString()
-                })
-            });
+## Структура репозитория
 
-            if (response.ok) {
-                alert(`Успешно: ${currentMode} для ID ${itemId}`);
-                location.reload(); // Возврат в меню
-            }
-        }
+```
+index.html      — единственная страница приложения, все экраны
+css/style.css   — стили
+js/
+  config.js      — WEBHOOK_BASE_URL, MOCK_MODE, справочники
+  util.js        — общие хелперы (форматирование, экранирование)
+  api.js         — обёртка над fetch/моками к вебхукам
+  mock-data.js   — локальная имитация бэкенда для разработки
+  telegram.js    — инициализация Telegram WebApp SDK
+  router.js      — переключение экранов
+  auth.js        — вход по PIN, сессия
+  qr.js          — генерация QR и вызов сканера
+  catalog.js     — каталог + добавление оборудования
+  scan.js        — сканирование, выдача/приём/дефект
+  item.js        — карточка предмета и история
+  repair.js      — доска дефектов/ремонта
+  clients.js     — клиенты/проекты
+  staff.js       — сотрудники (только для роли Admin)
+  app.js         — точка входа
+apps-script/
+  Code.gs        — весь бэкенд одним файлом, вставляется в Google Apps Script
+  test-local.js  — прогон логики бэкенда без Google-аккаунта (node apps-script/test-local.js)
+SETUP.md         — как настроить Google Sheets, Apps Script, бота и задеплоить фронтенд
+```
 
-        function stopScanner() {
-            html5QrCode.stop().then(() => location.reload());
-        }
-    </script>
-</body>
-</html>
+## Mock-режим
+
+По умолчанию (`js/config.js` → `MOCK_MODE: true`) приложение работает на встроенных фейковых данных (`js/mock-data.js`) без какого-либо реального бэкенда — это позволяет открыть и полностью прокликать приложение ещё до настройки Google Sheets/Apps Script.
+
+Тестовые учётные данные в mock-режиме:
+- Логин `ivan`, PIN `1234` (сотрудник склада)
+- Логин `maria`, PIN `0000` (администратор)
+
+## Запуск локально
+
+Статический сайт, сборка не требуется:
+
+```
+python3 -m http.server 8000
+```
+
+Откройте `http://localhost:8000` в браузере — вне Telegram QR-сканер недоступен, но есть поле для ручного ввода ID предмета на экране «Сканировать». Полноценно (со сканером камеры, MainButton, темой) приложение проверяется внутри Telegram после деплоя — см. `SETUP.md`.
+
+## Настройка реального бэкенда и деплой
+
+Полная инструкция — в [`SETUP.md`](./SETUP.md): создание таблицы Google Sheets (структуру скрипт создаёт сам), деплой `apps-script/Code.gs` как Web App, настройка бота через BotFather, деплой без GitHub (Netlify/Cloudflare Pages), регистрация сотрудников прямо в приложении и переключение `MOCK_MODE` на реальный бэкенд.
