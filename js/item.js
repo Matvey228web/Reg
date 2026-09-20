@@ -85,10 +85,8 @@ const ItemScreen = (() => {
                  spellcheck="false" />
         </div>
         </div>
-        <p class="hint">Номер вещи ${escapeHtml(item.item_id)} не изменится — он собран из
-        категории и модели. Пустое поле стирает номер. Занятый номер система не примет:
-        по этим номерам ищут технику, и повторный импорт считает одинаковые номера
-        одной и той же вещью.</p>
+        <p class="hint">Номер вещи ${escapeHtml(item.item_id)} не изменится. Пустое поле
+        стирает номер. Занятый номер система не примет: по ним ищут технику.</p>
         <div id="item-numbers-error"></div>
         <button class="btn" id="item-numbers-submit">Сохранить номера</button>
       </div>`;
@@ -180,9 +178,8 @@ const ItemScreen = (() => {
 
       <div class="section">
         <div class="section-title">${item.by_qty ? "QR-код полки" : "QR-код предмета"}</div>
-        ${item.by_qty ? `<p class="hint">У штучных позиций личных номеров нет — этот код
-        относится ко всей полке. Наклейте его на ящик: сканирование откроет остаток
-        и форму выдачи количеством.</p>` : ""}
+        ${item.by_qty ? `<p class="hint">Код относится ко всей полке — наклейте его на ящик.
+        Сканирование откроет остаток и выдачу количеством.</p>` : ""}
         <div class="qr-wrap">
           <canvas id="item-qr-canvas"></canvas>
           <div class="qr-id">${escapeHtml(item.item_id)}</div>
@@ -192,9 +189,8 @@ const ItemScreen = (() => {
           <button class="btn btn--secondary" id="item-qr-download">Сохранить</button>
           <button class="btn btn--secondary" id="item-qr-label">Этикетка</button>
         </div>
-        <p class="hint">Скачать файл напрямую из Telegram нельзя — это ограничение
-        мессенджера. «Сохранить» откроет системный лист «Поделиться», а если его
-        нет — картинку пришлёт бот в чат склада.</p>
+        <p class="hint">Из Telegram скачать нельзя: «Сохранить» откроет лист
+        «Поделиться», а если его нет — пришлёт бот в чат склада.</p>
       </div>
 
       <div class="section">

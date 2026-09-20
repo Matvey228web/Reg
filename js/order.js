@@ -157,8 +157,8 @@ const OrderScreen = (() => {
         ${receiveError ? `<div class="error-box">${escapeHtml(receiveError)}</div>` : ""}
         <div id="order-checkin-status" class="hint"></div>
         <button class="btn" id="order-checkin-all">Принять всё (${open.length})</button>
-        <p class="hint">«Принять всё» оформляет возврат без дефектов. Если что-то
-        пришло сломанным — примите эту позицию отдельно, там есть форма дефекта.</p>` : ""}
+        <p class="hint">Возврат без дефектов. Сломанное принимайте позицией отдельно — там есть
+          форма дефекта.</p>` : ""}
       </div>` : ""}
 
       ${closed.length ? `

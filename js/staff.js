@@ -23,9 +23,8 @@ const StaffScreen = (() => {
       iAmOwner = staffList.some((s) => s.is_owner && String(s.staff_id) === String(me.staff_id));
       document.getElementById("staff-add-toggle").style.display = iAmOwner ? "" : "none";
       document.getElementById("staff-owner-hint").innerHTML = iAmOwner
-        ? `<p class="hint">Вы главный администратор: только вы заводите и удаляете
-           сотрудников. Эту роль нельзя удалить — её можно только передать другому
-           администратору.</p>`
+        ? `<p class="hint">Только вы заводите и удаляете сотрудников. Эту роль нельзя удалить —
+  только передать.</p>`
         : `<p class="hint">Заводить и удалять сотрудников может только главный
            администратор.</p>`;
 

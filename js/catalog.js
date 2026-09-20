@@ -258,10 +258,8 @@ const CatalogScreen = (() => {
         <div class="qr-id">${escapeHtml(itemId)}</div>
       </div>
       <button class="btn" id="qr-download-btn">Сохранить этикетку</button>
-      <p class="hint">Скачать файл напрямую из Telegram нельзя — это ограничение
-      мессенджера. Кнопка откроет системный лист «Поделиться», а если его нет —
-      картинку пришлёт бот в чат склада. Печатать этикетку удобнее с экрана
-      «Этикетки».</p>
+      <p class="hint">Из Telegram скачать нельзя: кнопка откроет лист «Поделиться»,
+      а если его нет — пришлёт бот в чат склада. Печать — на экране «Этикетки».</p>
     `;
     const canvas = document.getElementById("new-item-qr-canvas");
     QR.render(canvas, itemId, 8);

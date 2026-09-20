@@ -46,18 +46,11 @@ const SettingsScreen = (() => {
       if (backendOutdated(err.message)) {
         showBoxError("settings-error", "");
         box.innerHTML = `
-          <p class="hint">Настройки живут в таблице, а её бэкенд ещё не обновлён —
-          поэтому этот экран пока пустой.</p>
+          <p class="hint">Настройки живут в таблице, а её бэкенд ещё не обновлён.</p>
           <div class="section">
             <h2>Что нужно сделать</h2>
-            <ol class="hint" style="padding-left:18px;">
-              <li>Откройте таблицу склада → Расширения → Apps Script.</li>
-              <li>Замените содержимое <b>Code.gs</b> присланным файлом целиком.</li>
-              <li>Deploy → Manage deployments → карандаш → New version → Deploy.</li>
-            </ol>
-            <p class="hint">Важно выбрать именно «новую версию» существующего
-            развёртывания, а не создавать новое: у нового будет другой адрес, и
-            приложение перестанет находить таблицу.</p>
+            <p class="hint">Выложить бэкенд заново: <b>node apps-script/deploy.js
+            push</b>. Порядок и права — в DEPLOY.md.</p>
           </div>
           ${accountHtml()}`;
         bindAccount();
@@ -113,9 +106,8 @@ const SettingsScreen = (() => {
 
       <div class="section">
         <h2>Категории</h2>
-        <p class="hint">Номер категории — первые две цифры номера предмета. У категории,
-        в которой уже есть техника, он не меняется: номера напечатаны на этикетках.
-        Название можно менять всегда.</p>
+        <p class="hint">Номер категории — первые две цифры номера вещи. Там, где техника уже
+          есть, он не меняется: номера напечатаны на этикетках. Название — всегда.</p>
         <div id="settings-categories"></div>
         <button class="btn btn--secondary" id="settings-cat-add-toggle">+ Новая категория</button>
         <!-- Модели — тот же справочник, только на уровень ниже: у каждой модели
@@ -139,9 +131,8 @@ const SettingsScreen = (() => {
               <input type="checkbox" id="settings-cat-new-qty" />
             </div>
           </div>
-          <p class="hint">«Количеством» — для того, на что не наклеить QR: мешки, флаги,
-          струбцины, расходники. Такая позиция живёт одной строкой с остатком.
-          Способ учёта потом меняется только у пустой категории.</p>
+          <p class="hint">«Количеством» — для того, на что не наклеить QR: мешки, флаги, расходники.
+            Одна строка с остатком. Потом меняется только у пустой категории.</p>
           <p class="hint">Номер система выдаст сама — следующий свободный.</p>
           <button class="btn" id="settings-cat-submit">Добавить</button>
         </div>
@@ -166,11 +157,9 @@ const SettingsScreen = (() => {
 
       <div class="section">
         <h2>Бот в Telegram</h2>
-        <p class="hint">Бот пишет в чат склада о дефектах и по кнопке — о
-        просрочках. Токен бота хранится не здесь, а в Apps Script → Project
-        Settings → Script Properties, ключ <b>TELEGRAM_BOT_TOKEN</b>: настройки
-        читает любой вошедший сотрудник, а токен — это полный доступ к боту.
-        Пошаговая инструкция лежит в файле BOT.md.</p>
+        <p class="hint">Бот пишет в чат склада о дефектах и о просрочках. Токен бота — не здесь,
+          а в Script Properties, ключ TELEGRAM_BOT_TOKEN (эти настройки видит любой
+          сотрудник). Как завести — в BOT.md.</p>
         <div id="settings-bot-result"></div>
         <button class="btn btn--secondary" id="settings-bot-test">Проверить связь с чатом</button>
         <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
@@ -178,18 +167,16 @@ const SettingsScreen = (() => {
 
       <div class="section">
         <h2>Обслуживание</h2>
-        <p class="hint">Выгрузка складывает журнал выдач и дефектов файлом на ваш Google Диск,
-        в папку «Mifs Rent — архив». Подрезка удаляет из таблицы уже закрытые записи и работает
-        только после выгрузки — иначе данные было бы нечем восстановить. Незакрытые выдачи
-        и открытые дефекты не трогаются никогда.</p>
+        <p class="hint">Выгрузка кладёт журналы на ваш Google Диск, в папку «Mifs Rent — архив».
+          Подрезка удаляет закрытые записи и работает только после выгрузки.</p>
         ${data.maintenance && data.maintenance.journal_archived_at
           ? `<p class="hint">Последняя выгрузка: ${escapeHtml(formatDate(data.maintenance.journal_archived_at))}</p>`
           : `<p class="hint">Журнал ещё не выгружался.</p>`}
         <div id="settings-maintenance-result"></div>
         <button class="btn btn--secondary" id="settings-archive">Выгрузить журнал в файл</button>
         <button class="btn btn--secondary" id="settings-trim" style="margin-top:8px;">Подрезать таблицу</button>
-        <p class="hint">Перезаливка каталога осталась в редакторе Apps Script: она тяжёлая,
-        и по сети запрос может отвалиться раньше, чем она закончит — тогда непонятно, прошла ли.</p>
+        <p class="hint">Перезаливка каталога осталась в редакторе Apps Script: она слишком долгая
+          для запроса по сети.</p>
       </div>
 
       ${accountHtml()}
