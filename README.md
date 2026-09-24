@@ -1,74 +1,80 @@
+# Mifs Rent — учёт оборудования с QR-кодами
 
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Sklad Scan</title>
-    <script src="https://unpkg.com/html5-qrcode"></script>
-    <style>
-        button { width: 100%; padding: 20px; margin: 10px 0; font-size: 18px; cursor: pointer; }
-        #reader { width: 100%; }
-        .active-btn { background-color: #4CAF50; color: white; }
-    </style>
-</head>
-<body>
-    <div id="menu">
-        <button onclick="setMode('Выдача')">📤 Выдача</button>
-        <button onclick="setMode('Приемка')">📥 Приемка</button>
-        <button onclick="setMode('Дефект')">⚠️ Дефект</button>
-    </div>
+Telegram Mini App для склада кинотехники Киноколледжа #40. Сотрудник сканирует
+QR на вещи прямо в Telegram и оформляет выдачу, приём или дефект.
 
-    <div id="scanner-container" style="display:none;">
-        <h2 id="current-mode"></h2>
-        <div id="reader"></div>
-        <button onclick="stopScanner()">Отмена</button>
-    </div>
+## Что умеет
 
-    <script>
-        let currentMode = "";
-        const html5QrCode = new Html5Qrcode("reader");
+- Каталог с QR и этикеткой на каждую единицу
+- Выдача и приём с привязкой к заказу студента
+- Дефекты и доска ремонта
+- Инвентаризация сканированием, в том числе выборочная
+- Печать и отправка этикеток
+- Роли: главный администратор, администратор, сотрудник склада
 
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('menu').style.display = 'none';
-            document.getElementById('scanner-container').style.display = 'block';
-            document.getElementById('current-mode').innerText = "Режим: " + mode;
-            startScanner();
-        }
+## Стек
 
-        function startScanner() {
-            html5QrCode.start(
-                { facingMode: "environment" }, 
-                { fps: 10, qrbox: 250 },
-                qrCodeMessage => {
-                    sendData(qrCodeMessage);
-                    html5QrCode.stop();
-                }
-            ).catch(err => alert("Ошибка камеры: " + err));
-        }
+- **Фронтенд** — HTML/CSS/JS без сборки, один `index.html` с экранами-вкладками,
+  `telegram-web-app.js`
+- **Сканер** — нативный Telegram (`showScanQrPopup`)
+- **Бэкенд** — Google Sheets (данные) + Apps Script (`apps-script/Code.gs`,
+  вся логика одним файлом). Своего сервера нет, только Google-аккаунт
+- **Хостинг** — Cloudflare Pages, прямой загрузкой, без привязки к Git
 
-        async function sendData(itemId) {
-            // URL твоего Webhook в Latenode или Albato
-            const webhookUrl = "https://your-webhook-link.com";
-            
-            const response = await fetch(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: itemId,
-                    action: currentMode,
-                    timestamp: new Date().toISOString()
-                })
-            });
+## Структура
 
-            if (response.ok) {
-                alert(`Успешно: ${currentMode} для ID ${itemId}`);
-                location.reload(); // Возврат в меню
-            }
-        }
+```
+index.html        все экраны одной страницей
+_headers          правила кэша Cloudflare Pages
+css/style.css
+js/
+  config.js       адрес бэкенда, MOCK_MODE, справочник категорий
+  api.js          единая точка обращения к бэкенду и к мокам
+  mock-data.js    имитация бэкенда для разработки
+  telegram.js     обёртка над Telegram WebApp SDK
+  auth.js         вход по PIN, сессия
+  router.js       переключение экранов
+  cache.js        кэш каталога и списков на телефоне
+  util.js         общие хелперы
+  catalog.js      каталог и добавление позиций
+  item.js         карточка вещи, история, правка номеров
+  scan.js         сканирование, выдача, приём, дефект
+  orders.js       заказы студентов
+  order.js        карточка заказа
+  repair.js       дефекты и ремонт
+  inventory.js    сверка склада
+  labels.js       этикетки и их размеры
+  models.js       разбор моделей по категориям
+  settings.js     настройки системы
+  staff.js        сотрудники
+  qr.js           генерация QR и просмотр картинки
+  pin.js  fab.js  pull.js  swipe.js  suggest.js  app.js
+apps-script/
+  Code.gs         весь бэкенд одним файлом
+  deploy.js       выкладка бэкенда через Apps Script API
+  test-local.js   прогон логики без Google-аккаунта
+```
 
-        function stopScanner() {
-            html5QrCode.stop().then(() => location.reload());
-        }
-    </script>
-</body>
-</html>
+## Документация
+
+| Файл | О чём |
+|---|---|
+| `MANUAL.md` | Как этим пользоваться: роли, обычные дела, что внутри таблицы |
+| `SETUP.md` | Настройка с нуля |
+| `DEPLOY.md` | Как выкладываются обе половины |
+| `BOT.md` | Бот в Telegram |
+| `WORKER.md` | Кэш перед таблицей (написан, не включён) |
+
+## Демо-режим
+
+При `MOCK_MODE: true` в `js/config.js` приложение работает на фейковых данных
+без бэкенда. Учётки: `ivan` / `1234` (сотрудник), `maria` / `0000`
+(администратор).
+
+## Запуск локально
+
+```sh
+python3 -m http.server 8000
+```
+
+Вне Telegram сканера нет — на экране «Скан» есть поле для ручного ввода номера.
