@@ -13,7 +13,7 @@
 // Доступ: файл с refresh-токеном, путь в GAS_TOKENS (по умолчанию ~/.gas-token.json).
 // Как его получить — в DEPLOY.md. Токен в репозиторий не кладём никогда.
 // Проект — GAS_SCRIPT_ID или значение по умолчанию ниже. Развёртывание берётся
-// из js/config.js, чтобы не разойтись с тем, куда стучится приложение.
+// из app/js/config.js, чтобы не разойтись с тем, куда стучится приложение.
 
 const fs = require("fs");
 const path = require("path");
@@ -36,9 +36,9 @@ function scriptId() {
 // берём идентификатор развёртывания, чтобы он не разошёлся с тем, куда
 // приложение на самом деле стучится.
 function deploymentId() {
-  const conf = fs.readFileSync(path.join(REPO, "js/config.js"), "utf8");
+  const conf = fs.readFileSync(path.join(REPO, "app/js/config.js"), "utf8");
   const m = conf.match(/macros\/s\/([^/]+)\//);
-  if (!m) throw new Error("В js/config.js не нашёлся адрес /macros/s/<id>/exec");
+  if (!m) throw new Error("В app/js/config.js не нашёлся адрес /macros/s/<id>/exec");
   return m[1];
 }
 
@@ -187,7 +187,7 @@ async function push() {
 // Живой бэкенд отвечает через редирект на script.googleusercontent.com, и
 // обычный fetch за ним не ходит с нужными заголовками — поэтому руками.
 async function verify() {
-  const conf = fs.readFileSync(path.join(REPO, "js/config.js"), "utf8");
+  const conf = fs.readFileSync(path.join(REPO, "app/js/config.js"), "utf8");
   const url = conf.match(/(https:\/\/script\.google\.com[^"']+)/)[1];
   const probes = ["/item/numbers", "/model/move", "/labels/send", "/выдуманный"];
   for (const endpoint of probes) {

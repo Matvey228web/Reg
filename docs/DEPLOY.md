@@ -2,7 +2,7 @@
 
 | Что | Куда | Чем |
 |---|---|---|
-| Склад (`index.html`, `css/`, `js/`) | Pages, проект `mifs-rent` | `wrangler pages deploy` |
+| Склад (`app/`) | Pages, проект `mifs-rent` | `wrangler pages deploy` |
 | Сайт проката (`site/`) | Pages, проект `mifs-site` | `wrangler pages deploy` |
 | Бэкенд (`apps-script/Code.gs`) | Apps Script в таблице | `node apps-script/deploy.js push` |
 
@@ -85,12 +85,12 @@ Script API**.
 
 - Script ID: `1ZroQ0unRv6xw9R4t-xTrzhKBLQ-ymQGB4ayFI8YwVS28Cjy4H2niD2Bn`
 - Таблица-контейнер: `1Fl9sVEy-IxLdFWP-eL9gB2vYAcgR2SF1oZh-1w_EGWs`
-- Развёртывание берётся из `js/config.js`.
+- Развёртывание берётся из `app/js/config.js`.
 
 ### Чего конвейер не делает
 
 - **Не ускоряет бэкенд.** Apps Script отвечает 5–8 секунд. От этого спасает
-  Worker перед таблицей — написан (`worker/`, `WORKER.md`), не включён.
+  Worker перед таблицей — написан (`worker/`), не включён.
 - **Не спасает от HTML вместо ответа.** Запрос к `/exec` уходит редиректом на
   `script.googleusercontent.com`; когда второй запрос не доходит, в приложение
   приезжает страница Google вместо JSON — это и есть «Некорректный ответ
@@ -107,7 +107,7 @@ npx wrangler@latest pages deploy <папка> --project-name=mifs-rent \
   --branch=main --commit-dirty=true
 ```
 
-Папка склада собирается из репозитория: `index.html`, `_headers`, `css/`, `js/`.
+Папка склада собирается из `app/`: `index.html`, `_headers`, `css/`, `js/`.
 Папка сайта — `site/` плюс свой `_headers`. Привязки к Git у проектов нет
 намеренно.
 

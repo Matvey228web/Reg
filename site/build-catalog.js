@@ -17,9 +17,9 @@ const REPO = path.resolve(__dirname, "..");
 const OUT = path.join(__dirname, "catalog.json");
 
 function backendUrl() {
-  const conf = fs.readFileSync(path.join(REPO, "js/config.js"), "utf8");
+  const conf = fs.readFileSync(path.join(REPO, "app/js/config.js"), "utf8");
   const m = conf.match(/(https:\/\/script\.google\.com[^"']+)/);
-  if (!m) throw new Error("В js/config.js не нашёлся адрес бэкенда");
+  if (!m) throw new Error("В app/js/config.js не нашёлся адрес бэкенда");
   return m[1];
 }
 
