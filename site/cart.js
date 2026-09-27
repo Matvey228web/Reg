@@ -1,13 +1,8 @@
 // Заявка: состав, даты, данные студента и текст для склада.
 //
-// Сайт НЕ пишет в таблицу: входа нет, и открытая запись без него — это дверь
-// для чужих. Вместо этого собираем текст ровно того вида, который бэкенд
-// разбирает с первого дня (parseOrderMessage в apps-script/Code.gs). Студент
-// копирует его и отправляет складу; складмен вставляет в «Заказы», где разбор
-// и подтверждение уже работают.
-//
-// Когда появится приём заявок бэкендом, меняется одна функция — сам текст
-// остаётся тем же.
+// Сайт не пишет в таблицу, а собирает текст, который бэкенд разбирает с
+// первого дня (parseOrderMessage в apps-script/Code.gs). Почему так — в
+// site/README.md.
 
 (function () {
   "use strict";
@@ -41,12 +36,12 @@
     }
 
     $("cart").innerHTML =
-      '<div class="cart-lines">' + list.map(function (l) {
+      '<div class="block">' + list.map(function (l) {
         var limit = limitFor(l.key, l.model);
         return '<div class="cart-line" data-key="' + esc(l.key) + '">' +
           '<a class="cart-name" href="item.html?m=' + esc(l.key) + '">' +
             esc(l.model.model_name) + "</a>" +
-          '<span class="cart-cat">' + esc(l.model.category_label) + "</span>" +
+          '<span class="cap">' + esc(l.model.category_label) + "</span>" +
           '<div class="stepper">' +
             '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
             '<input type="number" class="cart-qty" value="' + l.qty +
@@ -59,38 +54,38 @@
         "</div>";
       }).join("") + "</div>" +
 
-      '<div class="form-block">' +
+      '<div class="block">' +
         "<h2>Когда нужно</h2>" +
         '<div class="dates">' +
-          '<label class="date"><span>Выдача</span>' +
+          '<label class="date"><span class="cap">Выдача</span>' +
             '<input type="date" id="from" value="' + esc(dates.from) + '" /></label>' +
-          '<label class="date"><span>Возврат</span>' +
+          '<label class="date"><span class="cap">Возврат</span>' +
             '<input type="date" id="to" value="' + esc(dates.to) + '" /></label>' +
         "</div>" +
       "</div>" +
 
-      '<div class="form-block">' +
+      '<div class="block">' +
         "<h2>Кто берёт</h2>" +
         '<label class="row"><span>Мне есть 18 лет</span>' +
           '<input type="checkbox" id="adult" /></label>' +
-        '<label class="field"><span>ФИО</span>' +
+        '<label class="field"><span class="cap">ФИО</span>' +
           '<input type="text" id="name" autocomplete="name" /></label>' +
-        '<label class="field"><span>Телефон</span>' +
+        '<label class="field"><span class="cap">Телефон</span>' +
           '<input type="tel" id="phone" inputmode="tel" placeholder="+7…" /></label>' +
-        '<label class="field"><span>Ник в Telegram</span>' +
+        '<label class="field"><span class="cap">Ник в Telegram</span>' +
           '<input type="text" id="tg" placeholder="@nick" autocapitalize="off" /></label>' +
         '<div id="guardian">' +
           '<h2>Представитель</h2>' +
-          '<label class="field"><span>ФИО представителя</span>' +
+          '<label class="field"><span class="cap">ФИО представителя</span>' +
             '<input type="text" id="gname" /></label>' +
-          '<label class="field"><span>Телефон представителя</span>' +
+          '<label class="field"><span class="cap">Телефон представителя</span>' +
             '<input type="tel" id="gphone" inputmode="tel" placeholder="+7…" /></label>' +
         "</div>" +
-        '<label class="field"><span>Проект</span>' +
+        '<label class="field"><span class="cap">Проект</span>' +
           '<input type="text" id="project" placeholder="курсовая, короткий метр…" /></label>' +
       "</div>" +
 
-      '<div class="form-block">' +
+      '<div class="block">' +
         "<h2>Отправить складу</h2>" +
         '<p class="hint">Скопируйте заявку и отправьте её складу любым способом.' +
         " Складмен вставит её в систему — заполнять ничего заново не придётся.</p>" +
@@ -107,15 +102,12 @@
     updatePreview();
   }
 
-  // Текст заявки. Формат — тот же, что у сообщения бота сайта: номер, строки
-  // «N. Название: сумма (кол-во x цена)» и пары «Ключ: значение». Нули в ценах
-  // не заглушка — в настоящих сообщениях они ровно такие.
+  // Нули в ценах не заглушка: в настоящих сообщениях бота они ровно такие.
   function orderText() {
     var list = lines();
     var out = [];
-    // Именно «Заказ», а не «Заявка»: это слово ищет разбор на бэкенде
-    // (parseOrderMessage). На сайте мы говорим «заявка» — но строка едет
-    // складу, и она должна быть на его языке.
+    // Именно «Заказ»: это слово ищет разбор. На сайте мы говорим «заявка»,
+    // но строка едет складу и должна быть на его языке.
     out.push("Заказ №" + requestCode());
     list.forEach(function (l, i) {
       out.push((i + 1) + ". " + l.model.model_name + ": 0 (" + l.qty + " x 0)");
@@ -140,9 +132,7 @@
 
   function val(id) { return ($(id) && $(id).value || "").trim(); }
 
-  // Номер заявки нужен, чтобы её можно было позвать по имени. Дата плюс
-  // короткий случайный хвост: без сервера гарантировать уникальность нельзя,
-  // а совпадение двух заявок в один день практически исключено.
+  // Дата плюс случайный хвост: без сервера уникальность не гарантировать.
   var code = null;
   function requestCode() {
     if (code) return code;

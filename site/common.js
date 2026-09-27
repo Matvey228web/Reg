@@ -1,7 +1,5 @@
-// Общее для всех страниц сайта: снимок каталога, корзина, мелкие помощники.
-//
-// Ни фреймворков, ни Telegram. Глобальный объект вместо модулей — страницы
-// подключают файл тегом script, и сборки у сайта нет.
+// Общее для всех страниц: снимок каталога, корзина, помощники.
+// Ни фреймворков, ни Telegram — сборки у сайта нет, отсюда глобальный объект.
 
 var Site = (function () {
   "use strict";
@@ -31,6 +29,13 @@ var Site = (function () {
 
   function photo(m) { return "photos/" + key(m) + ".jpg"; }
 
+  // Пока фотографии нет. Картинка приходит поверх и прячет знак — см. style.css.
+  function shotIcon() {
+    return '<svg class="shot-ico" viewBox="0 0 24 24" aria-hidden="true">' +
+      '<rect x="3" y="6" width="13" height="12"/>' +
+      '<path d="M16 10l5-3v10l-5-3z"/></svg>';
+  }
+
   function humanDate(iso) {
     var p = String(iso || "").split("-");
     return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : String(iso || "");
@@ -52,7 +57,7 @@ var Site = (function () {
       });
   }
 
-  // Наличие на даты. Единственный живой запрос сайта, и только когда даты есть.
+  // Единственный живой запрос сайта, и только когда даты выбраны.
   function availability(from, to) {
     return fetch(BACKEND, {
       method: "POST",
@@ -74,10 +79,8 @@ var Site = (function () {
   }
 
   // --- Корзина ---
-  //
-  // Хранится в браузере: сервера для черновиков у нас нет, а терять набранное
-  // при переходе на карточку нельзя. Приватный режим может запретить запись —
-  // тогда сайт просто работает без памяти, а не падает.
+  // В браузере: сервера для черновиков нет. Приватный режим может запретить
+  // запись — тогда сайт работает без памяти, а не падает.
 
   function readCart() {
     try {
@@ -101,8 +104,8 @@ var Site = (function () {
     return readCart().lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
   }
 
-  // Больше, чем есть на складе, в заявку не кладём: иначе человек соберёт
-  // невыполнимую заявку и узнает об этом только от складмена.
+  // Больше, чем есть на складе, не кладём: иначе заявка невыполнима, и
+  // человек узнает об этом только от складмена.
   function addToCart(modelKey, qty, limit) {
     var cart = readCart();
     var line = cart.lines.filter(function (l) { return l.key === modelKey; })[0];
@@ -143,7 +146,7 @@ var Site = (function () {
     return { from: cart.from, to: cart.to };
   }
 
-  // Счётчик в шапке. Рисуется на каждой странице, поэтому живёт здесь.
+  // Счётчик в шапке — на каждой странице, поэтому здесь.
   function paintCount() {
     var el = $("cart-count");
     if (!el) return;
@@ -154,7 +157,7 @@ var Site = (function () {
 
   return {
     $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
-    humanDate: humanDate,
+    humanDate: humanDate, shotIcon: shotIcon,
     loadCatalog: loadCatalog, availability: availability,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
