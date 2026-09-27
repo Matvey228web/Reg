@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Прокат оборудования · Киноколледж #40</title>
-<meta name="description" content="Каталог съёмочного оборудования Киноколледжа #40: камеры, объективы, свет, звук, грип. Наличие на выбранные даты." />
+<title>Позиция каталога · MifsRent</title>
+<meta name="description" content="Карточка позиции каталога проката Киноколледжа #40." />
 <meta name="color-scheme" content="light dark" />
 <link rel="stylesheet" href="style.css?v=20260927b" />
 </head>
@@ -33,34 +33,9 @@
   </a>
 </header>
 
-<main>
-  <section class="intro">
-    <h1>Съёмочное оборудование</h1>
-    <p>Камеры, оптика, свет, звук и грип киношколы. Выберите даты — покажем,
-    что свободно именно тогда.</p>
-  </section>
-
-  <section class="controls">
-    <div class="dates">
-      <label class="date">
-        <span>Выдача</span>
-        <input type="date" id="from" />
-      </label>
-      <label class="date">
-        <span>Возврат</span>
-        <input type="date" id="to" />
-      </label>
-    </div>
-    <div class="searchbar">
-      <input type="search" id="search" placeholder="Поиск по названию"
-             autocapitalize="off" autocorrect="off" spellcheck="false" />
-    </div>
-    <div class="chips" id="chips"></div>
-  </section>
-
-  <p class="status" id="status" role="status"></p>
-  <div id="groups"></div>
-  <p class="empty" id="empty" hidden>Под запрос ничего не попало</p>
+<main class="page">
+  <p class="crumbs"><a href="index.html">← Каталог</a></p>
+  <article id="item"></article>
 </main>
 
 <footer>
@@ -72,6 +47,6 @@
 </footer>
 
 <script src="common.js?v=20260927b"></script>
-<script src="app.js?v=20260927b"></script>
+<script src="item.js?v=20260927b"></script>
 </body>
 </html>

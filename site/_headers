@@ -9,10 +9,16 @@
 /catalog.json
   Cache-Control: no-cache
 
+/item.html
+  Cache-Control: no-cache
+
+/cart.html
+  Cache-Control: no-cache
+
 /style.css
   Cache-Control: public, max-age=604800
 
-/app.js
+/*.js
   Cache-Control: public, max-age=604800
 
 /photos/*
