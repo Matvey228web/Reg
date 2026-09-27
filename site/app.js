@@ -5,20 +5,11 @@
 
   var $ = Site.$, esc = Site.escapeHtml;
   var catalog = { categories: [], models: [] };
-  var free = null;
   var category = "all";
   var query = "";
-  var pending = 0;   // ответы могут прийти не в том порядке, что запросы
 
   function freeText(m) {
-    var total = Number(m.total) || 0;
-    if (!free) {
-      return '<span class="card-free cap">Всего ' + total + "</span>";
-    }
-    var n = free[Site.key(m)];
-    if (n === undefined) n = 0;
-    return '<span class="card-free cap' + (n > 0 ? "" : " none") +
-           '">Свободно <b>' + n + "</b> из " + total + "</span>";
+    return '<span class="card-free cap">Всего ' + (Number(m.total) || 0) + "</span>";
   }
 
   function cardHtml(m) {
@@ -68,31 +59,6 @@
 
   function status(text) { $("status").textContent = text; }
 
-  function loadAvailability() {
-    var from = $("from").value, to = $("to").value;
-    if (!from && !to) return;
-    Site.cartDates(from, to);
-    var mine = ++pending;
-    status("Считаем, что свободно…");
-
-    Site.availability(from, to)
-      .then(function (res) {
-        if (mine !== pending) return;
-        free = res.free;
-        status(res.from === res.to
-          ? "Свободно на " + Site.humanDate(res.from)
-          : "Свободно с " + Site.humanDate(res.from) + " по " + Site.humanDate(res.to));
-        render();
-      })
-      .catch(function () {
-        if (mine !== pending) return;
-        // Вчерашние количества хуже никаких: по ним человек поедет за техникой.
-        free = null;
-        status("Не удалось узнать, что свободно на эти даты. Каталог показан целиком.");
-        render();
-      });
-  }
-
   function bind() {
     $("chips").addEventListener("click", function (e) {
       var chip = e.target.closest("[data-cat]");
@@ -107,17 +73,6 @@
       render();
     });
 
-    // Полей дат два, заполняют их подряд: без паузы первый запрос уходит на
-    // ещё не выбранный период и занимает бэкенд на 5–8 секунд впустую.
-    var timer = null;
-    ["from", "to"].forEach(function (id) {
-      $(id).addEventListener("change", function () {
-        var from = $("from").value, to = $("to").value;
-        if (from && to && to < from) { $("from").value = to; $("to").value = from; }
-        clearTimeout(timer);
-        timer = setTimeout(loadAvailability, 500);
-      });
-    });
   }
 
   Site.loadCatalog()
@@ -127,15 +82,8 @@
       render();
       status(catalog.models.length + " " +
              Site.plural(catalog.models.length, "позиция", "позиции", "позиций") +
-             " в каталоге. Выберите даты, чтобы увидеть свободное.");
+             " в каталоге");
       bind();
-
-      var saved = Site.cartDates();
-      if (saved.from || saved.to) {
-        $("from").value = saved.from;
-        $("to").value = saved.to;
-        loadAvailability();
-      }
     })
     .catch(function () { status("Каталог не загрузился. Обновите страницу."); });
 })();
