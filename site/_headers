@@ -1,0 +1,19 @@
+# Страницу всегда перепроверяем у сервера: в ней ссылки с версиями.
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+# Снимок каталога меняется при каждой выкладке и версии в адресе не имеет.
+/catalog.json
+  Cache-Control: no-cache
+
+/style.css
+  Cache-Control: public, max-age=604800
+
+/app.js
+  Cache-Control: public, max-age=604800
+
+/photos/*
+  Cache-Control: public, max-age=604800

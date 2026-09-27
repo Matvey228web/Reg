@@ -1,0 +1,257 @@
+/* Публичный каталог проката.
+ *
+ * Отдельный файл, а не общий со складом: у сайта нет Telegram, откуда склад
+ * берёт цвета темы, и нет его экранов. Общее здесь — только язык форм:
+ * те же радиусы, та же типографика, та же пара «приглушённая страница,
+ * сплошные карточки поверх».
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --ink: #111111;
+  --muted: #8e8e93;
+  --accent: #2481cc;
+  --on-accent: #ffffff;
+  --page-bg: #f2f2f7;
+  --group-bg: #ffffff;
+  --surface: rgba(128, 128, 128, 0.10);
+  --surface-strong: rgba(128, 128, 128, 0.17);
+  --hairline: rgba(128, 128, 128, 0.24);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.05);
+  --success: #2f7d32;
+  --danger: #c92a2a;
+
+  --r-sm: 10px; --r-md: 12px; --r-lg: 16px; --r-2xl: 24px; --r-pill: 999px;
+
+  --t-title: 20px;   --t-title-lh: 25px;
+  --t-body: 17px;    --t-body-lh: 22px;
+  --t-footnote: 13px; --t-footnote-lh: 18px;
+  --t-caption: 12px; --t-caption-lh: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ffffff;
+    --muted: #98989e;
+    --accent: #2ea6ff;
+    --page-bg: #000000;
+    --group-bg: #1c1c1e;
+    --success: #4caf50;
+    --danger: #ff6b6b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--ink);
+  font: var(--t-body)/var(--t-body-lh) -apple-system, BlinkMacSystemFont,
+        "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+main, .topbar, footer {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* --- Шапка --- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding-top: env(safe-area-inset-top);
+}
+
+.wordmark { display: flex; align-items: center; gap: 10px; }
+
+.logo-mark { width: 32px; height: 32px; color: var(--ink); flex: none; }
+.logo-mark path { fill: currentColor; }
+
+.wordmark-text { display: flex; flex-direction: column; }
+
+/* 17 + 13 = 30 — ровно высота знака рядом. Отрицательный margin съедает
+   трекинг последней буквы, иначе строки не встают по левому краю. */
+.wordmark-name {
+  font-size: 17px; line-height: 17px; font-weight: 600;
+  letter-spacing: .1em; margin-right: -.1em;
+}
+.wordmark-name b { font-weight: 400; }
+.wordmark-sub {
+  font-size: 11px; line-height: 13px; color: var(--muted);
+  letter-spacing: .17em; margin-right: -.17em; white-space: nowrap;
+}
+
+/* --- Вступление --- */
+
+.intro { padding: 8px 16px 20px; }
+.intro h1 {
+  font-size: 34px; line-height: 41px; letter-spacing: -0.4px;
+  margin: 0 0 8px;
+}
+.intro p { margin: 0; color: var(--muted); max-width: 52ch; }
+
+/* --- Управление --- */
+
+.controls {
+  background: var(--group-bg);
+  border-radius: var(--r-lg);
+  padding: 12px;
+  margin: 0 16px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.date { display: grid; gap: 4px; }
+.date span {
+  font-size: var(--t-footnote); line-height: var(--t-footnote-lh);
+  color: var(--muted);
+}
+
+/* 16px — граница, ниже которой iOS увеличивает страницу при фокусе. */
+input[type="date"], input[type="search"] {
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background-color: var(--surface);
+  border: 0;
+  border-radius: var(--r-md);
+  padding: 11px 12px;
+  width: 100%;
+  min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.searchbar { position: relative; }
+.searchbar input {
+  border-radius: var(--r-2xl);
+  padding-left: 38px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 12px center;
+  background-size: 18px 18px;
+}
+
+/* Категорий шесть — полосой чипов они все видны сразу, в отличие от списка. */
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex: none;
+  font: inherit;
+  font-size: var(--t-footnote);
+  line-height: var(--t-footnote-lh);
+  color: var(--ink);
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--r-pill);
+  padding: 7px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip--on { background: var(--accent); color: var(--on-accent); }
+
+/* --- Список --- */
+
+.status {
+  margin: 0 16px 12px;
+  color: var(--muted);
+  font-size: var(--t-footnote);
+  line-height: var(--t-footnote-lh);
+  min-height: var(--t-footnote-lh);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 0 16px 24px;
+}
+
+.card {
+  background: var(--group-bg);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Высота задана долей ширины: без неё список прыгает, пока грузятся фото. */
+.shot {
+  aspect-ratio: 4 / 3;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-ico {
+  width: 34px; height: 34px;
+  fill: none; stroke: var(--muted); stroke-width: 1.5;
+  stroke-linejoin: round; opacity: .55;
+}
+/* Картинка приходит поверх знака — иначе он просвечивал бы сквозь фото. */
+.shot img + .shot-ico { display: none; }
+
+.card-body { padding: 10px 12px 12px; display: grid; gap: 4px; }
+
+.card-name {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.card-cat {
+  font-size: var(--t-caption);
+  line-height: var(--t-caption-lh);
+  color: var(--muted);
+}
+.card-free {
+  font-size: var(--t-caption);
+  line-height: var(--t-caption-lh);
+  color: var(--muted);
+}
+.card-free b { color: var(--success); font-weight: 600; }
+.card-free.none b { color: var(--danger); }
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 32px 16px;
+}
+
+/* --- Подвал --- */
+
+footer {
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  color: var(--muted);
+  font-size: var(--t-footnote);
+  line-height: var(--t-footnote-lh);
+  border-top: 1px solid var(--hairline);
+  margin-top: 8px;
+}
+footer p { margin: 0 0 4px; }
+footer .dim { opacity: .75; }
+
+/* На широком экране колонки шире: карточка размером с ноготь на мониторе
+   выглядит не аккуратностью, а недосмотром. */
+@media (min-width: 720px) {
+  .grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .controls { grid-template-columns: auto 1fr; align-items: end; }
+  .dates { grid-column: 1; }
+  .searchbar { grid-column: 2; }
+  .chips { grid-column: 1 / -1; }
+  .intro h1 { font-size: 40px; line-height: 46px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

@@ -2,10 +2,15 @@
 
 | Что | Куда | Чем |
 |---|---|---|
-| Приложение (`index.html`, `css/`, `js/`) | Cloudflare Pages | `wrangler pages deploy` |
+| Склад (`index.html`, `css/`, `js/`) | Pages, проект `mifs-rent` | `wrangler pages deploy` |
+| Сайт проката (`site/`) | Pages, проект `mifs-site` | `wrangler pages deploy` |
 | Бэкенд (`apps-script/Code.gs`) | Apps Script в таблице | `node apps-script/deploy.js push` |
 
-Компьютер не нужен ни для той, ни для другой половины.
+Компьютер не нужен ни для одной из трёх частей.
+
+Склад и сайт — **разные проекты Pages** намеренно: у каждого свой адрес, свои
+правила кэша и своя выкладка, и сайт можно перевезти на другой хостинг, не
+трогая склад.
 
 ---
 
@@ -95,15 +100,35 @@ Script API**.
 
 ---
 
-## Приложение
+## Приложение и сайт
 
 ```sh
 npx wrangler@latest pages deploy <папка> --project-name=mifs-rent \
   --branch=main --commit-dirty=true
 ```
 
-Папка собирается из репозитория: `index.html`, `_headers`, `css/`, `js/`.
-Привязки к Git у проекта нет намеренно.
+Папка склада собирается из репозитория: `index.html`, `_headers`, `css/`, `js/`.
+Папка сайта — `site/` плюс свой `_headers`. Привязки к Git у проектов нет
+намеренно.
+
+Перед выкладкой сайта пересобирается снимок каталога:
+
+```sh
+node site/build-catalog.js
+```
+
+Он делает один запрос к `/public/catalog` и пишет `site/catalog.json`. Витрина
+читает этот файл и открывается мгновенно; наличие на даты сайт спрашивает у
+бэкенда сам, когда даты выбраны.
+
+**Новый проект Pages** создаётся не через `wrangler pages project create` —
+в версиях от 4.14 эта команда уводит в Workers. Через API:
+
+```sh
+curl -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"имя","production_branch":"main"}'
+```
 
 `?v=<версия>` в ссылках на свои файлы поднимаем каждой выкладкой. Работает это
 только вместе с `_headers`, который запрещает кэшировать саму страницу: WebView
