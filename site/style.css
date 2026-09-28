@@ -138,20 +138,61 @@ input[type="date"], input[type="search"], input[type="text"], input[type="tel"] 
 }
 input:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 
-.chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.chips::-webkit-scrollbar { display: none; }
-.chip {
-  flex: none;
+/* Каталог раскрывающимся списком: категорий полтора десятка, рядом кнопок их
+   пришлось бы прокручивать вбок. details/summary — без единой строки скрипта. */
+.catalog { position: relative; }
+.catalog > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  font-size: var(--cap);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.catalog > summary::-webkit-details-marker { display: none; }
+.catalog > summary::after {
+  content: "";
+  width: 6px; height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+.catalog[open] > summary { background: var(--panel); }
+.catalog[open] > summary::after { transform: translateY(1px) rotate(225deg); }
+
+.catalog-list {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: grid;
+}
+.catalog-item {
   font: inherit;
-  font-size: var(--cap); line-height: 14px;
-  letter-spacing: .08em; text-transform: uppercase;
+  font-size: 15px;
+  text-align: left;
   color: var(--ink);
   background: none;
-  border: 1px solid var(--line);
-  padding: 8px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 13px 16px;
   cursor: pointer;
 }
-.chip--on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.catalog-item:last-child { border-bottom: 0; }
+.catalog-item--on { color: var(--accent-text); font-weight: 700; }
+/* Пустая в этом разделе категория видна, но приглушена: так понятно, что она
+   есть, просто сейчас в ней ничего нет. */
+.catalog-item--empty { color: var(--dim); opacity: .55; cursor: default; }
 
 .status {
   margin: 0;
@@ -400,3 +441,43 @@ footer a { color: var(--dim); }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* --- Разделы витрины --- */
+
+/* Разделы — не фильтр, а развилка: подача другая, чтобы не путались с чипами
+   категорий. Крупнее, и выбранный подчёркнут красным. */
+.sections {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sections::-webkit-scrollbar { display: none; }
+
+.section {
+  flex: none;
+  padding: 18px var(--pad) 15px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+.section--on { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* --- Раздел, которого ещё нет --- */
+
+.soon { padding: 40px var(--pad) 56px; max-width: 46ch; }
+.soon h2 {
+  margin: 0 0 16px;
+  font-size: clamp(26px, 6vw, 40px);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  text-transform: uppercase;
+}
+.soon p { margin: 0 0 12px; color: var(--dim); }

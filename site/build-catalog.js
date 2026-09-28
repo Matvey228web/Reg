@@ -47,11 +47,16 @@ async function ask(endpoint, payload) {
 
 (async () => {
   const live = await ask("/public/catalog", {});
+  // Пробелы и переносы внутри названия схлопываем: в таблице такие названия
+  // есть, а строка заявки «N. Название: 0 (кол-во x 0)» разбирается построчно —
+  // перенос разрывает её надвое, и позиция молча пропадает из заявки.
+  const clean = (v) => String(v || "").replace(/\s+/g, " ").trim();
   const models = (live.models || []).map((m) => ({
     category: m.category,
     category_label: m.category_label,
     model_code: m.model_code,
-    model_name: m.model_name,
+    model_name: clean(m.model_name),
+    section: m.section || "",
     total: m.total,
   }));
 

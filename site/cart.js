@@ -20,9 +20,16 @@
       .filter(Boolean);
   }
 
-  function limitFor(key, model) {
-    if (free && free[key] !== undefined) return free[key];
-    return Number(model.total) || 0;
+  // Предупреждение о брони — только когда выбраны даты: без них «свободно»
+  // не определено, а пугать человека числом со склада незачем.
+  function warnHtml(l) {
+    if (!free) return "";
+    var n = free[l.key];
+    if (n === undefined) n = 0;
+    if (l.qty <= n) return "";
+    return '<p class="cart-warn">' + (n
+      ? "На эти даты свободно только " + n + " из " + l.qty + " — остальное забронировано."
+      : "На эти даты всё забронировано. Выберите другие или уберите позицию.") + "</p>";
   }
 
   function render() {
@@ -37,7 +44,6 @@
 
     $("cart").innerHTML =
       '<div class="block">' + list.map(function (l) {
-        var limit = limitFor(l.key, l.model);
         return '<div class="cart-line" data-key="' + esc(l.key) + '">' +
           '<a class="cart-name" href="item.html?m=' + esc(l.key) + '">' +
             esc(l.model.model_name) + "</a>" +
@@ -45,12 +51,11 @@
           '<div class="stepper">' +
             '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
             '<input type="number" class="cart-qty" value="' + l.qty +
-              '" min="1" max="' + Math.max(1, limit) + '" inputmode="numeric" />' +
+              '" min="1" inputmode="numeric" />' +
             '<button type="button" data-act="plus" aria-label="Больше">+</button>' +
           "</div>" +
           '<button class="link-danger" type="button" data-act="drop">Убрать</button>' +
-          (l.qty > limit
-            ? '<p class="cart-warn">На складе всего ' + limit + "</p>" : "") +
+          warnHtml(l) +
         "</div>";
       }).join("") + "</div>" +
 
@@ -110,7 +115,9 @@
     // но строка едет складу и должна быть на его языке.
     out.push("Заказ №" + requestCode());
     list.forEach(function (l, i) {
-      out.push((i + 1) + ". " + l.model.model_name + ": 0 (" + l.qty + " x 0)");
+      // Перенос внутри названия разорвал бы строку, и разбор потерял бы позицию.
+      var name = String(l.model.model_name).replace(/\s+/g, " ").trim();
+      out.push((i + 1) + ". " + name + ": 0 (" + l.qty + " x 0)");
     });
     out.push("");
     out.push("Информация о покупателе:");
@@ -164,19 +171,17 @@
       var row = btn.closest(".cart-line");
       var key = row.dataset.key;
       var input = row.querySelector(".cart-qty");
-      var limit = Number(input.max) || 0;
       if (btn.dataset.act === "drop") { Site.removeFromCart(key); render(); return; }
       var next = Number(input.value) + (btn.dataset.act === "plus" ? 1 : -1);
       if (next < 1) { Site.removeFromCart(key); render(); return; }
-      input.value = Site.setQty(key, next, limit);
-      updatePreview();
+      Site.setQty(key, next);
+      render();
     });
 
     $("cart").addEventListener("change", function (e) {
       if (e.target.classList.contains("cart-qty")) {
         var row = e.target.closest(".cart-line");
-        e.target.value = Site.setQty(row.dataset.key, Number(e.target.value),
-                                     Number(e.target.max) || 0);
+        e.target.value = Site.setQty(row.dataset.key, Number(e.target.value));
       }
       if (e.target.id === "adult") updateGuardian();
       if (e.target.id === "from" || e.target.id === "to") {

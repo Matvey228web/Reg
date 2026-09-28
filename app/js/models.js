@@ -10,6 +10,15 @@ const ModelsScreen = (() => {
   let counts = {};      // "CAM|01" -> сколько позиций
   let query = "";
 
+  // Пусто — «не размечено»: такая модель видна на сайте в обоих разделах.
+  // Забытая отметка не должна прятать технику с витрины.
+  const SECTION_CHOICES = [
+    { value: "", label: "Не размечено — видно везде" },
+    { value: "CINE", label: "Только Кино" },
+    { value: "PHOTO", label: "Только Фото" },
+    { value: "CINE,PHOTO", label: "Кино и Фото" },
+  ];
+
   function key(m) {
     return m.category + "|" + m.model_code;
   }
@@ -98,6 +107,13 @@ const ModelsScreen = (() => {
         </select>
         <p class="hint">${escapeHtml(m.category)}·${escapeHtml(m.model_code)} ·
           ${n} ${plural(n, "позиция", "позиции", "позиций")}</p>
+      </div>
+      <div class="field">
+        <label for="model-sec-${escapeHtml(key(m))}">Раздел на сайте</label>
+        <select id="model-sec-${escapeHtml(key(m))}" data-section="${escapeHtml(key(m))}">
+          ${SECTION_CHOICES.map((c) => `<option value="${escapeHtml(c.value)}"${
+            c.value === (m.section || "") ? " selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
+        </select>
       </div>`;
   }
 
@@ -116,6 +132,34 @@ const ModelsScreen = (() => {
     document.querySelectorAll("[data-move]").forEach((sel) => {
       sel.addEventListener("change", () => move(sel.dataset.move, sel.value, sel));
     });
+    document.querySelectorAll("[data-section]").forEach((sel) => {
+      sel.addEventListener("change", () => setSection(sel.dataset.section, sel.value, sel));
+    });
+  }
+
+  // Раздел меняется без подтверждения: в отличие от переноса между
+  // категориями, он ничего не перенумеровывает и откатывается тем же выбором.
+  async function setSection(modelKey, value, select) {
+    const model = models.filter((m) => key(m) === modelKey)[0];
+    if (!model) return;
+    const was = model.section || "";
+    const parts = modelKey.split("|");
+    select.disabled = true;
+    showBoxError("models-error", "");
+    try {
+      await apiPost("/models/sections", {
+        models: [{ category: parts[0], model_code: parts[1], section: value }],
+      });
+      model.section = value;
+      TG.hapticSuccess();
+    } catch (err) {
+      TG.hapticError();
+      select.value = was;
+      showBoxError("models-error", err.message);
+      TG.showAlert(err.message);
+    } finally {
+      select.disabled = false;
+    }
   }
 
   function move(modelKey, toCategory, select) {

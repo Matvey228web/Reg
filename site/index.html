@@ -6,7 +6,7 @@
 <title>Прокат оборудования · Киноколледж #40</title>
 <meta name="description" content="Каталог съёмочного оборудования Киноколледжа #40: камеры, объективы, свет, звук, грип. Наличие на выбранные даты." />
 <meta name="theme-color" content="#0d0d0f" />
-<link rel="stylesheet" href="style.css?v=20260927e" />
+<link rel="stylesheet" href="style.css?v=20260928a" />
 </head>
 <body>
 
@@ -37,18 +37,17 @@
 </header>
 
 <main class="wrap">
-  <section class="hero">
-    <h1>Съёмочное оборудование</h1>
-    <p>Камеры, оптика, свет, звук и грип киношколы. Выберите даты — покажем,
-    что свободно именно тогда.</p>
-  </section>
+  <nav class="sections" id="sections"></nav>
 
-  <section class="controls">
+  <section class="controls" id="controls">
     <div class="searchbar">
       <input type="search" id="search" placeholder="Поиск по названию"
              autocapitalize="off" autocorrect="off" spellcheck="false" />
     </div>
-    <div class="chips" id="chips"></div>
+    <details class="catalog" id="catalog">
+      <summary><span id="catalog-label">Каталог</span></summary>
+      <div class="catalog-list" id="catalog-list"></div>
+    </details>
   </section>
 
   <p class="status" id="status" role="status"></p>
@@ -62,7 +61,7 @@
   студентам колледжа бесплатно, сторонним по запросу</div>
 </footer>
 
-<script src="common.js?v=20260927e"></script>
-<script src="app.js?v=20260927e"></script>
+<script src="common.js?v=20260928a"></script>
+<script src="app.js?v=20260928a"></script>
 </body>
 </html>

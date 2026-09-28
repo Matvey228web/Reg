@@ -7,6 +7,12 @@ var Site = (function () {
   var BACKEND = "https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec";
   var CART_KEY = "mifs_cart";
 
+  var SECTIONS = [
+    { code: "cine", label: "Кино", mark: "CINE" },
+    { code: "photo", label: "Фото", mark: "PHOTO" },
+    { code: "my", label: "My mifs rent", mark: "" },
+  ];
+
   // --- Мелочи ---
 
   function $(id) { return document.getElementById(id); }
@@ -26,6 +32,35 @@ var Site = (function () {
   }
 
   function key(m) { return m.category + "-" + m.model_code; }
+
+  // Раздел витрины. Держим в адресе: ссылку можно переслать, а возврат из
+  // карточки не сбрасывает выбор.
+  var current = null;
+
+  function section() {
+    if (current === null) {
+      var m = /[?&]s=([a-z]+)/.exec(location.search);
+      var asked = m ? m[1] : "";
+      current = SECTIONS.some(function (s) { return s.code === asked; }) ? asked : "cine";
+    }
+    return current;
+  }
+
+  function setSection(code) {
+    current = code;
+    try {
+      history.replaceState(null, "", code === "cine" ? location.pathname : "?s=" + code);
+    } catch (e) { /* адрес не переписался — не беда */ }
+  }
+
+  // Неразмеченная модель видна в обоих разделах: забытая отметка не должна
+  // прятать технику с витрины.
+  function inSection(m) {
+    var mark = SECTIONS.filter(function (s) { return s.code === section(); })[0];
+    if (!mark || !mark.mark) return false;
+    var value = String(m.section || "");
+    return !value || value.indexOf(mark.mark) !== -1;
+  }
 
   function photo(m) { return "photos/" + key(m) + ".jpg"; }
 
@@ -104,25 +139,23 @@ var Site = (function () {
     return readCart().lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
   }
 
-  // Больше, чем есть на складе, не кладём: иначе заявка невыполнима, и
-  // человек узнает об этом только от складмена.
-  function addToCart(modelKey, qty, limit) {
+  // Потолка нет: сколько свободно — вопрос дат, а о брони предупреждает
+  // заявка, когда даты выбраны.
+  function addToCart(modelKey, qty) {
     var cart = readCart();
     var line = cart.lines.filter(function (l) { return l.key === modelKey; })[0];
     if (!line) { line = { key: modelKey, qty: 0 }; cart.lines.push(line); }
-    var max = Number(limit) || 0;
-    line.qty = max ? Math.min(max, line.qty + qty) : line.qty + qty;
+    line.qty += qty;
     if (line.qty < 1) return removeFromCart(modelKey);
     writeCart(cart);
     return line.qty;
   }
 
-  function setQty(modelKey, qty, limit) {
+  function setQty(modelKey, qty) {
     var cart = readCart();
     var line = cart.lines.filter(function (l) { return l.key === modelKey; })[0];
     if (!line) return 0;
-    var max = Number(limit) || 0;
-    line.qty = Math.max(1, max ? Math.min(max, qty) : qty);
+    line.qty = Math.max(1, qty);
     writeCart(cart);
     return line.qty;
   }
@@ -158,6 +191,7 @@ var Site = (function () {
   return {
     $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
     humanDate: humanDate, shotIcon: shotIcon,
+    SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,

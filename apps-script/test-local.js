@@ -1673,5 +1673,75 @@ check('без входа номера не исправить', num.ok === false
 numRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0];
 check('после всех отказов номер остался прежним', numRow && numRow.serial_number === 'АБ', numRow);
 
+console.log('\n== разделы витрины: КИНО и ФОТО ==');
+// Раздел — свойство модели, а не категории: объектив служит и кино, и фото.
+// Проверяем главное: незнакомое значение не записывается, пустое законно, и
+// неразмеченная модель не исчезает с витрины.
+const secLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const secToken = secLogin.ok ? secLogin.data.token : null;
+check('вход перед разметкой', secLogin.ok === true, secLogin);
+
+let sec = call('/item/create', { category: 'CAM', model_name: 'Разделовая Тест' }, secToken);
+check('модель для разметки заведена', sec.ok === true, sec);
+const secCode = sec.ok ? sec.data.item_id.slice(2, 4) : null;
+
+sec = call('/models/list', { category: 'CAM' }, secToken);
+const secModel = sec.ok ? sec.data.filter(m => m.model_code === secCode)[0] : null;
+check('новая модель приходит без разметки', secModel && secModel.section === '', secModel);
+
+sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: secCode, section: 'CINE,PHOTO' }],
+}, secToken);
+check('разметка применилась', sec.ok === true && sec.data.changed === 1, sec);
+sec = call('/models/list', { category: 'CAM' }, secToken);
+check('модель теперь в обоих разделах',
+  sec.data.filter(m => m.model_code === secCode)[0].section === 'CINE,PHOTO',
+  sec.data.filter(m => m.model_code === secCode)[0]);
+
+sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: secCode, section: 'photo' }],
+}, secToken);
+check('регистр не важен', sec.ok === true, sec);
+check('повтор той же разметки ничего не меняет',
+  call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'PHOTO' }] },
+       secToken).data.changed === 0, 'ожидали changed=0');
+
+sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: secCode, section: 'ЗВУК' }],
+}, secToken);
+check('незнакомый раздел отклонён', sec.ok === false && sec.status === 400, sec);
+sec = call('/models/list', { category: 'CAM' }, secToken);
+check('после отказа разметка прежняя',
+  sec.data.filter(m => m.model_code === secCode)[0].section === 'PHOTO',
+  sec.data.filter(m => m.model_code === secCode)[0]);
+
+sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: secCode, section: '' }],
+}, secToken);
+check('разметку можно снять', sec.ok === true && sec.data.changed === 1, sec);
+
+sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: '99', section: 'CINE' }],
+}, secToken);
+check('несуществующая модель названа, а не проглочена',
+  sec.ok === true && sec.data.missing.length === 1, sec.data);
+sec = call('/models/sections', { models: [] }, secToken);
+check('пустой список отклонён', sec.ok === false && sec.status === 400, sec);
+
+const secStaff = call('/staff/create', {
+  full_name: 'Складмен Разделов', login: 'seccheck', pin: '8888', role: 'Warehouse Staff',
+}, secToken);
+check('сотрудник склада заведён', secStaff.ok === true, secStaff);
+const secStaffLogin = call('/auth/login', { login: 'seccheck', pin: '8888' });
+sec = call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'CINE' }] },
+           secStaffLogin.ok ? secStaffLogin.data.token : 'нет-токена');
+check('сотруднику склада разметка запрещена', sec.ok === false && sec.status === 403, sec);
+
+// Публичный каталог отдаёт раздел — из него он попадает в снимок сайта.
+const secPublic = call('/public/catalog', {});
+check('публичный каталог отдаёт раздел',
+  secPublic.ok === true && secPublic.data.models.every(m => 'section' in m),
+  secPublic.ok ? secPublic.data.models[0] : secPublic);
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

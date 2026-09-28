@@ -94,7 +94,12 @@ var SCHEMA = {
   // расходники) строка описывает всю кучу: qty штук всего, qty_out на руках.
   // Заводить сэндбэги по одному с личным QR никто не станет.
   Equipment: ["item_id", "name", "category", "model_code", "serial_number", "inventory_number", "status", "condition_notes", "created_at", "current_transaction_id", "qty", "qty_out"],
-  Models: ["category", "model_code", "model_name", "created_at"],
+  // section: витрина сайта делится на разделы КИНО и ФОТО, и делится по
+  // модели, а не по категории: объектив и камера служат и тому и другому.
+  // Значения CINE, PHOTO или "CINE,PHOTO". Пусто — не размечено, и такая
+  // модель видна в обоих разделах: забытая отметка не должна прятать
+  // технику с витрины.
+  Models: ["category", "model_code", "model_name", "created_at", "section"],
   // Синонимы колонок исходной таблицы, через запятую. Проверяются по порядку,
   // первый совпавший выигрывает. Особые записи: colN — колонка по счёту
   // (col0 — первая), ВКЛАДКА:colN — то же, но только на этой вкладке.
@@ -960,6 +965,7 @@ function doPost(e) {
       case "/defect/resolve": data = handleDefectResolve(payload, token); break;
       case "/equipment/list": data = handleEquipmentList(payload, token); break;
       case "/models/list": data = handleModelsList(payload, token); break;
+      case "/models/sections": data = handleModelsSections(payload, token); break;
       case "/model/create": data = handleModelCreate(payload, token); break;
       case "/order/parse": data = handleOrderParse(payload, token); break;
       case "/order/create": data = handleOrderCreate(payload, token); break;
@@ -1196,6 +1202,89 @@ function handleItemNumbers(payload, token) {
   }
 }
 
+var SECTIONS = ["CINE", "PHOTO"];
+
+// Раздел хранится строкой через запятую. Наружу и внутрь ходит тот же вид:
+// "CINE", "PHOTO", "CINE,PHOTO" или пусто.
+function normalizeSection(value) {
+  var parts = String(value || "").toUpperCase().split(/[,;\s]+/);
+  var out = [];
+  SECTIONS.forEach(function (code) {
+    if (parts.indexOf(code) !== -1) out.push(code);
+  });
+  return out.join(",");
+}
+
+// Пустое значение законно — это «не размечено». Незнакомое отклоняем: молча
+// проглоченная опечатка спрячет позицию из обоих разделов.
+function checkSection(value) {
+  var raw = String(value || "").trim();
+  if (!raw) return "";
+  var clean = normalizeSection(raw);
+  if (!clean) {
+    throw apiError(400, "Неизвестный раздел: " + raw + ". Допустимо CINE, PHOTO или оба.");
+  }
+  return clean;
+}
+
+// Дописать недостающие колонки в лист, ничего не тронув.
+//
+// Нужно, чтобы новая колонка появлялась сама, а не требовала человека с
+// редактором Apps Script: строки пишутся по заголовкам, и без заголовка
+// значение молча теряется.
+function ensureColumns(sheet, names) {
+  var existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map(function (h) { return String(h).trim(); });
+  var missing = names.filter(function (n) { return existing.indexOf(n) === -1; });
+  if (!missing.length) return 0;
+  sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
+  return missing.length;
+}
+
+// Разметка моделей по разделам витрины, пачкой.
+//
+// Пачкой, а не по одной: 85 моделей по запросу — это 85 раз по 5–8 секунд,
+// то есть час ожидания вместо одного действия.
+function handleModelsSections(payload, token) {
+  requireAdmin(token);
+  var list = payload.models;
+  if (!list || !list.length) throw apiError(400, "Нечего размечать: список пуст");
+
+  // Значения проверяем ДО записи: иначе половина уедет в таблицу, а вторая
+  // упадёт на опечатке, и понять, что применилось, будет уже нельзя.
+  var wanted = list.map(function (row) {
+    return {
+      category: String(row.category || "").trim().toUpperCase(),
+      model_code: pad2(Number(row.model_code)),
+      section: checkSection(row.section),
+    };
+  });
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.MODELS);
+    ensureColumns(sheet, ["section"]);
+    var rows = readRows(sheet);
+    var byKey = {};
+    rows.forEach(function (r) {
+      byKey[r.category + "|" + pad2(Number(r.model_code))] = r;
+    });
+
+    var changed = 0, missing = [];
+    wanted.forEach(function (w) {
+      var row = byKey[w.category + "|" + w.model_code];
+      if (!row) { missing.push(w.category + "·" + w.model_code); return; }
+      if (normalizeSection(row.section) === w.section) return;
+      updateRow(sheet, row.__row, { section: w.section });
+      changed += 1;
+    });
+    return { changed: changed, asked: wanted.length, missing: missing };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function handleModelsList(payload, token) {
   checkAuth(token);
   var rows = readRows(getSheet(SHEETS.MODELS));
@@ -1206,7 +1295,8 @@ function handleModelsList(payload, token) {
     // Наружу отдаём тот же вид, в котором код лежит в таблице и стоит внутри
     // номера предмета: "04". Иначе фронтенд и таблица говорят о модели
     // по-разному, и сравнение строкой однажды промахнётся.
-    return { category: r.category, model_code: pad2(Number(r.model_code)), model_name: r.model_name };
+    return { category: r.category, model_code: pad2(Number(r.model_code)),
+             model_name: r.model_name, section: normalizeSection(r.section) };
   }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
 }
 
@@ -2878,9 +2968,11 @@ function handlePublicCatalog(payload) {
 
   // Название берём из справочника моделей: в Equipment оно повторяется у каждой
   // единицы и могло разъехаться, а Models — единственное место, где оно одно.
-  var names = {};
+  var names = {}, sections = {};
   readRows(getSheet(SHEETS.MODELS)).forEach(function (m) {
-    names[m.category + "|" + pad2(Number(m.model_code))] = m.model_name;
+    var key = m.category + "|" + pad2(Number(m.model_code));
+    names[key] = m.model_name;
+    sections[key] = normalizeSection(m.section);
   });
   var labels = {};
   categories().forEach(function (c) { labels[c.code] = c.label; });
@@ -2895,6 +2987,7 @@ function handlePublicCatalog(payload) {
       category_label: labels[parts[0]] || parts[0],
       model_code: parts[1],
       model_name: names[key] || a.model_name || "",
+      section: sections[key] || "",
       total: a.total,
       free: a.free,
     });

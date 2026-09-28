@@ -765,7 +765,38 @@ const MockAPI = {
         MockStore.requireToken(token);
         let list = MockStore.models;
         if (body && body.category && body.category !== "all") list = list.filter((m) => m.category === body.category);
-        return list.map((m) => ({ ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
+        return list.map((m) => ({ section: "", ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
+      }
+
+      // Разметка моделей по разделам витрины. Настоящая версия —
+      // handleModelsSections в Code.gs.
+      case "/models/sections": {
+        MockStore.requireAdmin(token);
+        const list = body && body.models;
+        if (!list || !list.length) { const e = new Error("Нечего размечать: список пуст"); e.status = 400; throw e; }
+        const allowed = ["CINE", "PHOTO"];
+        const wanted = list.map((row) => {
+          const raw = String(row.section || "").trim();
+          const parts = raw.toUpperCase().split(/[,;\s]+/).filter(Boolean);
+          const clean = allowed.filter((c) => parts.indexOf(c) !== -1).join(",");
+          if (raw && !clean) {
+            const e = new Error("Неизвестный раздел: " + raw + ". Допустимо CINE, PHOTO или оба.");
+            e.status = 400; throw e;
+          }
+          return { category: String(row.category || "").toUpperCase(),
+                   model_code: String(row.model_code || ""), section: clean };
+        });
+        let changed = 0;
+        const missing = [];
+        wanted.forEach((w) => {
+          const m = MockStore.models.find((x) => x.category === w.category &&
+            String(x.model_code).padStart(2, "0") === w.model_code.padStart(2, "0"));
+          if (!m) { missing.push(w.category + "·" + w.model_code); return; }
+          if ((m.section || "") === w.section) return;
+          m.section = w.section;
+          changed += 1;
+        });
+        return { changed, asked: wanted.length, missing };
       }
 
       // Перенос модели. В моке важно воспроизвести именно перенумерацию и
