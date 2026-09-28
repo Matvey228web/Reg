@@ -178,6 +178,17 @@ global.Logger = { log: () => {} };
 global.LockService = {
   getScriptLock: () => ({ waitLock() {}, releaseLock() {} }),
 };
+// Кэш скрипта. Время жизни не изображаем: в проверках важно, что счётчик
+// растёт и что предел срабатывает, а не что запись истекает через час.
+const cacheStore = new Map();
+global.CacheService = {
+  getScriptCache: () => ({
+    get: (k) => (cacheStore.has(k) ? cacheStore.get(k) : null),
+    put: (k, v) => { cacheStore.set(k, String(v)); },
+    remove: (k) => { cacheStore.delete(k); },
+  }),
+};
+global.__cacheStore = cacheStore;
 global.Utilities = {
   DigestAlgorithm: { SHA_256: 'SHA_256' },
   Charset: { UTF_8: 'UTF_8' },
@@ -1748,6 +1759,88 @@ const secPublic = call('/public/catalog', {});
 check('публичный каталог отдаёт раздел',
   secPublic.ok === true && secPublic.data.models.every(m => 'section' in m),
   secPublic.ok ? secPublic.data.models[0] : secPublic);
+
+console.log('\n== заявка с сайта ==');
+const siteAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+const siteCat = call('/public/catalog', {}).data.models[0];
+function siteText(no, extra) {
+  return [
+    'Заказ №' + no,
+    '1. ' + siteCat.model_name + ': 0 (2 x 0)',
+    '',
+    'Информация о покупателе:',
+    'Are_you_an_adult: Да',
+    'Full_name_minor: Петров Пётр Петрович',
+    'Phone_minors: +79990001122',
+    'Telegram_Minors: @petrov',
+    'Type_and_name_of_the_project: курсовая',
+  ].concat(extra || []).concat([
+    'Date_of_issue: 01.10.2026',
+    'Date_completion: 05.10.2026',
+  ]).join('\n');
+}
+
+// Выключено по умолчанию: включать ручку, в которую пишут без входа, должен
+// человек, а не выкладка кода.
+let so = call('/public/order', { raw_text: siteText('260101-1111') });
+check('пока не включено — отказ', so.ok === false && so.status === 403, so);
+
+check('включается настройкой',
+  call('/settings/set', { settings: { public_orders: 1 } }, siteAdmin).ok === true);
+
+so = call('/public/order', { raw_text: siteText('260101-1111') });
+check('заявка принята', so.ok === true && so.data.order_no === '260101-1111', so);
+const siteOrderId = so.ok ? so.data.order_id : null;
+
+const siteCard = call('/order/card', { order_id: siteOrderId }, siteAdmin);
+check('заказ виден складу', siteCard.ok === true, card);
+check('автор строки — сайт', siteCard.ok && siteCard.data.order.created_by_name === 'сайт',
+  siteCard.ok && siteCard.data.order.created_by_name);
+check('статус New, а не выдача', siteCard.ok && siteCard.data.order.status === 'New',
+  siteCard.ok && siteCard.data.order.status);
+check('ФИО и телефон разобраны',
+  siteCard.ok && siteCard.data.order.student_name === 'Петров Пётр Петрович' &&
+  siteCard.ok && siteCard.data.order.student_phone === '+79990001122', siteCard.ok && siteCard.data.order);
+check('позиция на месте', siteCard.ok && siteCard.data.items.length === 1, siteCard.ok && siteCard.data.items);
+
+// Ответ идёт 5–20 секунд, и человек нажимает кнопку второй раз.
+so = call('/public/order', { raw_text: siteText('260101-1111') });
+check('повтор возвращает ту же заявку',
+  so.ok === true && so.data.order_id === siteOrderId && so.data.repeat === true, so);
+check('вторая копия не появилась',
+  call('/orders/list', {}, siteAdmin).data.filter((o) => o.order_no === '260101-1111').length === 1);
+
+// Тот же номер с другим содержимым — это уже не повтор, а столкновение.
+so = call('/public/order', { raw_text: siteText('260101-1111', ['Input: другое']) });
+check('тот же номер с другим текстом отклонён', so.ok === false && so.status === 409, so);
+
+check('ловушка отсекает заявку',
+  call('/public/order', { raw_text: siteText('260101-2222'), trap: 'бот' }).status === 400);
+check('пустая заявка отклонена', call('/public/order', { raw_text: '' }).status === 400);
+check('без номера отклонена',
+  call('/public/order', { raw_text: siteText('260101-3333').replace(/^Заказ.*\n/, '') }).status === 400);
+check('без позиций отклонена',
+  call('/public/order', { raw_text: siteText('260101-4444').replace(/^1\..*\n/m, '') }).status === 400);
+check('без ФИО отклонена',
+  call('/public/order', { raw_text: siteText('260101-5555').replace(/^Full_name_minor.*\n/m, '') }).status === 400);
+check('слишком длинная отклонена',
+  call('/public/order', { raw_text: siteText('260101-6666') + '\n' + 'я'.repeat(4000) }).status === 400);
+
+console.log('\n== предел на заявки с сайта ==');
+call('/settings/set', { settings: { public_orders_per_hour: 2 } }, siteAdmin);
+__cacheStore.clear();
+check('первая в пределах', call('/public/order', { raw_text: siteText('260102-0001') }).ok === true);
+check('вторая в пределах', call('/public/order', { raw_text: siteText('260102-0002') }).ok === true);
+const over = call('/public/order', { raw_text: siteText('260102-0003') });
+check('третья отклонена по частоте', over.ok === false && over.status === 429, over);
+check('отклонённая в таблицу не попала',
+  call('/orders/list', {}, siteAdmin).data.every((o) => o.order_no !== '260102-0003'));
+// Отказ по частоте не должен съедать квоту на разборе мусора: считаем только
+// то, что дошло до записи.
+__cacheStore.clear();
+check('после сброса счётчика снова принимает',
+  call('/public/order', { raw_text: siteText('260102-0004') }).ok === true);
+call('/settings/set', { settings: { public_orders: 0 } }, siteAdmin);
 
 // Хранение PIN. Блок стоит последним: вход перезаписывает session_token, и
 // добытые выше токены после него стали бы недействительны.

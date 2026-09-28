@@ -156,6 +156,30 @@ const SettingsScreen = (() => {
       </div>
 
       <div class="section">
+        <h2>Заявки с сайта</h2>
+        <p class="hint">Включено — сайт отправляет заявку сам: строка появляется в «Заказах»
+          со статусом «Новый», и бот пишет об этом в чат. Выключено — студент копирует
+          текст и присылает его любым способом, как сейчас.</p>
+        <p class="hint">Это единственный адрес, куда пишут без входа в систему. Со складом он
+          ничего не делает: технику по-прежнему списывает человек. Предел в час не даст
+          завалить таблицу, если адрес найдут роботы.</p>
+        <div id="settings-public-error"></div>
+        <div class="form-group">
+          <div class="toggle-row">
+            <label for="set-public_orders">Принимать заявки с сайта</label>
+            <input type="checkbox" id="set-public_orders"
+                   ${Number(s.public_orders) === 1 ? "checked" : ""} />
+          </div>
+          <div class="field">
+            <label for="set-public_orders_per_hour">Не больше в час</label>
+            <input id="set-public_orders_per_hour" type="number"
+                   value="${escapeHtml(String(s.public_orders_per_hour === undefined ? 20 : s.public_orders_per_hour))}" />
+          </div>
+        </div>
+        <button class="btn" id="settings-public-save">Сохранить</button>
+      </div>
+
+      <div class="section">
         <h2>Бот в Telegram</h2>
         <p class="hint">Бот пишет в чат склада о дефектах и о просрочках. Токен бота — не здесь,
           а в Script Properties, ключ TELEGRAM_BOT_TOKEN (эти настройки видит любой
@@ -291,6 +315,36 @@ const SettingsScreen = (() => {
     }
   }
 
+  // Приём заявок с сайта сохраняем отдельно от сроков входа: это выключатель
+  // единственного адреса, куда пишут без входа, и трогать его заодно с
+  // «блокировка, минут» человек не должен.
+  async function savePublicOrders() {
+    const btn = document.getElementById("settings-public-save");
+    showBoxError("settings-public-error", "");
+    btn.disabled = true;
+    btn.textContent = "Сохраняем…";
+    try {
+      const res = await apiPost("/settings/set", {
+        settings: {
+          public_orders: document.getElementById("set-public_orders").checked ? 1 : 0,
+          public_orders_per_hour:
+            Number(document.getElementById("set-public_orders_per_hour").value.trim()),
+        },
+      });
+      data.settings = res.settings;
+      TG.hapticSuccess();
+      TG.showAlert(Number(res.settings.public_orders) === 1
+        ? "Сайт теперь отправляет заявки сам"
+        : "Заявки с сайта выключены");
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("settings-public-error", err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Сохранить";
+    }
+  }
+
   async function saveFields() {
     const payload = {};
     FIELDS.forEach((f) => {
@@ -378,6 +432,8 @@ const SettingsScreen = (() => {
     });
     document.getElementById("settings-cat-submit").addEventListener("click", addCategory);
     document.getElementById("settings-save").addEventListener("click", saveFields);
+    document.getElementById("settings-public-save")
+      .addEventListener("click", savePublicOrders);
     document.getElementById("settings-bot-test")
       .addEventListener("click", () => bot("/notify/test", "settings-bot-test"));
     document.getElementById("settings-bot-overdue")

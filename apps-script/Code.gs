@@ -956,6 +956,7 @@ function doPost(e) {
       // перед таблицей (кэш и ограничение частоты); сюда наружу не уходит
       // ничего, по чему можно опознать конкретную единицу техники.
       case "/public/catalog": data = handlePublicCatalog(payload); break;
+      case "/public/order": data = handlePublicOrder(payload); break;
       case "/item/lookup": data = handleItemLookup(payload, token); break;
       case "/item/create": data = handleItemCreate(payload, token); break;
       case "/item/numbers": data = handleItemNumbers(payload, token); break;
@@ -2138,6 +2139,12 @@ function findOrCreateStudent(order) {
 
 function handleOrderCreate(payload, token) {
   var staffRow = checkAuth(token);
+  return writeOrder(payload, staffRow.staff_id, staffRow.full_name);
+}
+
+// Запись заказа. Одна на два пути: складмен вставляет сообщение руками, сайт
+// присылает заявку сам. Разница только в авторе строки.
+function writeOrder(payload, authorId, authorName) {
   var orderNo = String(payload.order_no || "").trim();
   if (!orderNo) throw apiError(400, "Укажите номер заказа");
   if (!String(payload.student_name || "").trim()) throw apiError(400, "Укажите имя арендатора");
@@ -2176,8 +2183,8 @@ function handleOrderCreate(payload, token) {
       status: "New",
       raw_text: String(payload.raw_text || ""),
       created_at: now,
-      created_by: staffRow.staff_id,
-      created_by_name: staffRow.full_name,
+      created_by: authorId,
+      created_by_name: authorName,
       closed_at: "",
     });
 
@@ -3002,6 +3009,95 @@ function handlePublicCatalog(payload) {
   return { from: from, to: to, models: models };
 }
 
+// Заявка прямо с сайта. Это единственная ручка, в которую пишут без входа,
+// поэтому она устроена скучно и узко:
+//
+// — выключена, пока администратор не включит (настройка public_orders);
+// — берёт ровно тот текст, который сайт и так показывает студенту, и разбирает
+//   его тем же разбором, что и вставленное складменом сообщение: новых путей
+//   для данных не появляется;
+// — со складом ничего не делает. Строка в «Заказах» со статусом New — это
+//   заявка, а не выдача; технику по-прежнему списывает человек;
+// — повтор той же заявки возвращает уже созданную, а не вторую копию: ответ
+//   идёт 5–20 секунд, и человек нажимает кнопку второй раз.
+//
+// Уведомление в чат — следствие записи, а не способ доставки: если Telegram
+// недоступен, заявка всё равно в таблице.
+function handlePublicOrder(payload) {
+  var settings = getSettings();
+  if (Number(settings.public_orders) !== 1) {
+    throw apiError(403, "Приём заявок с сайта выключен");
+  }
+  // Поле-ловушка: в форме его не видно, человек его не заполнит.
+  if (String(payload.trap || "").trim()) throw apiError(400, "Заявка не принята");
+
+  var text = String(payload.raw_text || "");
+  if (text.length < 20) throw apiError(400, "Заявка пустая");
+  if (text.length > 4000) throw apiError(400, "Заявка слишком длинная");
+
+  var parsed = parseOrderMessage(text);
+  if (!parsed.order_no) throw apiError(400, "В заявке нет номера");
+  if (!parsed.items.length) throw apiError(400, "В заявке нет ни одной позиции");
+  if (parsed.items.length > 40) throw apiError(400, "Слишком много позиций в одной заявке");
+
+  var fields = mapOrderFields(parsed.fields);
+  if (!String(fields.student_name || "").trim()) throw apiError(400, "Укажите ФИО");
+  if (!String(fields.student_phone || "").trim()) throw apiError(400, "Укажите телефон");
+
+  var sheet = getSheet(SHEETS.ORDERS);
+  var dup = findRowByValue(sheet, "order_no", parsed.order_no);
+  if (dup) {
+    if (String(dup.raw_text || "") === text) {
+      return { order_id: dup.order_id, order_no: dup.order_no, repeat: true };
+    }
+    throw apiError(409, "Заявка с таким номером уже есть. Обновите страницу и отправьте заново");
+  }
+
+  publicOrderQuotaTake(Number(settings.public_orders_per_hour));
+
+  var order = writeOrder({
+    order_no: parsed.order_no,
+    request_code: parsed.order_no,
+    student_name: fields.student_name,
+    student_phone: fields.student_phone,
+    student_tg: fields.student_tg,
+    is_adult: fields.is_adult,
+    guardian_name: fields.guardian_name,
+    guardian_phone: fields.guardian_phone,
+    project: fields.project,
+    issue_date: fields.issue_date,
+    return_date: fields.return_date,
+    extra_input: fields.extra_input,
+    source_url: String(payload.source_url || ""),
+    raw_text: text,
+    items: parsed.items,
+  }, "", "сайт");
+
+  // В чат — короткое извещение, а не вся заявка: подробности уже в таблице, а
+  // ФИО и телефоны детей незачем множить по чатам.
+  tgSend("Заявка с сайта №" + parsed.order_no + "\n" +
+    fields.student_name + ", " + fields.student_phone + "\n" +
+    "Позиций: " + parsed.items.length +
+    (fields.issue_date ? "\nНа " + fields.issue_date +
+      (fields.return_date && fields.return_date !== fields.issue_date ? " — " + fields.return_date : "") : "") +
+    "\nОткройте «Заказы» в приложении.");
+
+  return { order_id: order.order_id, order_no: parsed.order_no, repeat: false };
+}
+
+// Предел на приём заявок. Считаем в кэше: он живёт час и переживает вызовы, а
+// заводить под счётчик строку в таблице — это ещё одно обращение к ней на
+// каждую заявку.
+function publicOrderQuotaTake(limit) {
+  var cache = CacheService.getScriptCache();
+  var slot = "public_orders_" + Math.floor(Date.now() / 3600000);
+  var used = Number(cache.get(slot) || 0);
+  if (used >= limit) {
+    throw apiError(429, "Сейчас заявки с сайта не принимаются, попробуйте позже");
+  }
+  cache.put(slot, String(used + 1), 3900);
+}
+
 function warehouseSummary() {
   var today = new Date().toISOString().substring(0, 10);
   var out = {
@@ -3475,6 +3571,24 @@ var SETTINGS_SPEC = {
     text: true,
     check: function (v) { return v === "" || /^https:\/\/[^\s]+$/.test(v); },
     hint: "адрес сайта проката целиком, начиная с https:// — или пусто",
+  },
+  // Приём заявок прямо с сайта. Выключено по умолчанию намеренно: это
+  // единственная ручка, в которую можно писать без входа, и включать её должен
+  // человек, а не выкладка кода.
+  public_orders: {
+    def: 0,
+    text: false,
+    check: function (v) { return v === 0 || v === 1; },
+    hint: "1 — сайт отправляет заявку сам, 0 — только копипастом",
+  },
+  // Сколько заявок с сайта принимаем в час. Опознать посетителя нечем: Apps
+  // Script не сообщает его адрес, поэтому предел общий на всех. Мусор он не
+  // остановит, но не даст завалить таблицу за одну ночь.
+  public_orders_per_hour: {
+    def: 20,
+    text: false,
+    check: function (v) { return v >= 1 && v <= 200; },
+    hint: "от 1 до 200",
   },
 };
 

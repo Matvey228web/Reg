@@ -113,6 +113,32 @@ var Site = (function () {
       });
   }
 
+  // Отправка заявки складу. Ответа ждём долго — таблица отвечает 5–20 секунд,
+  // — поэтому вызывающий обязан показать, что идёт работа.
+  //
+  // Ручка может быть выключена на стороне склада: тогда приходит отказ, и
+  // остаются копирование и письмо. Поэтому кнопка «Отправить» не заменяет их,
+  // а стоит рядом.
+  function sendOrder(text) {
+    return fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        endpoint: "/public/order",
+        payload: { raw_text: text, trap: "", source_url: location.href },
+      }),
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          var err = new Error((data && data.error) || "склад не ответил");
+          err.status = data && data.status;
+          throw err;
+        }
+        return data.data;
+      });
+  }
+
   // --- Корзина ---
   // В браузере: сервера для черновиков нет. Приватный режим может запретить
   // запись — тогда сайт работает без памяти, а не падает.
@@ -192,7 +218,7 @@ var Site = (function () {
     $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
     humanDate: humanDate, shotIcon: shotIcon,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
-    loadCatalog: loadCatalog, availability: availability,
+    loadCatalog: loadCatalog, availability: availability, sendOrder: sendOrder,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
     paintCount: paintCount,

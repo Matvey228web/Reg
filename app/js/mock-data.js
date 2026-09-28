@@ -15,6 +15,8 @@ const mockSettings = {
   login_lock_minutes: 15,
   import_source_id: "",
   site_url: "",
+  public_orders: 0,
+  public_orders_per_hour: 20,
 };
 const MOCK_SETTINGS_SPEC = {
   site_url: { def: "", text: true, check: (v) => v === "" || /^https:\/\/[^\s]+$/.test(String(v)),
@@ -25,6 +27,8 @@ const MOCK_SETTINGS_SPEC = {
   max_login_attempts: { min: 3, max: 20, hint: "от 3 до 20 попыток" },
   login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
   import_source_id: { text: true, hint: "идентификатор таблицы Google или пусто" },
+  public_orders: { min: 0, max: 1, hint: "1 — сайт отправляет заявку сам, 0 — только копипастом" },
+  public_orders_per_hour: { min: 1, max: 200, hint: "от 1 до 200" },
 };
 let mockCats = CONFIG.CATEGORIES.map((c) => ({
   ...c,

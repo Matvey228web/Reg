@@ -98,12 +98,16 @@
 
       '<div class="block">' +
         "<h2>Отправить складу</h2>" +
-        '<p class="hint">Скопируйте заявку и отправьте её складу любым способом.' +
-        " Складмен вставит её в систему — заполнять ничего заново не придётся.</p>" +
+        // Поле-ловушка: человек его не видит и не заполнит.
+        '<input type="text" id="trap" tabindex="-1" autocomplete="off"' +
+          ' aria-hidden="true" class="trap" />' +
         '<div class="btn-row">' +
-          '<button class="btn" id="copy">Скопировать заявку</button>' +
+          '<button class="btn" id="send">Отправить складу</button>' +
+          '<button class="btn btn--secondary" id="copy">Скопировать</button>' +
           '<a class="btn btn--secondary" id="mail" href="#">Письмом</a>' +
         "</div>" +
+        '<p class="hint" id="sendnote">Ответ идёт до 20 секунд — столько думает' +
+        " склад. Не получилось — скопируйте заявку и отправьте любым способом.</p>" +
         '<p class="hint" id="copied" hidden>Заявка скопирована.</p>' +
         "<pre id=\"preview\" class=\"preview\"></pre>" +
       "</div>";
@@ -248,6 +252,8 @@
       }
     });
 
+    $("send").addEventListener("click", send);
+
     $("copy").addEventListener("click", function () {
       var text = orderText();
       var done = function () {
@@ -262,6 +268,40 @@
         selectPreview();
       }
     });
+  }
+
+  // Отправка. Обязательное проверяем здесь же: отказ после двадцати секунд
+  // ожидания — худший способ узнать, что не введён телефон.
+  function send() {
+    var note = $("sendnote");
+    if (!val("name") || !val("phone")) {
+      note.textContent = "Заполните ФИО и телефон — без них склад не поймёт, кому выдавать.";
+      note.classList.add("hint--bad");
+      ($("name").value ? $("phone") : $("name")).focus();
+      return;
+    }
+    if (($("trap") && $("trap").value).trim()) return;
+
+    var btn = $("send");
+    btn.disabled = true;
+    btn.textContent = "Отправляем…";
+    note.classList.remove("hint--bad");
+    note.textContent = "Идёт отправка. Это до 20 секунд, не закрывайте страницу.";
+
+    Site.sendOrder(orderText())
+      .then(function (res) {
+        btn.textContent = "Заявка отправлена";
+        note.textContent = res.repeat
+          ? "Эта заявка уже была принята, номер " + res.order_no + ". Второй раз не завели."
+          : "Склад принял заявку, номер " + res.order_no + ". Ждите ответа.";
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = "Отправить складу";
+        note.classList.add("hint--bad");
+        note.textContent = "Отправить не вышло: " + (err.message || "склад не ответил") +
+          ". Скопируйте заявку и отправьте её складу любым способом.";
+      });
   }
 
   function selectPreview() {

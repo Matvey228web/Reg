@@ -412,6 +412,11 @@ input[type="checkbox"]:checked::after {
 }
 
 .hint { margin: 0 0 12px; color: var(--dim); font-size: 13px; line-height: 18px; }
+.hint--bad { color: var(--accent-text); }
+
+/* Поле-ловушка для роботов. Убрано с экрана, но не display:none — иначе его не
+   заполнит и робот, а в этом весь смысл. */
+input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 
 .preview {
   margin: 14px 0 0; padding: 14px;
