@@ -3006,7 +3006,13 @@ function handlePublicCatalog(payload) {
     if (x.category_label !== y.category_label) return x.category_label < y.category_label ? -1 : 1;
     return String(x.model_name).localeCompare(String(y.model_name), "ru");
   });
-  return { from: from, to: to, models: models };
+  // Принимает ли склад заявки. Сайту это нужно заранее: показывать кнопку,
+  // которая заведомо откажет, хуже, чем сразу предложить скопировать текст.
+  // Наружу уходит только «да/нет» — ничего лишнего.
+  return {
+    from: from, to: to, models: models,
+    orders_open: Number(getSettings().public_orders) === 1 ? 1 : 0,
+  };
 }
 
 // Заявка прямо с сайта. Это единственная ручка, в которую пишут без входа,

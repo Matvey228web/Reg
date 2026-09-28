@@ -31,6 +31,10 @@ function makeKV() {
         expires: opts && opts.expirationTtl ? Date.now() + opts.expirationTtl * 1000 : 0,
       });
     },
+    async delete(key) { store.delete(key); },
+    async list({ prefix }) {
+      return { keys: [...store.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })) };
+    },
   };
 }
 
@@ -151,6 +155,101 @@ r = await call("/equipment/list", { category: "all" }, "неизвестный")
 ok("недоступная таблица объясняет причину, а не молчит",
    r.data.ok === false && /Нет связи с таблицей/.test(r.data.error), r.data);
 globalThis.fetch = savedFetch;
+
+console.log("== заявка с сайта: отказ на месте, без таблицы ==");
+const goodOrder = (no) => [
+  "Заказ №" + no,
+  "1. GreenBean HDV Elite-756: 0 (2 x 0)",
+  "",
+  "Информация о покупателе:",
+  "Are_you_an_adult: Да",
+  "Full_name_minor: Петров Пётр Петрович",
+  "Phone_minors: +7 999 000 11 22",
+].join("\n");
+
+const qKeys = () => [...env.CACHE.store.keys()].filter((k) => k.startsWith("q:"));
+const deadKeys = () => [...env.CACHE.store.keys()].filter((k) => k.startsWith("dead:"));
+
+upstream.calls = [];
+upstream.reply = { ok: true, data: { order_id: 1 }, error: null, status: 200 };
+
+r = await call("/public/order", { raw_text: "" });
+ok("пустая заявка отклонена", r.data.ok === false && r.data.status === 400, r.data);
+r = await call("/public/order", { raw_text: goodOrder("1").replace(/^Заказ.*\n/, "") });
+ok("без номера отклонена", r.data.ok === false && /номера/.test(r.data.error), r.data);
+r = await call("/public/order", { raw_text: goodOrder("2").replace(/^Full_name_minor.*\n/m, "") });
+ok("без ФИО отклонена", r.data.ok === false && /ФИО/.test(r.data.error), r.data);
+// Строка телефона в примере последняя, без перевода строки в конце.
+r = await call("/public/order", { raw_text: goodOrder("3").replace(/^Phone_minors.*$/m, "") });
+ok("без телефона отклонена", r.data.ok === false && /телефон/.test(r.data.error), r.data);
+r = await call("/public/order", { raw_text: goodOrder("4"), trap: "я робот" });
+ok("ловушка отсекает", r.data.ok === false, r.data);
+ok("ни одна кривая заявка не ушла в таблицу", upstream.calls.length === 0, upstream.calls);
+ok("и в очереди ничего не осталось", qKeys().length === 0, qKeys());
+
+console.log("== годная заявка: ответ сразу, доставка потом ==");
+upstream.calls = [];
+r = await call("/public/order", { raw_text: goodOrder("260101-0001") });
+ok("ответ успешный и с номером",
+   r.data.ok === true && r.data.data.order_no === "260101-0001", r.data);
+ok("заявка доставлена в таблицу", upstream.calls.includes("/public/order"), upstream.calls);
+ok("из очереди убрана после успеха", qKeys().length === 0, qKeys());
+
+console.log("== повтор не плодит заявок ==");
+// Ответ мгновенный, и кнопку жмут второй раз.
+upstream.reply = (body) => ({ ok: false, data: null, error: "нет связи", status: 502 });
+upstream.calls = [];
+r = await call("/public/order", { raw_text: goodOrder("260101-0002") });
+ok("первая принята", r.data.ok === true && r.data.data.repeat === false, r.data);
+ok("осталась в очереди после отказа таблицы", qKeys().length === 1, qKeys());
+const callsAfterFirst = upstream.calls.length;
+r = await call("/public/order", { raw_text: goodOrder("260101-0002") });
+ok("повтор отвечает тем же номером",
+   r.data.ok === true && r.data.data.repeat === true &&
+   r.data.data.order_no === "260101-0002", r.data);
+ok("и второй записи в очереди нет", qKeys().length === 1, qKeys());
+ok("повтор таблицу не трогает", upstream.calls.length === callsAfterFirst, upstream.calls);
+
+console.log("== cron добирает застрявшее ==");
+upstream.reply = { ok: true, data: { order_id: 2 }, error: null, status: 200 };
+upstream.calls = [];
+await worker.scheduled({}, env, ctx);
+await settle();
+ok("cron дослал заявку", upstream.calls.includes("/public/order"), upstream.calls);
+ok("очередь опустела", qKeys().length === 0, qKeys());
+ok("в ящик неудач ничего не легло", deadKeys().length === 0, deadKeys());
+
+console.log("== отказ по существу не повторяем бесконечно ==");
+upstream.reply = { ok: false, data: null, error: "Приём заявок с сайта выключен", status: 403 };
+upstream.calls = [];
+r = await call("/public/order", { raw_text: goodOrder("260101-0003") });
+ok("студенту ответили успехом (заявка принята нами)", r.data.ok === true, r.data);
+ok("из очереди убрана", qKeys().length === 0, qKeys());
+ok("но видна в ящике неудач, а не потеряна", deadKeys().length === 1, deadKeys());
+
+console.log("== таблица ответила не JSON ==");
+// Настоящий случай: Apps Script раз в несколько запросов отдаёт страницу
+// ошибки Google вместо ответа.
+const savedOk = globalThis.fetch;
+globalThis.fetch = async () => new Response("<!DOCTYPE html><html>Page Not Found",
+  { headers: { "Content-Type": "text/html" } });
+r = await call("/public/order", { raw_text: goodOrder("260101-0004") });
+ok("заявка всё равно принята", r.data.ok === true, r.data);
+ok("и осталась в очереди, а не пропала", qKeys().length === 1, qKeys());
+globalThis.fetch = savedOk;
+upstream.reply = { ok: true, data: { order_id: 3 }, error: null, status: 200 };
+await worker.scheduled({}, env, ctx);
+await settle();
+ok("cron её дослал", qKeys().length === 0, qKeys());
+
+console.log("== наличие на даты кэшируется без токена ==");
+upstream.reply = { ok: true, data: { models: [], orders_open: 1 }, error: null, status: 200 };
+upstream.calls = [];
+r = await call("/public/catalog", { from: "2026-10-01", to: "2026-10-02" });
+ok("первый запрос идёт в таблицу", r.cache === "miss", r.cache);
+r = await call("/public/catalog", { from: "2026-10-01", to: "2026-10-02" });
+ok("второй — из кэша, хотя токена нет", r.cache === "hit" && upstream.calls.length === 1,
+   { cache: r.cache, calls: upstream.calls });
 
 console.log("\n" + (bad ? "❌ ПРОВАЛОВ: " + bad : "✅ Worker: проверки пройдены"));
 process.exit(bad ? 1 : 0);

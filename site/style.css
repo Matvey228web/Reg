@@ -349,10 +349,16 @@ input:focus-visible, textarea:focus-visible {
   flex: 1;
 }
 .btn[disabled] { opacity: .45; cursor: default; }
+/* display у кнопки перебивает браузерное [hidden] — как когда-то у блока
+   поиска. Без этой строки скрытая кнопка остаётся на экране. */
+.btn[hidden] { display: none; }
 .btn--secondary {
   background: none; color: var(--ink); border-color: var(--line);
 }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Бронь — единственное действие на странице, поэтому во всю ширину: три
+   кнопки в ряд на телефоне не влезали и переносились лестницей. */
+.btn--wide { width: 100%; min-height: 52px; font-size: 15px; }
 
 .stepper {
   display: inline-grid;
@@ -446,14 +452,32 @@ input[type="checkbox"]:checked::after {
    заполнит и робот, а в этом весь смысл. */
 input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
 
+.preview-box { position: relative; }
 .preview {
-  margin: 14px 0 0; padding: 14px;
+  margin: 14px 0 0; padding: 14px 52px 14px 14px;
   background: var(--panel); border: 1px solid var(--line);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px; line-height: 18px;
   white-space: pre-wrap; word-break: break-word;
   user-select: all;
 }
+
+/* Копирование — знаком в углу самого текста: подписи ему не нужно, а место
+   рядом с кнопкой брони оно занимало зря. */
+.copy-btn {
+  position: absolute; top: 23px; right: 9px;
+  width: 34px; height: 34px; padding: 0;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 0;
+  color: var(--dim); cursor: pointer;
+  display: grid; place-items: center;
+}
+.copy-btn svg {
+  width: 17px; height: 17px;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.copy-btn:hover { color: var(--ink); border-color: var(--accent); }
+.copy-btn--done { color: var(--accent-text); border-color: var(--accent-text); }
 
 /* --- Подвал --- */
 

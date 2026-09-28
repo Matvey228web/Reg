@@ -32,6 +32,55 @@
       : "На эти даты всё забронировано. Выберите другие или уберите позицию.") + "</p>";
   }
 
+  // Два листа — общепринятый знак «скопировать», его узнают без подписи.
+  function copyIcon() {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<rect x="9" y="9" width="11" height="11" rx="1"/>' +
+      '<path d="M15 5H5a1 1 0 0 0-1 1v10"/></svg>';
+  }
+
+  function doneIcon() {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M4 12l5 5L20 6"/></svg>';
+  }
+
+  // Телефон. «+7» подставляется само, как только набрали цифру: набирать код
+  // руками незачем, а без него разбор на складе не поймёт номер.
+  //
+  // Чужой код с «+» не ломаем: если начали не с семёрки, оставляем как есть —
+  // приезжают и не из России.
+  function maskPhone(raw) {
+    var value = String(raw || "");
+    var foreign = /^\+(?!7)/.test(value.trim());
+    var digits = value.replace(/\D/g, "");
+    if (foreign) return "+" + digits;
+    if (!digits) return "";
+    if (digits[0] === "8" || digits[0] === "7") digits = digits.slice(1);
+    digits = digits.slice(0, 10);
+    var out = "+7";
+    if (digits.length) out += " " + digits.slice(0, 3);
+    if (digits.length > 3) out += " " + digits.slice(3, 6);
+    if (digits.length > 6) out += " " + digits.slice(6, 8);
+    if (digits.length > 8) out += " " + digits.slice(8, 10);
+    return out;
+  }
+
+  // Ник: «@» подставляется само и не удваивается.
+  function maskTg(raw) {
+    var value = String(raw || "").replace(/@/g, "").trim();
+    return value ? "@" + value : "";
+  }
+
+  // Курсор держим в конце: маска переписывает строку целиком, и без этого он
+  // прыгал бы в начало на каждом знаке.
+  function applyMask(input, fn) {
+    var atEnd = input.selectionStart === input.value.length;
+    var next = fn(input.value);
+    if (next === input.value) return;
+    input.value = next;
+    if (atEnd) { try { input.setSelectionRange(next.length, next.length); } catch (e) { /* не всем полям можно */ } }
+  }
+
   // Браузер запретил запись — заявка не переживёт переход между страницами.
   function storageWarnHtml() {
     return '<p class="hint hint--bad" id="nostore">Браузер не сохраняет заявку —' +
@@ -87,40 +136,37 @@
         '<label class="field"><span class="cap">ФИО</span>' +
           '<input type="text" id="name" autocomplete="name" /></label>' +
         '<label class="field"><span class="cap">Телефон</span>' +
-          '<input type="tel" id="phone" inputmode="tel" placeholder="+7…" /></label>' +
+          '<input type="tel" id="phone" inputmode="tel" /></label>' +
         '<label class="field"><span class="cap">Ник в Telegram</span>' +
-          '<input type="text" id="tg" placeholder="@nick" autocapitalize="off" /></label>' +
+          '<input type="text" id="tg" autocapitalize="off" autocorrect="off"' +
+            ' spellcheck="false" /></label>' +
         '<div id="guardian">' +
           '<h2>Представитель</h2>' +
           '<label class="field"><span class="cap">ФИО представителя</span>' +
             '<input type="text" id="gname" /></label>' +
           '<label class="field"><span class="cap">Телефон представителя</span>' +
-            '<input type="tel" id="gphone" inputmode="tel" placeholder="+7…" /></label>' +
+            '<input type="tel" id="gphone" inputmode="tel" /></label>' +
         "</div>" +
         '<label class="field"><span class="cap">Проект</span>' +
           '<input type="text" id="project" placeholder="курсовая, короткий метр…" /></label>' +
-        '<label class="field"><span class="cap">Мастерская или курс</span>' +
-          '<input type="text" id="workshop" placeholder="оператор, режиссура, звук…" /></label>' +
+        '<label class="field"><span class="cap">Мастерская и курс</span>' +
+          '<input type="text" id="workshop" /></label>' +
         '<label class="field"><span class="cap">Комментарий</span>' +
-          '<textarea id="note" rows="3" ' +
-            'placeholder="пожелания, во сколько удобно забрать"></textarea></label>' +
+          '<textarea id="note" rows="3"></textarea></label>' +
       "</div>" +
 
       '<div class="block">' +
-        "<h2>Отправить складу</h2>" +
         // Поле-ловушка: человек его не видит и не заполнит.
         '<input type="text" id="trap" tabindex="-1" autocomplete="off"' +
           ' aria-hidden="true" class="trap" />' +
-        '<div class="btn-row">' +
-          '<button class="btn" id="send">Отправить складу</button>' +
-          '<button class="btn btn--secondary" id="copy">Скопировать</button>' +
-          '<a class="btn btn--secondary" id="mail" href="#">Письмом</a>' +
-        "</div>" +
-        '<p class="hint" id="sendnote">Ответ идёт до 20 секунд — столько думает' +
-        " склад. Не получилось — скопируйте заявку и отправьте любым способом.</p>" +
+        '<button class="btn btn--wide" id="send">Забронировать</button>' +
+        '<p class="hint" id="sendnote" hidden></p>' +
         (Site.storageOk() ? "" : storageWarnHtml()) +
-        '<p class="hint" id="copied" hidden>Заявка скопирована.</p>' +
-        "<pre id=\"preview\" class=\"preview\"></pre>" +
+        '<div class="preview-box">' +
+          '<pre id="preview" class="preview"></pre>' +
+          '<button type="button" class="copy-btn" id="copy"' +
+            ' aria-label="Скопировать заявку">' + copyIcon() + "</button>" +
+        "</div>" +
       "</div>";
 
     bind();
@@ -215,11 +261,7 @@
   }
 
   function updatePreview() {
-    var text = orderText();
-    $("preview").textContent = text;
-    $("mail").href = "mailto:?subject=" +
-      encodeURIComponent("Заявка на оборудование №" + requestCode()) +
-      "&body=" + encodeURIComponent(text);
+    $("preview").textContent = orderText();
   }
 
   function updateGuardian() {
@@ -258,6 +300,10 @@
 
     $("cart").addEventListener("input", function (e) {
       var tag = e.target.tagName;
+      if (e.target.id === "phone" || e.target.id === "gphone") {
+        applyMask(e.target, maskPhone);
+      }
+      if (e.target.id === "tg") applyMask(e.target, maskTg);
       if ((tag === "INPUT" && e.target.type !== "date") || tag === "TEXTAREA") {
         updatePreview();
       }
@@ -266,15 +312,19 @@
     $("send").addEventListener("click", send);
 
     $("copy").addEventListener("click", function () {
-      var text = orderText();
+      var btn = $("copy");
       var done = function () {
-        $("copied").hidden = false;
-        setTimeout(function () { $("copied").hidden = true; }, 2500);
+        btn.innerHTML = doneIcon();
+        btn.classList.add("copy-btn--done");
+        setTimeout(function () {
+          btn.innerHTML = copyIcon();
+          btn.classList.remove("copy-btn--done");
+        }, 2000);
       };
       // Буфер доступен не везде: без https и без жеста браузер откажет.
       // Тогда выделяем текст — скопировать его человек сможет сам.
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done, selectPreview);
+        navigator.clipboard.writeText(orderText()).then(done, selectPreview);
       } else {
         selectPreview();
       }
@@ -295,23 +345,27 @@
 
     var btn = $("send");
     btn.disabled = true;
-    btn.textContent = "Отправляем…";
+    btn.textContent = "Бронируем…";
     note.classList.remove("hint--bad");
-    note.textContent = "Идёт отправка. Это до 20 секунд, не закрывайте страницу.";
+    note.hidden = true;
 
     Site.sendOrder(orderText())
       .then(function (res) {
-        btn.textContent = "Заявка отправлена";
+        btn.textContent = "Забронировано";
+        note.hidden = false;
         note.textContent = res.repeat
-          ? "Эта заявка уже была принята, номер " + res.order_no + ". Второй раз не завели."
-          : "Склад принял заявку, номер " + res.order_no + ". Ждите ответа.";
+          ? "Эта заявка уже принята, номер " + res.order_no + "."
+          : "Заявка №" + res.order_no + " у склада. Ответ придёт вам в Telegram.";
       })
       .catch(function (err) {
         btn.disabled = false;
-        btn.textContent = "Отправить складу";
+        btn.textContent = "Забронировать";
+        note.hidden = false;
         note.classList.add("hint--bad");
-        note.textContent = "Отправить не вышло: " + (err.message || "склад не ответил") +
-          ". Скопируйте заявку и отправьте её складу любым способом.";
+        note.textContent = err.status === 403
+          ? "Склад пока не принимает заявки с сайта. Скопируйте текст и отправьте его складу."
+          : "Забронировать не вышло: " + (err.message || "склад не ответил") +
+            ". Скопируйте текст и отправьте его складу.";
       });
   }
 
@@ -322,8 +376,9 @@
     var sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
-    $("copied").textContent = "Текст выделен — скопируйте его вручную.";
-    $("copied").hidden = false;
+    var note = $("sendnote");
+    note.hidden = false;
+    note.textContent = "Текст выделен — скопируйте его вручную.";
   }
 
   function loadFree() {
@@ -339,11 +394,28 @@
     if (catalog) render();
   });
 
+  // Приём заявок на складе выключают и включают. Спрашиваем на входе и, если
+  // выключен, убираем кнопку — вместо неё остаётся текст с копированием.
+  function checkOpen() {
+    Site.ordersOpen()
+      .then(function (open) {
+        var btn = $("send");
+        if (!btn || open) return;
+        btn.hidden = true;
+        var note = $("sendnote");
+        note.hidden = false;
+        note.textContent = "Склад пока принимает заявки только текстом: " +
+          "скопируйте её и отправьте любым способом.";
+      })
+      .catch(function () { /* не ответил — оставляем кнопку, она объяснит сама */ });
+  }
+
   Site.loadCatalog()
     .then(function (data) {
       catalog = data;
       render();
       loadFree();
+      checkOpen();
     })
     .catch(function () {
       $("cart").innerHTML = '<p class="empty">Каталог не загрузился. Обновите страницу.</p>';

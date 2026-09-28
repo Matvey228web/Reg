@@ -113,6 +113,26 @@ var Site = (function () {
       });
   }
 
+  // Принимает ли склад заявки прямо с сайта. Спрашиваем один раз за страницу:
+  // показывать кнопку, которая заведомо откажет, хуже, чем сразу предложить
+  // скопировать текст.
+  var openKnown = null;
+
+  function ordersOpen() {
+    if (openKnown !== null) return Promise.resolve(openKnown);
+    return fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ endpoint: "/public/catalog", payload: {} }),
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) throw new Error("не ответил");
+        openKnown = Number(data.data.orders_open) === 1;
+        return openKnown;
+      });
+  }
+
   // Отправка заявки складу. Ответа ждём долго — таблица отвечает 5–20 секунд,
   // — поэтому вызывающий обязан показать, что идёт работа.
   //
@@ -269,7 +289,8 @@ var Site = (function () {
     $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
     humanDate: humanDate, shotIcon: shotIcon,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
-    loadCatalog: loadCatalog, availability: availability, sendOrder: sendOrder,
+    loadCatalog: loadCatalog, availability: availability,
+    sendOrder: sendOrder, ordersOpen: ordersOpen,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,

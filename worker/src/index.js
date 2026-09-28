@@ -31,7 +31,17 @@ const READS = new Set([
   "/orders/list", "/order/card", "/students/list", "/student/history",
   "/clients/list", "/client/history", "/defects/list", "/staff/list",
   "/inventory/list", "/settings/get",
+  // Наличие на даты для сайта. Токена у посетителя нет, поэтому кэш здесь
+  // общий — и это правильно: ответ у всех одинаковый.
+  "/public/catalog",
 ]);
+
+// Чтения, которые кэшируются без токена: их зовёт сайт, где никто не входит.
+const PUBLIC_READS = new Set(["/public/catalog"]);
+
+// Сколько раз пытаемся донести заявку до таблицы, прежде чем считать это
+// нашей проблемой, а не случайным сбоем.
+const DELIVER_TRIES = 10;
 
 // Записи, которые кэша не касаются: ничего в складе не меняют.
 const HARMLESS = new Set(["/auth/login", "/notify/test", "/notify/overdue", "/order/parse"]);
@@ -57,12 +67,21 @@ export default {
     const endpoint = String(body.endpoint || "");
     const token = body.token ? String(body.token) : "";
 
+    // Заявка с сайта — единственное, что Worker делает сам, а не пересылает.
+    // Apps Script отвечает 4–18 секунд и раз в несколько запросов отдаёт
+    // страницу ошибки вместо ответа; студент не должен об это упираться.
+    if (endpoint === "/public/order") return cors(await takeOrder(env, ctx, body.payload || {}));
+
     // Кэш отключается целиком одной переменной окружения: если что-то пойдёт
     // не так на складе, чинить это не должно требовать выкладки.
     const enabled = String(env.CACHE_ENABLED || "1") !== "0";
     const cacheable = enabled && READS.has(endpoint) && !PERSONAL.has(endpoint) && !body.fresh;
 
-    if (cacheable && token) {
+    if (cacheable && PUBLIC_READS.has(endpoint)) {
+      const key = await cacheKey(env, endpoint, body.payload);
+      const hit = await env.CACHE.get(key);
+      if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
+    } else if (cacheable && token) {
       // Отдаём кэш только тому, чей токен Apps Script уже подтверждал: иначе
       // подделанный токен получил бы весь каталог, не заходя в систему.
       const known = await env.CACHE.get("sess:" + token);
@@ -103,7 +122,106 @@ export default {
 
     return cors(json(answer, { "X-Mifs-Cache": cacheable ? "miss" : "bypass" }));
   },
+
+  // Добор очереди. Apps Script раз в несколько запросов отвечает страницей
+  // ошибки вместо ответа — такая заявка и остаётся в очереди до следующего
+  // захода сюда.
+  async scheduled(event, env, ctx) {
+    const list = await env.CACHE.list({ prefix: "q:" });
+    for (const entry of list.keys) {
+      await deliver(env, entry.name);
+    }
+  },
 };
+
+// ---- заявка с сайта ----
+
+// Проверяем на месте, не спрашивая таблицу: студент узнаёт об опечатке сразу,
+// а не через двадцать секунд. Условия те же, что у бэкенда, — он всё равно
+// проверит повторно, здесь мы только не гоняем зря мусор.
+function checkOrder(payload) {
+  if (String(payload.trap || "").trim()) return "Заявка не принята";
+  const text = String(payload.raw_text || "");
+  if (text.length < 20) return "Заявка пустая";
+  if (text.length > 4000) return "Заявка слишком длинная";
+  if (!/^\s*Заказ\s*№\s*\S+/im.test(text)) return "В заявке нет номера";
+
+  const items = text.split(/\r?\n/).filter((l) => /^\s*\d+\s*[.)]\s*\S+.*:/.test(l));
+  if (!items.length) return "В заявке нет ни одной позиции";
+  if (items.length > 40) return "Слишком много позиций в одной заявке";
+
+  if (!/^\s*Full_name(_minor|_adult)?\s*:\s*\S/im.test(text)) return "Укажите ФИО";
+  if (!/^\s*Phone(_minors?|_adult)?\s*:\s*\S/im.test(text)) return "Укажите телефон";
+  return "";
+}
+
+function orderNumber(text) {
+  const m = String(text).match(/^\s*Заказ\s*№\s*(\S+)/im);
+  return m ? m[1].trim() : "";
+}
+
+async function takeOrder(env, ctx, payload) {
+  const wrong = checkOrder(payload);
+  if (wrong) return json(envelope(false, wrong, 400));
+
+  const no = orderNumber(payload.raw_text);
+  const key = "q:" + no;
+
+  // Ответ идёт мгновенно, и кнопку жмут второй раз. Повтор не должен ни
+  // заводить вторую заявку, ни выглядеть отказом.
+  const queued = await env.CACHE.get(key);
+  if (queued) {
+    return json({ ok: true, data: { order_no: no, queued: true, repeat: true }, error: null, status: 200 });
+  }
+
+  // Сначала в хранилище, потом ответ: пообещать «забронировано» и потерять
+  // заявку хуже, чем ответить отказом.
+  try {
+    await env.CACHE.put(key, JSON.stringify({ payload, tries: 0, at: Date.now() }));
+  } catch (err) {
+    return json(envelope(false, "Не удалось принять заявку, попробуйте ещё раз", 503));
+  }
+
+  ctx.waitUntil(deliver(env, key));
+  return json({ ok: true, data: { order_no: no, queued: true, repeat: false }, error: null, status: 200 });
+}
+
+// Доставка в таблицу. Удалось — из очереди убираем; не удалось — оставляем,
+// добирает cron. Отказ по существу (ручка выключена, заявка кривая) повторять
+// незачем: она не станет годной сама.
+async function deliver(env, key) {
+  const raw = await env.CACHE.get(key);
+  if (!raw) return;
+  const row = JSON.parse(raw);
+
+  const res = await callUpstream(env, { endpoint: "/public/order", payload: row.payload });
+  const answer = res.ok ? res.envelope : null;
+
+  if (answer && (answer.ok || answer.status === 409)) {
+    await env.CACHE.delete(key);
+    return;
+  }
+  // 400 и 403 — «так не бывает» и «приём выключен». Ждать тут нечего, но и
+  // молча терять заявку нельзя: перекладываем в отдельный ящик, чтобы её
+  // было видно глазами.
+  if (answer && (answer.status === 400 || answer.status === 403)) {
+    await env.CACHE.put("dead:" + key.slice(2), JSON.stringify({
+      ...row, error: answer.error, at: Date.now(),
+    }));
+    await env.CACHE.delete(key);
+    return;
+  }
+
+  row.tries = (row.tries || 0) + 1;
+  if (row.tries >= DELIVER_TRIES) {
+    await env.CACHE.put("dead:" + key.slice(2), JSON.stringify({
+      ...row, error: (answer && answer.error) || "таблица не ответила", at: Date.now(),
+    }));
+    await env.CACHE.delete(key);
+    return;
+  }
+  await env.CACHE.put(key, JSON.stringify(row));
+}
 
 // ---- обращение к таблице ----
 
