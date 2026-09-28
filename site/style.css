@@ -132,6 +132,16 @@ footer { flex: none; }
   gap: 10px;
 }
 
+/* Кнопка «Каталог» и поиск — одна высота на обоих. Раньше её задавали свои
+   отступы у каждого: у кнопки выходило 36 точек, у поля 41, и рядом это
+   читалось как съехавшая вёрстка. Высота задаётся здесь, в одном месте, а не
+   подгоняется отступами по отдельности. */
+.controls .searchbar input,
+.controls .catalog > summary {
+  height: 44px;
+}
+.controls .catalog > summary { padding: 0 14px; }
+
 .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .date { display: grid; gap: 5px; min-width: 0; }
 
