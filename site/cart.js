@@ -65,6 +65,32 @@
     return out;
   }
 
+  // Дата: 01-01-2026. Разделители расставляются сами, из цифр.
+  function maskDate(raw) {
+    var d = String(raw || "").replace(/\D/g, "").slice(0, 8);
+    if (!d) return "";
+    var out = d.slice(0, 2);
+    if (d.length > 2) out += "-" + d.slice(2, 4);
+    if (d.length > 4) out += "-" + d.slice(4, 8);
+    return out;
+  }
+
+  // Время: 10:00.
+  function maskTime(raw) {
+    var d = String(raw || "").replace(/\D/g, "").slice(0, 4);
+    if (!d) return "";
+    var hh = d.slice(0, 2);
+    // Часов больше 23 не бывает, и лучше поправить сразу, чем в заявке.
+    if (hh.length === 2 && Number(hh) > 23) hh = "23";
+    var out = hh;
+    if (d.length > 2) {
+      var mm = d.slice(2, 4);
+      if (mm.length === 2 && Number(mm) > 59) mm = "59";
+      out += ":" + mm;
+    }
+    return out;
+  }
+
   // Ник: «@» подставляется само и не удваивается.
   function maskTg(raw) {
     var value = String(raw || "").replace(/@/g, "").trim();
@@ -81,9 +107,9 @@
     if (atEnd) { try { input.setSelectionRange(next.length, next.length); } catch (e) { /* не всем полям можно */ } }
   }
 
-  // Браузер запретил запись — заявка не переживёт переход между страницами.
+  // Браузер запретил запись — корзина не переживёт переход между страницами.
   function storageWarnHtml() {
-    return '<p class="hint hint--bad" id="nostore">Браузер не сохраняет заявку —' +
+    return '<p class="hint hint--bad" id="nostore">Браузер не сохраняет корзину —' +
       " похоже, приватный режим. Соберите и отправьте её за один заход.</p>";
   }
 
@@ -93,10 +119,10 @@
     var keep = snapshot();
 
     if (!list.length) {
-      // Пустая заявка после набранного на витрине — это не «ничего не выбрал»,
+      // Пустая корзина после набранного на витрине — это не «ничего не выбрал»,
       // а запрет хранилища. Молчать об этом хуже всего: человек уверен, что
       // выбирал, и не понимает, куда всё делось.
-      $("cart").innerHTML = '<p class="empty">Заявка пуста. ' +
+      $("cart").innerHTML = '<p class="empty">Корзина пуста. ' +
         '<a href="index.html">Выбрать оборудование</a></p>' +
         (Site.storageOk() ? "" : storageWarnHtml());
       return;
@@ -121,11 +147,22 @@
 
       '<div class="block">' +
         "<h2>Когда нужно</h2>" +
+        // Дата текстом, а не полем type="date": вид такого поля задаёт язык
+        // браузера, и на английском оно показывает mm/dd/yyyy. Здесь всегда
+        // 01-01-2026, как и договаривались.
         '<div class="dates">' +
           '<label class="date"><span class="cap">Выдача</span>' +
-            '<input type="date" id="from" value="' + esc(dates.from) + '" /></label>' +
+            '<input type="text" id="from" inputmode="numeric" placeholder="01-01-2026"' +
+            ' value="' + esc(Site.dateToRu(dates.from)) + '" /></label>' +
+          '<label class="date"><span class="cap">Время</span>' +
+            '<input type="text" id="from-time" inputmode="numeric" placeholder="10:00"' +
+            ' value="' + esc(dates.fromTime) + '" /></label>' +
           '<label class="date"><span class="cap">Возврат</span>' +
-            '<input type="date" id="to" value="' + esc(dates.to) + '" /></label>' +
+            '<input type="text" id="to" inputmode="numeric" placeholder="01-01-2026"' +
+            ' value="' + esc(Site.dateToRu(dates.to)) + '" /></label>' +
+          '<label class="date"><span class="cap">Время</span>' +
+            '<input type="text" id="to-time" inputmode="numeric" placeholder="18:00"' +
+            ' value="' + esc(dates.toTime) + '" /></label>' +
         "</div>" +
       "</div>" +
 
@@ -165,7 +202,7 @@
         '<div class="preview-box">' +
           '<pre id="preview" class="preview"></pre>' +
           '<button type="button" class="copy-btn" id="copy"' +
-            ' aria-label="Скопировать заявку">' + copyIcon() + "</button>" +
+            ' aria-label="Скопировать">' + copyIcon() + "</button>" +
         "</div>" +
       "</div>";
 
@@ -224,8 +261,11 @@
     out.push("Type_and_name_of_the_project: " + val("project"));
     var extra = extraInput();
     if (extra) out.push("Input: " + extra);
-    out.push("Date_of_issue: " + Site.humanDate($("from").value));
-    out.push("Date_completion: " + Site.humanDate($("to").value));
+    // Поле уже хранит 01-01-2026 — разбор на складе такой вид понимает.
+    out.push("Date_of_issue: " + val("from"));
+    out.push("Time_of_issue: " + val("from-time"));
+    out.push("Date_completion: " + val("to"));
+    out.push("Time_completion: " + val("to-time"));
     return out.join("\n");
   }
 
@@ -289,10 +329,15 @@
         e.target.value = Site.setQty(row.dataset.key, Number(e.target.value));
       }
       if (e.target.id === "adult") updateGuardian();
-      if (e.target.id === "from" || e.target.id === "to") {
-        var from = $("from").value, to = $("to").value;
-        if (from && to && to < from) { $("from").value = to; $("to").value = from; }
-        Site.cartDates($("from").value, $("to").value);
+      if (["from", "to", "from-time", "to-time"].indexOf(e.target.id) !== -1) {
+        var from = Site.ruToDate($("from").value), to = Site.ruToDate($("to").value);
+        // Перепутали местами — меняем, а не отказываем: человек имел в виду срок.
+        if (from && to && to < from) {
+          var swap = from; from = to; to = swap;
+          $("from").value = Site.dateToRu(from);
+          $("to").value = Site.dateToRu(to);
+        }
+        Site.cartDates(from, to, $("from-time").value, $("to-time").value);
         loadFree();
       }
       updatePreview();
@@ -302,6 +347,10 @@
       var tag = e.target.tagName;
       if (e.target.id === "phone" || e.target.id === "gphone") {
         applyMask(e.target, maskPhone);
+      }
+      if (e.target.id === "from" || e.target.id === "to") applyMask(e.target, maskDate);
+      if (e.target.id === "from-time" || e.target.id === "to-time") {
+        applyMask(e.target, maskTime);
       }
       if (e.target.id === "tg") applyMask(e.target, maskTg);
       if ((tag === "INPUT" && e.target.type !== "date") || tag === "TEXTAREA") {

@@ -128,7 +128,8 @@ var SCHEMA = {
   // их берёт печать акта и больше ничего.
   Orders: ["order_id", "order_no", "request_code", "student_id", "student_name",
            "student_phone", "student_tg", "is_adult", "guardian_name", "guardian_phone",
-           "project", "issue_date", "return_date", "extra_input", "amount", "currency",
+           "project", "issue_date", "issue_time", "return_date", "return_time",
+           "extra_input", "amount", "currency",
            "source_url", "status", "raw_text", "created_at", "created_by",
            "created_by_name", "closed_at"],
 
@@ -1928,6 +1929,16 @@ function normalizePhone(raw) {
 
 // Дата из формы приходит как 30.04.2026. Держим её строкой "2026-04-30":
 // так она не зависит от часового пояса таблицы и не сползает на сутки.
+// «10:00» из чего угодно похожего. Мусор отбрасываем: пустое поле честнее
+// выдуманного времени.
+function normalizeTime(value) {
+  var m = String(value || "").match(/(\d{1,2})\s*[:.\-]?\s*(\d{2})/);
+  if (!m) return "";
+  var h = Number(m[1]), min = Number(m[2]);
+  if (h > 23 || min > 59) return "";
+  return (h < 10 ? "0" + h : String(h)) + ":" + (min < 10 ? "0" + min : String(min));
+}
+
 function parseRuDate(raw) {
   var s = String(raw || "").trim();
   var m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
@@ -2054,7 +2065,11 @@ function mapOrderFields(fields) {
     guardian_phone: isAdult ? "" : normalizePhone(pickField(fields, ["Phone_guardian", "guardian_phone"])),
     project: pickField(fields, ["Type_and_name_of_the_project", "project", "Проект"]),
     issue_date: parseRuDate(pickField(fields, ["Date_of_issue", "issue_date"])),
+    // Время — просто «10:00». Отдельной колонкой, а не приклеенным к дате:
+    // дату складу надо сравнивать, а время он читает глазами.
+    issue_time: normalizeTime(pickField(fields, ["Time_of_issue", "issue_time"])),
     return_date: parseRuDate(pickField(fields, ["Date_completion", "Date_of_completion", "return_date"])),
+    return_time: normalizeTime(pickField(fields, ["Time_completion", "Time_of_completion", "return_time"])),
     extra_input: pickField(fields, ["Input", "Дополнительно"]),
   };
 }
@@ -2213,7 +2228,9 @@ function writeOrder(payload, authorId, authorName) {
       guardian_phone: normalizePhone(payload.guardian_phone),
       project: String(payload.project || ""),
       issue_date: parseRuDate(payload.issue_date),
+      issue_time: normalizeTime(payload.issue_time),
       return_date: parseRuDate(payload.return_date),
+      return_time: normalizeTime(payload.return_time),
       extra_input: String(payload.extra_input || ""),
       amount: Number(payload.amount || 0),
       currency: String(payload.currency || ""),
@@ -2362,7 +2379,7 @@ function handleOrderCard(payload, token) {
 
 // Правка заказа. Список полей закрытый: номер заказа, арендатор и состав
 // правятся не здесь — номер приходит с сайта, а состав отдельным эндпоинтом.
-var ORDER_EDITABLE = ["project", "issue_date", "return_date", "extra_input",
+var ORDER_EDITABLE = ["project", "issue_date", "issue_time", "return_date", "return_time", "extra_input",
                       "guardian_name", "guardian_phone", "student_tg", "status"];
 
 function handleOrderUpdate(payload, token) {
@@ -3119,12 +3136,20 @@ function handlePublicOrder(payload) {
 
   // В чат — короткое извещение, а не вся заявка: подробности уже в таблице, а
   // ФИО и телефоны детей незачем множить по чатам.
+  //
+  // Ссылка на приложение — из настройки: короткого имени мини-приложения код
+  // знать не может, его заводят в BotFather. Не задана — говорим словами, куда
+  // смотреть, а не даём ссылку в никуда.
+  var appLink = String(settings.app_link || "").trim();
   tgSend("Заявка с сайта №" + parsed.order_no + "\n" +
     fields.student_name + ", " + fields.student_phone + "\n" +
     "Позиций: " + parsed.items.length +
     (fields.issue_date ? "\nНа " + fields.issue_date +
-      (fields.return_date && fields.return_date !== fields.issue_date ? " — " + fields.return_date : "") : "") +
-    "\nОткройте «Заказы» в приложении.");
+      (fields.issue_time ? " " + fields.issue_time : "") +
+      (fields.return_date && fields.return_date !== fields.issue_date
+        ? " — " + fields.return_date + (fields.return_time ? " " + fields.return_time : "")
+        : "") : "") +
+    (appLink ? "\n" + appLink : "\nОткройте «Заказы» в приложении."));
 
   return { order_id: order.order_id, order_no: parsed.order_no, repeat: false };
 }
@@ -3616,6 +3641,16 @@ var SETTINGS_SPEC = {
     check: function (v) { return v === "" || /^https:\/\/[^\s]+$/.test(v); },
     hint: "адрес сайта проката целиком, начиная с https:// — или пусто",
   },
+  // Ссылка на мини-приложение вида https://t.me/<бот>/<приложение>. Заводится
+  // в BotFather командой /newapp, поэтому код её знать не может. Бот вставляет
+  // её в сообщение о новой заявке — из чата открывается сразу приложение.
+  app_link: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^https:\/\/t\.me\/[^\s]+$/.test(v); },
+    hint: "https://t.me/ваш_бот/имя_приложения или пусто",
+  },
+
   // Шаблон акта в Google Docs и папка для готовых. Пусто — акт не собирается,
   // и кнопка это объясняет: молча отдавать пустой документ хуже.
   act_template_id: {

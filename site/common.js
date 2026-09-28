@@ -263,16 +263,37 @@ var Site = (function () {
     return 0;
   }
 
-  function cartDates(from, to) {
+  // Даты храним в виде 2026-01-01 — так их сравнивать, — а показываем и пишем
+  // в заявку как 01-01-2026. Время просто строкой «10:00».
+  function cartDates(from, to, fromTime, toTime) {
     if (from === undefined) {
       var c = readCart();
-      return { from: c.from || "", to: c.to || "" };
+      return {
+        from: c.from || "", to: c.to || "",
+        fromTime: c.from_time || "", toTime: c.to_time || "",
+      };
     }
     var cart = readCart();
     cart.from = from || "";
     cart.to = to || "";
+    cart.from_time = fromTime || "";
+    cart.to_time = toTime || "";
     writeCart(cart);
-    return { from: cart.from, to: cart.to };
+    return {
+      from: cart.from, to: cart.to,
+      fromTime: cart.from_time, toTime: cart.to_time,
+    };
+  }
+
+  // 2026-01-01 → 01-01-2026 и обратно. Незаполненное остаётся пустым.
+  function dateToRu(iso) {
+    var m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
+  }
+
+  function ruToDate(text) {
+    var m = String(text || "").match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
   }
 
   // Заявка изменилась не на этой странице: вернулись «назад» или правили в
@@ -302,6 +323,7 @@ var Site = (function () {
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
+    dateToRu: dateToRu, ruToDate: ruToDate,
     paintCount: paintCount, refreshCart: refreshCart,
   };
 })();

@@ -269,7 +269,13 @@ input:focus-visible, textarea:focus-visible {
 }
 .add:hover { border-color: var(--accent); color: var(--accent-text); }
 
-.stepper--wide { display: grid; grid-template-columns: 1fr auto 1fr; width: 100%; }
+/* Во всю ширину, но не шире разумного: на широкой карточке «−» и «+» иначе
+   расходятся к краям, и попасть по ним труднее, чем по мелкой кнопке. */
+.stepper--wide {
+  display: grid; grid-template-columns: 1fr auto 1fr;
+  width: 100%; max-width: 220px;
+}
+.card-add .add { max-width: 220px; }
 .stepper--wide button { height: 40px; }
 .stepper-num {
   font-size: 15px; font-weight: 700; text-align: center;
@@ -279,6 +285,10 @@ input:focus-visible, textarea:focus-visible {
 
 .shot {
   aspect-ratio: 4 / 3;
+  /* На промежуточной ширине карточка вырастает до 400 с лишним точек, и
+     квадрат фотографии превращался в огромное пустое поле выше самого
+     названия. Выше этого не пускаем. */
+  max-height: 210px;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -492,10 +502,15 @@ footer a { color: var(--dim); }
 /* --- Широкий экран --- */
 
 @media (min-width: 720px) {
+  /* Карточки по-прежнему делят всю ширину — иначе справа остаётся мёртвое
+     поле, а решётка рвётся. От растяжения спасают потолок у фотографии и у
+     счётчика, а не узкая колонка. */
   .grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
-  .controls { grid-template-columns: auto 1fr; align-items: end; }
-  .dates { grid-column: 1; }
-  .searchbar { grid-column: 2; }
+  /* «Каталог» и поиск в один ряд. Раньше в первой колонке стоял блок дат, его
+     убрали — и поиск с «Каталогом» встали лестницей через пустую клетку. */
+  .controls { grid-template-columns: auto 1fr; align-items: center; }
+  .catalog { grid-column: 1; grid-row: 1; }
+  .searchbar { grid-column: 2; grid-row: 1; }
   .chips { grid-column: 1 / -1; }
   .item-shot { aspect-ratio: 16 / 9; }
   .item-main { max-width: 640px; }

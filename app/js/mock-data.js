@@ -15,6 +15,7 @@ const mockSettings = {
   login_lock_minutes: 15,
   import_source_id: "",
   site_url: "",
+  app_link: "",
   public_orders: 0,
   public_orders_per_hour: 20,
   act_template_id: "",
@@ -25,6 +26,8 @@ const mockSettings = {
 const MOCK_SETTINGS_SPEC = {
   site_url: { def: "", text: true, check: (v) => v === "" || /^https:\/\/[^\s]+$/.test(String(v)),
               hint: "адрес сайта проката целиком, начиная с https:// — или пусто" },
+  app_link: { def: "", text: true, check: (v) => v === "" || /^https:\/\/t\.me\/[^\s]+$/.test(String(v)),
+              hint: "https://t.me/ваш_бот/имя_приложения или пусто" },
   notify_chat_id: { def: "", text: true, check: (v) => v === "" || /^-?\d{5,20}$/.test(String(v)),
                     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит" },
   session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },

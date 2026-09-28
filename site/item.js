@@ -20,9 +20,9 @@
   function noteHtml() {
     var n = inCart();
     if (!n) return "";
-    return '<p class="item-note">В заявке уже ' + n + " " +
+    return '<p class="item-note">В корзине уже ' + n + " " +
       Site.plural(n, "штука", "штуки", "штук") +
-      '. <a href="cart.html">Открыть заявку</a></p>';
+      '. <a href="cart.html">Открыть корзину</a></p>';
   }
 
   function render() {
@@ -42,7 +42,7 @@
             '<input type="number" id="qty" value="1" min="1" inputmode="numeric" />' +
             '<button type="button" id="plus" aria-label="Больше">+</button>' +
           "</div>" +
-          '<button class="btn" id="add">В заявку</button>' +
+          '<button class="btn" id="add">В корзину</button>' +
         "</div>" + noteHtml() +
       "</div>";
 
@@ -63,7 +63,7 @@
       Site.addToCart(Site.key(model), Math.max(1, Number(qty.value) || 1));
       add.textContent = "Добавлено";
       add.disabled = true;
-      setTimeout(function () { add.textContent = "В заявку"; add.disabled = false; }, 1200);
+      setTimeout(function () { add.textContent = "В корзину"; add.disabled = false; }, 1200);
 
       var note = document.querySelector(".item-note");
       if (note) note.outerHTML = noteHtml();
@@ -71,7 +71,7 @@
     });
   }
 
-  // Вернулись «назад» или правили в соседней вкладке — строка «в заявке уже N»
+  // Вернулись «назад» или правили в соседней вкладке — строка «в корзине уже N»
   // должна стать правдой.
   document.addEventListener("cart-refresh", function () {
     if (!model) return;

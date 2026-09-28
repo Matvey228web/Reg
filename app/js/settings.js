@@ -20,6 +20,7 @@ const SettingsScreen = (() => {
     { key: "import_source_id", label: "Исходная таблица", text: true, ph: "идентификатор" },
     { key: "notify_chat_id", label: "Чат склада", text: true, ph: "-1001234567890" },
     { key: "site_url", label: "Сайт проката", text: true, ph: "https://" },
+    { key: "app_link", label: "Ссылка на приложение", text: true, ph: "https://t.me/бот/app" },
   ];
 
   async function load() {
