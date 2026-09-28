@@ -37,6 +37,7 @@
         }).join("") + "</div>";
     });
 
+    $("groups").className = "";
     $("groups").innerHTML = html;
     $("empty").hidden = shown.length > 0;
     $("controls").hidden = false;
@@ -49,6 +50,7 @@
     $("controls").hidden = true;
     $("status").textContent = "";
     $("empty").hidden = true;
+    $("groups").className = "soonwrap";
     $("groups").innerHTML = '<p class="soon">soon…</p>';
   }
 
