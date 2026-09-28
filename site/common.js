@@ -247,6 +247,15 @@ var Site = (function () {
     return { from: cart.from, to: cart.to };
   }
 
+  // Заявка изменилась не на этой странице: вернулись «назад» или правили в
+  // соседней вкладке. Память сбрасываем — она устарела, — красим счётчик и
+  // даём странице перерисовать своё.
+  function refreshCart() {
+    memCart = null;
+    paintCount();
+    document.dispatchEvent(new Event("cart-refresh"));
+  }
+
   // Счётчик в шапке — на каждой странице, поэтому здесь.
   function paintCount() {
     var el = $("cart-count");
@@ -264,8 +273,19 @@ var Site = (function () {
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
-    paintCount: paintCount,
+    paintCount: paintCount, refreshCart: refreshCart,
   };
 })();
 
 document.addEventListener("DOMContentLoaded", Site.paintCount);
+
+// Возврат кнопкой «назад» страницу заново не выполняет: браузер достаёт её из
+// своего кэша ровно такой, какой она была. Набранное в карточке на витрину при
+// этом не попадает — счётчик остаётся нулём, а карточки пустыми.
+//
+// Второй случай — соседняя вкладка: телефон легко держит десяток, и заявка в
+// них должна быть одна.
+window.addEventListener("pageshow", Site.refreshCart);
+window.addEventListener("storage", function (e) {
+  if (!e.key || e.key === "mifs_cart") Site.refreshCart();
+});

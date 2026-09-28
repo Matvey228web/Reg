@@ -334,6 +334,11 @@
       .catch(function () { /* остаёмся на общих количествах */ });
   }
 
+  // Вернулись «назад» или правили в соседней вкладке.
+  document.addEventListener("cart-refresh", function () {
+    if (catalog) render();
+  });
+
   Site.loadCatalog()
     .then(function (data) {
       catalog = data;

@@ -28,6 +28,14 @@
     if (box) box.innerHTML = addHtml(k);
   }
 
+  // Заявку меняли не здесь: вернулись «назад» или правили в соседней вкладке.
+  document.addEventListener("cart-refresh", function () {
+    var boxes = document.querySelectorAll("[data-add]");
+    for (var i = 0; i < boxes.length; i++) {
+      boxes[i].innerHTML = addHtml(boxes[i].dataset.add);
+    }
+  });
+
   function render() {
     if (Site.section() === "my") return renderMy();
 

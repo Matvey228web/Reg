@@ -71,6 +71,18 @@
     });
   }
 
+  // Вернулись «назад» или правили в соседней вкладке — строка «в заявке уже N»
+  // должна стать правдой.
+  document.addEventListener("cart-refresh", function () {
+    if (!model) return;
+    var note = document.querySelector(".item-note");
+    if (note) note.outerHTML = noteHtml();
+    else {
+      var main = document.querySelector(".item-main");
+      if (main) main.insertAdjacentHTML("beforeend", noteHtml());
+    }
+  });
+
   Site.loadCatalog()
     .then(function (catalog) {
       model = catalog.byKey[modelKey()];
