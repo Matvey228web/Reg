@@ -134,7 +134,8 @@ footer { flex: none; }
 .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .date { display: grid; gap: 5px; }
 
-input[type="date"], input[type="search"], input[type="text"], input[type="tel"] {
+input[type="date"], input[type="search"], input[type="text"], input[type="tel"],
+textarea {
   font: inherit;
   font-size: 16px;            /* ниже 16 iOS увеличивает страницу при фокусе */
   color: var(--ink);
@@ -147,7 +148,12 @@ input[type="date"], input[type="search"], input[type="text"], input[type="tel"] 
   -webkit-appearance: none;
   appearance: none;
 }
-input:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+/* Тянуть можно только по высоте: вширь поле разъедет форму. */
+textarea { resize: vertical; min-height: 76px; line-height: 1.4; display: block; }
+
+input:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent-text); outline-offset: -2px;
+}
 
 /* Каталог раскрывающимся списком: категорий полтора десятка, рядом кнопок их
    пришлось бы прокручивать вбок. details/summary — без единой строки скрипта. */

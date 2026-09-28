@@ -35,6 +35,7 @@
   function render() {
     var list = lines();
     var dates = Site.cartDates();
+    var keep = snapshot();
 
     if (!list.length) {
       $("cart").innerHTML = '<p class="empty">Заявка пуста. ' +
@@ -88,6 +89,11 @@
         "</div>" +
         '<label class="field"><span class="cap">Проект</span>' +
           '<input type="text" id="project" placeholder="курсовая, короткий метр…" /></label>' +
+        '<label class="field"><span class="cap">Мастерская или курс</span>' +
+          '<input type="text" id="workshop" placeholder="оператор, режиссура, звук…" /></label>' +
+        '<label class="field"><span class="cap">Комментарий</span>' +
+          '<textarea id="note" rows="3" ' +
+            'placeholder="пожелания, во сколько удобно забрать"></textarea></label>' +
       "</div>" +
 
       '<div class="block">' +
@@ -103,8 +109,31 @@
       "</div>";
 
     bind();
+    restore(keep);
     updateGuardian();
     updatePreview();
+  }
+
+  // Список перерисовывается целиком при каждом изменении количества, а форма
+  // живёт в том же блоке: без этого набранный текст пропадал от нажатия «+».
+  var TEXT_FIELDS = ["name", "phone", "tg", "gname", "gphone", "project",
+                     "workshop", "note"];
+
+  function snapshot() {
+    if (!$("adult")) return null;
+    var kept = { adult: $("adult").checked };
+    TEXT_FIELDS.forEach(function (id) {
+      kept[id] = $(id) ? $(id).value : "";
+    });
+    return kept;
+  }
+
+  function restore(kept) {
+    if (!kept) return;
+    $("adult").checked = kept.adult;
+    TEXT_FIELDS.forEach(function (id) {
+      if ($(id)) $(id).value = kept[id];
+    });
   }
 
   // Нули в ценах не заглушка: в настоящих сообщениях бота они ровно такие.
@@ -132,12 +161,31 @@
       out.push("Phone_guardian: " + val("gphone"));
     }
     out.push("Type_and_name_of_the_project: " + val("project"));
+    var extra = extraInput();
+    if (extra) out.push("Input: " + extra);
     out.push("Date_of_issue: " + Site.humanDate($("from").value));
     out.push("Date_completion: " + Site.humanDate($("to").value));
     return out.join("\n");
   }
 
   function val(id) { return ($(id) && $(id).value || "").trim(); }
+
+  // Мастерская и комментарий едут одной строкой «Input»: в таблице под них
+  // одна колонка (extra_input), и так же называлось поле в форме на Tilda —
+  // старые сообщения бота и новые заявки лягут в одно место.
+  //
+  // Пробелы схлопываем: перенос строки внутри комментария разорвал бы строку,
+  // и разбор потерял бы поле. На названиях моделей мы на это уже наступали.
+  function extraInput() {
+    var parts = [];
+    var workshop = flat(val("workshop"));
+    var note = flat(val("note"));
+    if (workshop) parts.push("Мастерская: " + workshop);
+    if (note) parts.push("Комментарий: " + note);
+    return parts.join(". ");
+  }
+
+  function flat(s) { return String(s).replace(/\s+/g, " ").trim(); }
 
   // Дата плюс случайный хвост: без сервера уникальность не гарантировать.
   var code = null;
@@ -194,7 +242,10 @@
     });
 
     $("cart").addEventListener("input", function (e) {
-      if (e.target.tagName === "INPUT" && e.target.type !== "date") updatePreview();
+      var tag = e.target.tagName;
+      if ((tag === "INPUT" && e.target.type !== "date") || tag === "TEXTAREA") {
+        updatePreview();
+      }
     });
 
     $("copy").addEventListener("click", function () {
