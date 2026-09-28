@@ -299,8 +299,14 @@ check('создан без токена', r.ok === true, r);
 check('staff_id = 1', r.data && r.data.staff_id === 1, r.data);
 const staffRow = dumpSheet('Staff')[1];
 check('роль принудительно Admin', staffRow[SCHEMA.Staff.indexOf('role')] === 'Admin', staffRow);
-check('PIN сохранён как хэш, не в открытом виде',
-  staffRow[SCHEMA.Staff.indexOf('pin_hash')] === crypto.createHash('sha256').update('4321').digest('hex'));
+const storedPin = staffRow[SCHEMA.Staff.indexOf('pin_hash')];
+check('PIN сохранён не в открытом виде', storedPin !== '4321' && !/4321/.test(storedPin), storedPin);
+// Голый SHA-256 от четырёх цифр подбирается перебором десяти тысяч вариантов
+// за секунды, поэтому в таблице его быть не должно.
+check('PIN не голый SHA-256',
+  storedPin !== crypto.createHash('sha256').update('4321').digest('hex'), storedPin);
+check('у PIN есть соль и число повторов',
+  /^v2\$\d+\$[0-9a-f]{32}\$[0-9a-f]{64}$/.test(storedPin), storedPin);
 
 console.log('\n== bootstrap закрывается после первой записи ==');
 r = call('/staff/create', { full_name: 'Чужой', login: 'hacker', pin: '0000' });
@@ -1742,6 +1748,39 @@ const secPublic = call('/public/catalog', {});
 check('публичный каталог отдаёт раздел',
   secPublic.ok === true && secPublic.data.models.every(m => 'section' in m),
   secPublic.ok ? secPublic.data.models[0] : secPublic);
+
+// Хранение PIN. Блок стоит последним: вход перезаписывает session_token, и
+// добытые выше токены после него стали бы недействительны.
+console.log('\n== PIN в таблице ==');
+const pinCol = SCHEMA.Staff.indexOf('pin_hash');
+const pinAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+
+// Одинаковый PIN у двух человек не должен давать одинаковую строку: иначе по
+// таблице видно, у кого код совпадает, и один перебор вскрывает обоих.
+call('/staff/create', { full_name: 'Первый', login: 'pin_a', pin: '5150', role: 'Warehouse Staff' }, pinAdmin);
+call('/staff/create', { full_name: 'Второй', login: 'pin_b', pin: '5150', role: 'Warehouse Staff' }, pinAdmin);
+const pinRows = dumpSheet('Staff');
+const loginCol = SCHEMA.Staff.indexOf('login');
+const rowA = pinRows.filter((x) => x[loginCol] === 'pin_a')[0];
+const rowB = pinRows.filter((x) => x[loginCol] === 'pin_b')[0];
+check('одинаковый PIN — разные строки в таблице',
+  rowA && rowB && rowA[pinCol] !== rowB[pinCol], [rowA && rowA[pinCol], rowB && rowB[pinCol]]);
+check('оба входят со своим PIN',
+  call('/auth/login', { login: 'pin_a', pin: '5150' }).ok === true &&
+  call('/auth/login', { login: 'pin_b', pin: '5150' }).ok === true);
+
+// В живой таблице PIN лежат в прежнем виде. После выкладки вход по ним обязан
+// работать и обязан тут же переписать запись по-новому.
+console.log('\n== старый формат PIN переезжает сам ==');
+const legacyRow = dumpSheet('Staff').filter((x) => x[loginCol] === 'pin_a')[0];
+legacyRow[pinCol] = crypto.createHash('sha256').update('5150').digest('hex');
+const legacyIn = call('/auth/login', { login: 'pin_a', pin: '5150' });
+check('вход по старому формату прошёл', legacyIn.ok === true, legacyIn);
+check('запись переписана на новый формат', /^v2\$/.test(legacyRow[pinCol]), legacyRow[pinCol]);
+check('тот же PIN по-прежнему пускает',
+  call('/auth/login', { login: 'pin_a', pin: '5150' }).ok === true);
+check('чужой PIN не пускает',
+  call('/auth/login', { login: 'pin_a', pin: '5151' }).status === 401);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

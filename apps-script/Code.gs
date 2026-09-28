@@ -1043,8 +1043,7 @@ function handleAuthLogin(payload) {
     }
   }
 
-  var pinHash = hashPin(pin);
-  var pinOk = staffRow && String(staffRow.pin_hash) === pinHash && isTruthyCell(staffRow.active);
+  var pinOk = staffRow && verifyPin(pin, staffRow.pin_hash) && isTruthyCell(staffRow.active);
   if (!pinOk) {
     if (staffRow) {
       var limits = getSettings();
@@ -1062,12 +1061,16 @@ function handleAuthLogin(payload) {
   }
 
   var token = Utilities.getUuid();
-  updateRow(sheet, staffRow.__row, {
+  var fresh = {
     session_token: token,
     token_issued_at: new Date().toISOString(),
     failed_attempts: 0,
     locked_until: "",
-  });
+  };
+  // Запись в старом формате переезжает на новый прямо здесь: строку мы всё
+  // равно перезаписываем, так что лишнего обращения к таблице не будет.
+  if (isLegacyPinHash(staffRow.pin_hash)) fresh.pin_hash = makePinHash(pin);
+  updateRow(sheet, staffRow.__row, fresh);
   // Настройки и категории отдаём сразу здесь: бэкенд отвечает 5–8 секунд, и
   // отдельный запрос за ними на каждом экране стоил бы этих секунд заново.
   return {
@@ -2488,7 +2491,7 @@ function handleStaffCreate(payload, token) {
       staff_id: staffId,
       full_name: payload.full_name || login,
       login: login,
-      pin_hash: hashPin(pin),
+      pin_hash: makePinHash(pin),
       telegram_id: payload.telegram_id || "",
       role: isBootstrap ? "Admin" : (payload.role || "Warehouse Staff"),
       active: true,
@@ -3227,7 +3230,7 @@ function handleStaffSetPin(payload, token) {
     // Именно 403, а не 401: сессия в порядке, неверен введённый текущий PIN.
     // На 401 клиент считает сессию протухшей и выбрасывает на экран входа —
     // человек терял бы сессию из-за опечатки.
-    if (hashPin(String(payload.current_pin || "")) !== String(staffRow.pin_hash)) {
+    if (!verifyPin(String(payload.current_pin || ""), staffRow.pin_hash)) {
       throw apiError(403, "Текущий PIN указан неверно");
     }
   } else if (me.role !== "Admin") {
@@ -3239,7 +3242,7 @@ function handleStaffSetPin(payload, token) {
   }
 
   var patch = {
-    pin_hash: hashPin(newPin),
+    pin_hash: makePinHash(newPin),
     failed_attempts: 0,
     locked_until: "",
     session_token: "",
@@ -3638,8 +3641,32 @@ function findOrCreateModel(category, modelName) {
   return { model_code: code, model_name: name };
 }
 
-function hashPin(pin) {
-  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(pin), Utilities.Charset.UTF_8);
+// Хранение PIN. Раньше здесь был голый SHA-256 от четырёх цифр: вариантов
+// десять тысяч, так что утёкшая таблица означала бы, что подобраны сразу все
+// и мгновенно. Соли не было — одинаковые PIN давали одинаковые строки, и один
+// перебор вскрывал всех разом.
+//
+// Онлайн-подбор у нас и так закрыт блокировкой после неверных попыток. Здесь
+// речь об утечке самой таблицы, и главное — люди ставят один код везде: PIN
+// из таблицы может оказаться кодом от карты. Достать его оттуда быть не должно.
+//
+// Формат: v2$<повторов>$<соль>$<хеш>. Число повторов лежит в самой строке, а
+// не в константе, поэтому поднять его потом можно, ничего не сломав.
+//
+// Главное здесь — соль, а не повторы: голый SHA-256 от четырёх цифр это
+// фактически открытый текст, таблица на десять тысяч строк считается за
+// мгновение и разом подходит ко всем сотрудникам. Соль убивает и готовые
+// таблицы, и возможность увидеть, у кого PIN совпадает.
+//
+// Повторов немного намеренно: Utilities.computeDigest каждый раз уходит за
+// пределы JS, и цикл на десятки тысяч шагов добавил бы секунды ко входу.
+// Настоящий запас даёт не число повторов, а PIN из шести цифр вместо четырёх
+// (разрешены и те, и другие): четыре цифры не спасёт никакое хеширование.
+// Померить скорость на своём проекте — benchPin() в конце файла.
+var PIN_ROUNDS = 1000;
+
+function sha256hex(text) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(text), Utilities.Charset.UTF_8);
   var hex = "";
   for (var i = 0; i < bytes.length; i++) {
     var b = (bytes[i] + 256) % 256;
@@ -3648,6 +3675,47 @@ function hashPin(pin) {
     hex += h;
   }
   return hex;
+}
+
+function pinDigest(pin, salt, rounds) {
+  var acc = sha256hex(String(salt) + ":" + String(pin));
+  for (var i = 0; i < rounds; i++) acc = sha256hex(acc + ":" + salt);
+  return acc;
+}
+
+function makePinHash(pin) {
+  var salt = Utilities.getUuid().replace(/-/g, "");
+  return "v2$" + PIN_ROUNDS + "$" + salt + "$" + pinDigest(pin, salt, PIN_ROUNDS);
+}
+
+function verifyPin(pin, stored) {
+  var s = String(stored || "");
+  if (!s) return false;
+  var parts = s.split("$");
+  if (parts[0] === "v2" && parts.length === 4) {
+    var rounds = Number(parts[1]);
+    if (!rounds || rounds < 1) return false;
+    return sameString(pinDigest(pin, parts[2], rounds), parts[3]);
+  }
+  // Прежний формат — голый SHA-256. Принимаем, иначе после выкладки в систему
+  // не войдёт никто; вход по нему тут же перезапишет PIN по-новому.
+  return sameString(hashPinLegacy(pin), s);
+}
+
+function hashPinLegacy(pin) { return sha256hex(pin); }
+
+function isLegacyPinHash(stored) {
+  return !!String(stored || "") && String(stored).indexOf("v2$") !== 0;
+}
+
+// Без раннего выхода: время сравнения не должно зависеть от того, сколько
+// знаков совпало.
+function sameString(a, b) {
+  var x = String(a), y = String(b);
+  if (x.length !== y.length) return false;
+  var diff = 0;
+  for (var i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
 }
 
 function checkAuth(token) {
@@ -3703,4 +3771,15 @@ function requireOwner(token) {
     throw apiError(403, "Действие доступно только главному администратору");
   }
   return staffRow;
+}
+
+// Сколько стоит хеширование PIN на этом проекте. Запускается из редактора
+// Apps Script (кнопка Run), наружу не выведено. Если вход стал заметно
+// дольше — уменьшите PIN_ROUNDS, старые записи от этого не испортятся.
+function benchPin() {
+  var started = Date.now();
+  makePinHash("123456");
+  var ms = Date.now() - started;
+  Logger.log("PIN_ROUNDS=" + PIN_ROUNDS + " → " + ms + " мс на один хеш");
+  return ms;
 }
