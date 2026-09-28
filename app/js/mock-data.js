@@ -831,6 +831,79 @@ const MockAPI = {
         return { category: cat, model_code: code, price };
       }
 
+      // Выдача по заявке без сканирования. В моке важно воспроизвести именно
+      // выбор предмета и списание со строки: иначе экран выглядит работающим,
+      // а на живой таблице выдача уйдёт не с той строки.
+      case "/order/issue": {
+        const staff_id = MockStore.requireToken(token);
+        const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
+        if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        const line = MockStore.orderItems.find((i) =>
+          String(i.order_id) === String(order.order_id) &&
+          Number(i.line_no) === Number(body.line_no));
+        if (!line) { const e = new Error("Такой строки в заказе нет"); e.status = 404; throw e; }
+        if (!line.model_code || !line.category) {
+          const e = new Error("Позиция не сопоставлена с моделью"); e.status = 409; throw e;
+        }
+        const left = Number(line.qty || 1) - Number(line.issued_qty || 0);
+        if (left < 1) { const e = new Error("По этой строке уже всё выдано"); e.status = 409; throw e; }
+        const asked = body.qty === undefined || body.qty === null || body.qty === "";
+        const free = MockStore.equipment.filter((e2) =>
+          e2.category === line.category &&
+          String(e2.model_code).padStart(2, "0") === String(line.model_code).padStart(2, "0") &&
+          e2.status === "Available");
+        if (!free.length) {
+          const e = new Error("Свободных на складе нет — ни одной"); e.status = 409; throw e;
+        }
+        // Не задано — выдаём сколько свободно, но не больше остатка по строке.
+        let want = asked ? Math.min(left, free.length) : Math.floor(Number(body.qty));
+        if (!want || want < 1) { const e = new Error("Количество — целое от одного"); e.status = 400; throw e; }
+        if (free.length < want) {
+          const e = new Error("Свободно только " + free.length + " из " + want);
+          e.status = 409; throw e;
+        }
+        const issued = [];
+        for (let i = 0; i < want; i++) {
+          const it = free[i];
+          it.status = "Issued";
+          MockStore.transactions.push({
+            transaction_id: MockStore.transactions.length + 1,
+            item_id: it.item_id, client_id: "", order_id: order.order_id,
+            order_line: line.line_no, staff_out: staff_id,
+            staff_out_name: (MockStore.findStaffById(staff_id) || {}).full_name || "",
+            checked_out_at: new Date().toISOString(),
+            expected_return_at: order.return_date || "", status: "Open",
+            notes: "Выдано по заявке без сканирования", qty: 1, qty_in: 0,
+          });
+          line.issued_qty = Number(line.issued_qty || 0) + 1;
+          issued.push({ item_id: it.item_id, qty: 1 });
+        }
+        order.status = "Issued";
+        return { order_id: order.order_id, line_no: line.line_no, issued, left: left - want };
+      }
+
+      // Удаление заказа. Пока по нему ничего не выдано.
+      case "/order/delete": {
+        MockStore.requireAdmin(token);
+        const idx = MockStore.orders.findIndex((o) => String(o.order_id) === String(body.order_id));
+        if (idx === -1) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        const order = MockStore.orders[idx];
+        const used = MockStore.transactions.filter((t) => String(t.order_id) === String(order.order_id));
+        if (used.length) {
+          const e = new Error("По этому заказу уже есть выдачи — удалять нельзя");
+          e.status = 409; throw e;
+        }
+        let lines = 0;
+        for (let i = MockStore.orderItems.length - 1; i >= 0; i--) {
+          if (String(MockStore.orderItems[i].order_id) === String(order.order_id)) {
+            MockStore.orderItems.splice(i, 1);
+            lines += 1;
+          }
+        }
+        MockStore.orders.splice(idx, 1);
+        return { order_id: order.order_id, lines };
+      }
+
       // Шаблон акта. В демо документа нет — запоминаем выдуманный
       // идентификатор, чтобы экран настроек можно было проверить.
       case "/act/template": {

@@ -285,17 +285,6 @@ var Site = (function () {
     };
   }
 
-  // 2026-01-01 → 01-01-2026 и обратно. Незаполненное остаётся пустым.
-  function dateToRu(iso) {
-    var m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
-  }
-
-  function ruToDate(text) {
-    var m = String(text || "").match(/^(\d{2})-(\d{2})-(\d{4})$/);
-    return m ? m[3] + "-" + m[2] + "-" + m[1] : "";
-  }
-
   // Заявка изменилась не на этой странице: вернулись «назад» или правили в
   // соседней вкладке. Память сбрасываем — она устарела, — красим счётчик и
   // даём странице перерисовать своё.
@@ -323,7 +312,6 @@ var Site = (function () {
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
-    dateToRu: dateToRu, ruToDate: ruToDate,
     paintCount: paintCount, refreshCart: refreshCart,
   };
 })();

@@ -87,8 +87,9 @@ footer { flex: none; }
 .cart-link {
   display: flex; align-items: center; gap: 8px;
   height: 36px; padding: 0 12px;
-  border: 1px solid var(--line);
-  color: var(--ink); text-decoration: none;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #fff; text-decoration: none;
   font-size: var(--cap); letter-spacing: .08em; text-transform: uppercase;
   flex: none;
 }
@@ -258,16 +259,36 @@ input:focus-visible, textarea:focus-visible {
   flex: 1;
 }
 
+/* Кнопка и счётчик занимают ровно одну площадь: иначе карточка прыгает в
+   момент подмены, и решётка дёргается целиком. */
 .card-add { padding: 0 12px 12px; }
+.add, .card-add .stepper--wide {
+  width: 100%; max-width: 220px; height: 40px; box-sizing: border-box;
+}
 .add {
   font: inherit; font-size: 12px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase;
   background: none; color: var(--ink);
   border: 1px solid var(--line); border-radius: 0;
-  width: 100%; min-height: 40px;
   cursor: pointer;
 }
 .add:hover { border-color: var(--accent); color: var(--accent-text); }
+
+/* Наплыв заливки в момент появления счётчика: красное проходит слева направо
+   и уходит, оставляя обычный вид. Подмену видно, а мигания нет. */
+.card-add .stepper--wide { position: relative; overflow: hidden; }
+.card-add .stepper--wide::before {
+  content: ""; position: absolute; inset: 0; z-index: 0;
+  background: var(--accent); transform: scaleX(0); transform-origin: left;
+  opacity: 0;
+}
+.card-add .stepper--wide > * { position: relative; z-index: 1; }
+.card-add .stepper--wide.is-new::before { animation: add-sweep .34s ease-out forwards; }
+@keyframes add-sweep {
+  0% { transform: scaleX(0); opacity: .9; }
+  55% { transform: scaleX(1); opacity: .9; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
 
 /* Во всю ширину, но не шире разумного: на широкой карточке «−» и «+» иначе
    расходятся к краям, и попасть по ним труднее, чем по мелкой кнопке. */
@@ -276,7 +297,7 @@ input:focus-visible, textarea:focus-visible {
   width: 100%; max-width: 220px;
 }
 .card-add .add { max-width: 220px; }
-.stepper--wide button { height: 40px; }
+.card-add .stepper--wide button { height: 38px; }
 .stepper-num {
   font-size: 15px; font-weight: 700; text-align: center;
   font-variant-numeric: tabular-nums;

@@ -982,6 +982,8 @@ function doPost(e) {
       case "/order/card": data = handleOrderCard(payload, token); break;
       case "/order/update": data = handleOrderUpdate(payload, token); break;
       case "/order/line-update": data = handleOrderLineUpdate(payload, token); break;
+      case "/order/issue": data = handleOrderIssue(payload, token); break;
+      case "/order/delete": data = handleOrderDelete(payload, token); break;
       case "/students/list": data = handleStudentsList(payload, token); break;
       case "/student/history": data = handleStudentHistory(payload, token); break;
       // Ниже — предыдущая модель «клиент/проект». Осталась ради старых строк
@@ -1339,7 +1341,11 @@ function handleModelsList(payload, token) {
     // номера предмета: "04". Иначе фронтенд и таблица говорят о модели
     // по-разному, и сравнение строкой однажды промахнётся.
     return { category: r.category, model_code: pad2(Number(r.model_code)),
-             model_name: r.model_name, section: normalizeSection(r.section) };
+             model_name: r.model_name, section: normalizeSection(r.section),
+             // Цена для акта. Пустая строка, а не ноль: «не задана» и «ничего
+             // не стоит» — разные вещи, и в акте они выглядят по-разному.
+             price: r.price === "" || r.price === null || r.price === undefined
+               ? "" : Number(r.price) };
   }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
 }
 
@@ -4452,4 +4458,122 @@ function shortName(full) {
 // replaceText принимает регулярное выражение, а в подстановках фигурные скобки.
 function escapeForReplace(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Выдача по заявке без сканирования. Сканер — правильный путь: он не даёт
+// выдать не то. Но бывает, что вещь уже в руках, а этикетка не читается, или
+// весь заказ собран заранее — и тогда упираться в скан значит стоять.
+//
+// Предметы выбираются сами: свободные, этой же модели, по порядку номеров.
+// Дальше всё идёт через ту же выдачу, что и со сканера, — с теми же
+// проверками состояния, количества и списания со строки заказа.
+function handleOrderIssue(payload, token) {
+  checkAuth(token);
+  var orderId = String(payload.order_id || "");
+  var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
+  if (!order) throw apiError(404, "Заказ не найден");
+  if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
+
+  var lineNo = Number(payload.line_no || 0);
+  var line = null;
+  readRows(getSheet(SHEETS.ORDER_ITEMS)).forEach(function (r) {
+    if (String(r.order_id) === orderId && Number(r.line_no) === lineNo) line = r;
+  });
+  if (!line) throw apiError(404, "Такой строки в заказе нет");
+  if (!line.category || line.model_code === "") {
+    throw apiError(409, "Позиция не сопоставлена с моделью. Сопоставьте её в заказе, " +
+      "иначе выдавать нечего: система не знает, что это за вещь");
+  }
+
+  var category = String(line.category);
+  var model = pad2(Number(line.model_code));
+  var left = Number(line.qty || 1) - Number(line.issued_qty || 0);
+  if (left < 1) throw apiError(409, "По этой строке уже всё выдано");
+  // Количество не задано — выдаём столько, сколько свободно, но не больше
+  // остатка по строке. Отказ «свободна одна, а нужно три» заставлял бы
+  // складмена считать самому, хотя выдать одну он всё равно хочет.
+  var asked = payload.qty === undefined || payload.qty === null || payload.qty === "";
+  var want = asked ? left : Math.floor(Number(payload.qty));
+  if (!want || want < 1) throw apiError(400, "Количество — целое число от одного");
+  if (want > left) throw apiError(409, "По этой строке осталось выдать " + left);
+
+  // Позиция «количеством» — одна строка на складе, выдаётся сразу нужным
+  // числом. Поштучная — столько выдач, сколько предметов.
+  var byQty = categoryByQty(category);
+  var free = readRows(getSheet(SHEETS.EQUIPMENT)).filter(function (e) {
+    if (String(e.category) !== category) return false;
+    if (e.model_code === "" || pad2(Number(e.model_code)) !== model) return false;
+    return byQty ? itemQty(e) - Number(e.qty_out || 0) > 0 : e.status === "Available";
+  });
+  free.sort(function (a, b) { return String(a.item_id) < String(b.item_id) ? -1 : 1; });
+
+  if (!free.length) {
+    throw apiError(409, "Свободных «" + String(line.raw_name || model) +
+      "» на складе нет — ни одной");
+  }
+
+  var issued = [];
+  if (byQty) {
+    var spare = itemQty(free[0]) - Number(free[0].qty_out || 0);
+    if (asked) want = Math.min(want, spare);
+    if (spare < want) throw apiError(409, "Свободно только " + spare + " из " + want);
+    handleTransactionCheckout({
+      item_id: free[0].item_id, order_id: orderId, qty: want,
+      notes: "Выдано по заявке без сканирования",
+    }, token);
+    issued.push({ item_id: free[0].item_id, qty: want });
+  } else {
+    if (asked) want = Math.min(want, free.length);
+    if (free.length < want) {
+      throw apiError(409, "Свободно только " + free.length + " из " + want);
+    }
+    for (var i = 0; i < want; i++) {
+      handleTransactionCheckout({
+        item_id: free[i].item_id, order_id: orderId,
+        notes: "Выдано по заявке без сканирования",
+      }, token);
+      issued.push({ item_id: free[i].item_id, qty: 1 });
+    }
+  }
+
+  // Сколько осталось по строке после этой выдачи — чтобы приложение сказало
+  // правду, а не «выдано» на строке, где ещё две единицы.
+  var rest = left - want;
+  return { order_id: Number(orderId), line_no: lineNo, issued: issued, left: rest };
+}
+
+// Удаление заказа. Заказ — это запись о договорённости, и пока по нему ничего
+// не выдано, лишняя строка только мешает (проверки связи, дубли, опечатки).
+// Как только выдача прошла, удалять нельзя: пропадёт след того, у кого вещь.
+function handleOrderDelete(payload, token) {
+  requireAdmin(token);
+  var orderId = String(payload.order_id || "");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.ORDERS);
+    var order = findRowByValue(sheet, "order_id", orderId);
+    if (!order) throw apiError(404, "Заказ не найден");
+
+    var txRows = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(function (t) {
+      return String(t.order_id || "") === orderId;
+    });
+    if (txRows.length) {
+      throw apiError(409, "По этому заказу уже есть выдачи — удалять нельзя, " +
+        "иначе пропадёт след того, у кого вещь. Такой заказ отменяют, а не удаляют");
+    }
+
+    // Строки состава удаляем снизу вверх: иначе после первого же удаления
+    // остальные номера строк съезжают.
+    var itemSheet = getSheet(SHEETS.ORDER_ITEMS);
+    var rows = readRows(itemSheet).filter(function (r) {
+      return String(r.order_id) === orderId;
+    }).sort(function (a, b) { return b.__row - a.__row; });
+    rows.forEach(function (r) { itemSheet.deleteRow(r.__row); });
+
+    sheet.deleteRow(order.__row);
+    return { order_id: Number(orderId), lines: rows.length };
+  } finally {
+    lock.releaseLock();
+  }
 }

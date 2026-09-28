@@ -11,10 +11,13 @@
   // Что стоит в ячейке под названием: кнопка, пока позиции в корзине нет, и
   // счётчик, когда есть. Число видно прямо на витрине — раньше узнать его
   // можно было только на странице позиции.
-  function addHtml(k) {
+  // fresh — только что нажали «Добавить» на этой карточке: счётчик появляется
+  // с наплывом заливки. При перерисовке всей решётки анимации быть не должно,
+  // иначе восемьдесят карточек мигнут разом.
+  function addHtml(k, fresh) {
     var n = Site.qtyOf(k);
     if (!n) return '<button type="button" class="add" data-act="add">Добавить</button>';
-    return '<div class="stepper stepper--wide">' +
+    return '<div class="stepper stepper--wide' + (fresh ? " is-new" : "") + '">' +
       '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
       '<span class="stepper-num">' + n + "</span>" +
       '<button type="button" data-act="plus" aria-label="Больше">+</button>' +
@@ -23,9 +26,9 @@
 
   // Перерисовываем одну ячейку, а не решётку: иначе на каждом нажатии теряется
   // место прокрутки.
-  function paintAdd(k) {
+  function paintAdd(k, fresh) {
     var box = document.querySelector('[data-add="' + k + '"]');
-    if (box) box.innerHTML = addHtml(k);
+    if (box) box.innerHTML = addHtml(k, fresh);
   }
 
   // Заявку меняли не здесь: вернулись «назад» или правили в соседней вкладке.
@@ -156,9 +159,10 @@
       var box = btn.closest("[data-add]");
       if (!box) return;
       var k = box.dataset.add;
+      var first = btn.dataset.act === "add";
       if (btn.dataset.act === "minus") Site.addToCart(k, -1);
       else Site.addToCart(k, 1);
-      paintAdd(k);
+      paintAdd(k, first);
     });
   }
 

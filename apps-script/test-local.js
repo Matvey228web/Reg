@@ -1982,6 +1982,70 @@ check('тот же PIN по-прежнему пускает',
 check('чужой PIN не пускает',
   call('/auth/login', { login: 'pin_a', pin: '5151' }).status === 401);
 
+console.log('\n== выдача по заявке без скана ==');
+const issAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+// Свой заказ, чтобы не тревожить те, на которых висят прежние проверки.
+const issModel = call('/models/list', {}, issAdmin).data
+  .filter((m) => !categoryByQty(m.category))[0];
+const issItem = call('/item/create',
+  { name: issModel.model_name, category: issModel.category, model_code: issModel.model_code },
+  issAdmin);
+check('предмет для выдачи заведён', issItem.ok === true, issItem);
+
+let iss = call('/order/create', {
+  order_no: 'ISSUE-1', student_name: 'Без Скана Иванович', student_phone: '+79990000001',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [{ line_no: 1, raw_name: issModel.model_name, category: issModel.category,
+            model_code: issModel.model_code, qty: 1 }],
+}, issAdmin);
+check('заказ для выдачи создан', iss.ok === true, iss);
+const issOrder = iss.data.order_id;
+
+let out = call('/order/issue', { order_id: issOrder, line_no: 1 }, issAdmin);
+check('выдали без сканирования', out.ok === true && out.data.issued.length === 1, out);
+let issCard = call('/order/card', { order_id: issOrder }, issAdmin);
+check('выдача записана в журнал', issCard.data.transactions.length === 1,
+  issCard.data.transactions);
+check('строка заказа отмечена выданной', issCard.data.items[0].issued_qty === 1,
+  issCard.data.items[0]);
+check('в примечании видно, что без скана',
+  /без сканирования/.test(issCard.data.transactions[0].notes || ''),
+  issCard.data.transactions[0].notes);
+check('повторная выдача по той же строке отклонена',
+  call('/order/issue', { order_id: issOrder, line_no: 1 }, issAdmin).status === 409);
+check('несопоставленную строку выдать нельзя',
+  call('/order/issue', { order_id: 1, line_no: 1 }, issAdmin).status === 409);
+check('несуществующую строку тоже',
+  call('/order/issue', { order_id: issOrder, line_no: 99 }, issAdmin).status === 404);
+
+console.log('\n== удаление заказа ==');
+check('заказ с выдачами удалить нельзя',
+  call('/order/delete', { order_id: issOrder }, issAdmin).status === 409,
+  call('/order/delete', { order_id: issOrder }, issAdmin));
+
+let empty = call('/order/create', {
+  order_no: 'DELETE-ME', student_name: 'Проверка Связи', student_phone: '+79000000000',
+  items: [{ line_no: 1, raw_name: 'Что-то', qty: 1 }],
+}, issAdmin);
+const emptyId = empty.data.order_id;
+const beforeDel = call('/orders/list', {}, issAdmin).data.length;
+let del = call('/order/delete', { order_id: emptyId }, issAdmin);
+check('заказ без выдач удалён', del.ok === true && del.data.lines === 1, del);
+check('в списке его больше нет',
+  call('/orders/list', {}, issAdmin).data.length === beforeDel - 1);
+check('состав удалён вместе с ним',
+  call('/order/card', { order_id: emptyId }, issAdmin).status === 404);
+// Своя учётка: у заведённых выше к этому месту уже меняли PIN и ловили
+// блокировку, и войти ими нельзя.
+call('/staff/create', { full_name: 'Складмен Удалений', login: 'delcheck',
+                        pin: '5566', role: 'Warehouse Staff' }, issAdmin);
+const delStaff = call('/auth/login', { login: 'delcheck', pin: '5566' });
+check('учётка сотрудника склада заведена', delStaff.ok === true, delStaff);
+check('сотруднику склада удаление запрещено',
+  call('/order/delete', { order_id: issOrder }, delStaff.data.token).status === 403);
+check('а выдавать без скана он может',
+  call('/order/issue', { order_id: issOrder, line_no: 1 }, delStaff.data.token).status === 409);
+
 console.log('\n== акт: сумма прописью ==');
 check('ноль словами', numberInWords(0) === 'ноль');
 check('одна тысяча, а не один тысяча', numberInWords(1000) === 'одна тысяча');

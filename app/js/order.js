@@ -137,6 +137,14 @@ const OrderScreen = (() => {
       <p class="hint">Акт уйдёт ссылкой в чат склада. Позиции без цены встанут
         прочерком — цены задаются на экране «Модели».</p>
 
+      ${data.transactions.length ? "" : `
+        <div id="order-delete-error"></div>
+        <button class="btn btn--secondary btn--danger" id="order-delete"
+                style="margin-top:8px;">Удалить заказ</button>
+        <p class="hint">Пока по заказу ничего не выдано, его можно удалить —
+          проверки связи и дубли висеть не должны. После первой выдачи удалить
+          нельзя: пропадёт след того, у кого вещь.</p>`}
+
       <div class="section">
         <div class="section-title">Арендатор</div>
         <div class="card-sub">${escapeHtml(o.student_name || "—")}</div>
@@ -206,6 +214,9 @@ const OrderScreen = (() => {
 
   function lineHtml(line) {
     const left = Math.max(0, line.qty - line.issued_qty);
+    // Выдать без скана можно только то, что сопоставлено с моделью: иначе
+    // система не знает, какую вещь брать со склада.
+    const canIssue = left > 0 && !!line.model_code;
     return `
       <div class="order-line">
         <div class="order-line-name">${escapeHtml(line.raw_name)}</div>
@@ -213,6 +224,9 @@ const OrderScreen = (() => {
           выдано ${line.issued_qty} из ${line.qty}${left ? "" : " · закрыта"}
           ${line.model_code ? "" : ` · <span class="order-line-warn">нет в каталоге</span>`}
         </div>
+        ${canIssue ? `<button class="btn btn--secondary order-issue-line"
+          data-line="${escapeHtml(String(line.line_no))}"
+          data-left="${escapeHtml(String(left))}">Выдать без скана</button>` : ""}
       </div>`;
   }
 
@@ -238,6 +252,11 @@ const OrderScreen = (() => {
     }
     const actBtn = document.getElementById("order-act");
     if (actBtn) actBtn.addEventListener("click", () => buildAct(order, actBtn));
+    document.querySelectorAll(".order-issue-line").forEach((btn) => {
+      btn.addEventListener("click", () => issueLine(order, btn));
+    });
+    const delBtn = document.getElementById("order-delete");
+    if (delBtn) delBtn.addEventListener("click", () => removeOrder(order, delBtn));
     document.querySelectorAll(".order-line-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         Router.navigate("scan", { itemId: btn.dataset.item, mode: "checkin" });
@@ -245,6 +264,58 @@ const OrderScreen = (() => {
     });
     const allBtn = document.getElementById("order-checkin-all");
     if (allBtn) allBtn.addEventListener("click", () => checkinAll(open));
+  }
+
+  // Выдача без сканирования. Сканер остаётся главным путём — он не даёт выдать
+  // не то, — но когда этикетка не читается или заказ собран заранее, упираться
+  // в скан значит стоять. Предметы выбирает бэкенд: свободные, той же модели.
+  async function issueLine(order, btn) {
+    // Сколько выдастся, знает только бэкенд: свободных может быть меньше, чем
+    // в строке. Поэтому обещать число в вопросе нельзя.
+    const go = await new Promise((resolve) => TG.showConfirm(
+      "Выдать без сканирования? Система возьмёт свободные предметы этой модели.",
+      resolve));
+    if (!go) return;
+
+    btn.disabled = true;
+    btn.textContent = "Выдаём…";
+    try {
+      const res = await apiPost("/order/issue", {
+        order_id: Number(order.order_id), line_no: Number(btn.dataset.line),
+      });
+      TG.hapticSuccess();
+      const ids = res.issued.map((i) => i.item_id).join(", ");
+      TG.showAlert(res.left
+        ? `Выдано: ${ids}. Осталось по строке: ${res.left} — свободных больше нет.`
+        : `Выдано: ${ids}`);
+      await load();
+    } catch (err) {
+      TG.hapticError();
+      TG.showAlert(err.message);
+      btn.disabled = false;
+      btn.textContent = "Выдать без скана";
+    }
+  }
+
+  // Удаление заказа. Только пока по нему ничего не выдано — это бэкенд и
+  // проверяет. Спрашиваем дважды: строка уходит вместе с составом.
+  async function removeOrder(order, btn) {
+    const go = await new Promise((resolve) => TG.showConfirm(
+      `Удалить заказ №${order.order_no}? Строка и весь состав исчезнут.`, resolve));
+    if (!go) return;
+    btn.disabled = true;
+    btn.textContent = "Удаляем…";
+    try {
+      await apiPost("/order/delete", { order_id: Number(order.order_id) });
+      TG.hapticSuccess();
+      TG.showAlert("Заказ удалён");
+      Router.navigate("orders");
+    } catch (err) {
+      TG.hapticError();
+      TG.showAlert(err.message);
+      btn.disabled = false;
+      btn.textContent = "Удалить заказ";
+    }
   }
 
   // Сборка акта. Документ делает бэкенд: копирует шаблон, расставляет позиции
