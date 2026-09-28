@@ -13,20 +13,40 @@ const SettingsScreen = (() => {
   // предложение стояло подписью, занимало две строки и выдавливало значение
   // за край. Подсказка в пустом поле нужна затем же: внутри группы у поля нет
   // ни рамки, ни заливки, и пустое оно ничем не отличается от пустого места.
+  // grp — в каком подразделе поле показывается. Сохраняются они всё равно все
+  // сразу: бэкенд принимает настройки одним словарём, а поля остаются в DOM,
+  // даже когда подраздел закрыт.
   const FIELDS = [
-    { key: "session_ttl_hours", label: "Срок входа, часов" },
-    { key: "max_login_attempts", label: "Попыток до блокировки" },
-    { key: "login_lock_minutes", label: "Блокировка, минут" },
-    { key: "import_source_id", label: "Исходная таблица", text: true, ph: "идентификатор" },
-    { key: "notify_chat_id", label: "Чат склада", text: true, ph: "-1001234567890" },
-    { key: "site_url", label: "Сайт проката", text: true, ph: "https://" },
-    { key: "app_link", label: "Ссылка на приложение", text: true, ph: "https://t.me/бот/app" },
+    { key: "session_ttl_hours", label: "Срок входа, часов", grp: "login" },
+    { key: "max_login_attempts", label: "Попыток до блокировки", grp: "login" },
+    { key: "login_lock_minutes", label: "Блокировка, минут", grp: "login" },
+    { key: "import_source_id", label: "Исходная таблица", text: true, ph: "идентификатор", grp: "links" },
+    { key: "notify_chat_id", label: "Чат склада", text: true, ph: "-1001234567890", grp: "links" },
+    { key: "site_url", label: "Сайт проката", text: true, ph: "https://", grp: "links" },
+    { key: "app_link", label: "Ссылка на приложение", text: true, ph: "https://t.me/бот/app", grp: "links" },
   ];
+
+  // Одна строка поля — чтобы два подраздела рисовались одним кодом.
+  function fieldHtml(f, s, hints) {
+    return `
+      <div class="field${f.text ? " field--stacked" : ""}">
+        <label for="set-${f.key}">${escapeHtml(f.label)}</label>
+        <input id="set-${f.key}" type="${f.text ? "text" : "number"}"
+               value="${escapeHtml(String(s[f.key] === undefined ? "" : s[f.key]))}"
+               ${f.ph ? `placeholder="${escapeHtml(f.ph)}"` : ""}
+               ${f.text ? 'autocapitalize="off" autocorrect="off" spellcheck="false"' : ""} />
+        ${hints[f.key] ? `<p class="hint">${escapeHtml(hints[f.key])}</p>` : ""}
+      </div>`;
+  }
 
   async function load() {
     const box = document.getElementById("settings-content");
     const me = Auth.getSession() || {};
     showBoxError("settings-error", "");
+    // Заходя в настройки заново, человек ждёт список, а не тот подраздел, где
+    // был в прошлый раз. Внутри экрана подраздел держится (сохранение
+    // перерисовывает всё), а вход на экран его сбрасывает.
+    panel = null;
     // Складскому сотруднику здесь нужна только своя учётная запись: категории,
     // сроки, бот и обслуживание — администраторские, их правку бэкенд всё равно
     // не пропустит, и показывать кнопки, которые ответят «нельзя», незачем.
@@ -71,7 +91,7 @@ const SettingsScreen = (() => {
   function accountHtml() {
     const me = Auth.getSession() || {};
     return `
-      <div class="section section--account">
+      <div class="section section--account section--top">
         <h2>Учётная запись</h2>
         <p class="hint">Вошли как ${escapeHtml(me.full_name || "—")}${
           me.full_name ? ` · ${escapeHtml(roleLabel(me))}` : ""}.</p>
@@ -97,6 +117,55 @@ const SettingsScreen = (() => {
     }
   }
 
+  // Куда открыт вход: null — список, иначе имя подраздела. Всё содержимое
+  // рисуется сразу, а видно одно: обработчики остаются прежними, и правка
+  // блоков не зависит от того, как их показывают.
+  let panel = null;
+
+  const PANELS = [
+    { key: "cats", label: "Категории и модели", hint: "номера, названия, где лежит модель" },
+    { key: "public", label: "Заявки с сайта", hint: "принимать ли заявки и как часто" },
+    { key: "act", label: "Акт сдачи-приёмки", hint: "шаблон, подписи, папка" },
+    { key: "bot", label: "Бот в Telegram", hint: "проверка связи и сводки" },
+    { key: "links", label: "Адреса и связи", hint: "таблица, чат, сайт, приложение" },
+    { key: "login", label: "Вход и защита", hint: "срок сессии, попытки, блокировка" },
+    { key: "maint", label: "Обслуживание", hint: "выгрузка и подрезка журналов" },
+  ];
+
+  function menuHtml() {
+    return `
+      <div class="section" id="settings-menu">
+        <div class="menu">
+          ${PANELS.map((x) => `
+            <button class="menu-row" type="button" data-open="${x.key}">
+              <span class="menu-row-main">
+                <span class="menu-row-label">${escapeHtml(x.label)}</span>
+                <span class="menu-row-hint">${escapeHtml(x.hint)}</span>
+              </span>
+              <span class="menu-row-go">›</span>
+            </button>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  // Показываем один подраздел или список. Прокрутку возвращаем наверх: иначе
+  // после длинного списка категорий следующий экран открывается с середины.
+  function showPanel(key) {
+    panel = key || null;
+    const menu = document.getElementById("settings-menu");
+    if (menu) menu.hidden = !!panel;
+    document.querySelectorAll("#settings-content [data-panel]").forEach((el) => {
+      el.hidden = el.dataset.panel !== panel;
+    });
+    // Панель со сводкой и своя учётка — только на верхнем уровне.
+    document.querySelectorAll("#settings-content .section--top").forEach((el) => {
+      el.hidden = !!panel;
+    });
+    const screen = document.getElementById("screen-settings");
+    if (screen) screen.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }
+
   function render() {
     const box = document.getElementById("settings-content");
     const s = data.settings || {};
@@ -104,9 +173,11 @@ const SettingsScreen = (() => {
 
     box.innerHTML = `
       ${panelHtml()}
+      ${menuHtml()}
 
-      <div class="section">
-        <h2>Категории</h2>
+      <div class="section" data-panel="cats" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
+        <h2>Категории и модели</h2>
         <p class="hint">Номер категории — первые две цифры номера вещи. Там, где техника уже
           есть, он не меняется: номера напечатаны на этикетках. Название — всегда.</p>
         <div id="settings-categories"></div>
@@ -139,24 +210,31 @@ const SettingsScreen = (() => {
         </div>
       </div>
 
-      <div class="section">
-        <h2>Сроки и защита входа</h2>
+      <div class="section" data-panel="links" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
+        <h2>Адреса и связи</h2>
+        <p class="hint">Куда система смотрит наружу: таблица, из которой берут каталог,
+          чат склада, витрина для студентов и ссылка на это приложение.</p>
+        <div id="settings-links-error"></div>
+        <div class="form-group">
+          ${FIELDS.filter((f) => f.grp === "links").map((f) => fieldHtml(f, s, hints)).join("")}
+        </div>
+        <button class="btn" id="settings-links-save">Сохранить</button>
+      </div>
+
+      <div class="section" data-panel="login" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
+        <h2>Вход и защита</h2>
+        <p class="hint">Сколько держится вход и что происходит после неверных PIN.</p>
         <div id="settings-fields-error"></div>
         <div class="form-group">
-          ${FIELDS.map((f) => `
-            <div class="field${f.text ? " field--stacked" : ""}">
-              <label for="set-${f.key}">${escapeHtml(f.label)}</label>
-              <input id="set-${f.key}" type="${f.text ? "text" : "number"}"
-                     value="${escapeHtml(String(s[f.key] === undefined ? "" : s[f.key]))}"
-                     ${f.ph ? `placeholder="${escapeHtml(f.ph)}"` : ""}
-                     ${f.text ? 'autocapitalize="off" autocorrect="off" spellcheck="false"' : ""} />
-              ${hints[f.key] ? `<p class="hint">${escapeHtml(hints[f.key])}</p>` : ""}
-            </div>`).join("")}
+          ${FIELDS.filter((f) => f.grp === "login").map((f) => fieldHtml(f, s, hints)).join("")}
         </div>
         <button class="btn" id="settings-save">Сохранить</button>
       </div>
 
-      <div class="section">
+      <div class="section" data-panel="act" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Акт сдачи-приёмки</h2>
         <p class="hint">Акт собирается кнопкой на карточке заказа: копия шаблона,
           позиции по строкам, сумма прописью, ссылка в чат склада.</p>
@@ -195,7 +273,8 @@ const SettingsScreen = (() => {
           : `<p class="hint">Шаблон создаёт главный администратор.</p>`}
       </div>
 
-      <div class="section">
+      <div class="section" data-panel="public" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Заявки с сайта</h2>
         <p class="hint">Включено — сайт отправляет заявку сам: строка появляется в «Заказах»
           со статусом «Новый», и бот пишет об этом в чат. Выключено — студент копирует
@@ -219,7 +298,8 @@ const SettingsScreen = (() => {
         <button class="btn" id="settings-public-save">Сохранить</button>
       </div>
 
-      <div class="section">
+      <div class="section" data-panel="bot" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Бот в Telegram</h2>
         <p class="hint">Бот пишет в чат склада о дефектах и о просрочках. Токен бота — не здесь,
           а в Script Properties, ключ TELEGRAM_BOT_TOKEN (эти настройки видит любой
@@ -229,7 +309,8 @@ const SettingsScreen = (() => {
         <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
       </div>
 
-      <div class="section">
+      <div class="section" data-panel="maint" hidden>
+        <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Обслуживание</h2>
         <p class="hint">Выгрузка кладёт журналы на ваш Google Диск, в папку «Mifs Rent — архив».
           Подрезка удаляет закрытые записи и работает только после выгрузки.</p>
@@ -249,6 +330,9 @@ const SettingsScreen = (() => {
     renderCategories();
     bind();
     bindAccount();
+    // Сохранение перерисовывает экран целиком — возвращаемся туда, где были,
+    // а не выбрасываем человека в список.
+    showPanel(panel);
   }
 
   // Панель главного администратора. Смысл не в красоте, а в том, чтобы одним
@@ -268,7 +352,7 @@ const SettingsScreen = (() => {
        </div>`;
 
     return `
-      <div class="section">
+      <div class="section section--top">
         <h2>${me.is_owner ? "Панель главного администратора" : "Панель администратора"}</h2>
         ${owner
           ? `<p class="hint">Главный администратор — ${escapeHtml(owner.full_name)}${me.is_owner ? " (это вы)" : ""}.
@@ -438,14 +522,17 @@ const SettingsScreen = (() => {
     }
   }
 
-  async function saveFields() {
+  // Кнопки две — в «Адресах» и во «Входе», — а сохранение одно: бэкенд
+  // принимает настройки словарём, и делить его по подразделам смысла нет.
+  // Отличается только то, где показать отказ и какую кнопку погасить.
+  async function saveFields(btnId, errId) {
     const payload = {};
     FIELDS.forEach((f) => {
       const raw = document.getElementById("set-" + f.key).value.trim();
       payload[f.key] = f.text ? raw : Number(raw);
     });
-    showBoxError("settings-fields-error", "");
-    const btn = document.getElementById("settings-save");
+    showBoxError(errId, "");
+    const btn = document.getElementById(btnId);
     btn.disabled = true;
     btn.textContent = "Сохраняем…";
     try {
@@ -459,7 +546,7 @@ const SettingsScreen = (() => {
       TG.showAlert("Настройки сохранены");
     } catch (err) {
       TG.hapticError();
-      showBoxError("settings-fields-error", err.message);
+      showBoxError(errId, err.message);
     } finally {
       btn.disabled = false;
       btn.textContent = "Сохранить";
@@ -516,6 +603,15 @@ const SettingsScreen = (() => {
   }
 
   function bind() {
+    // Переходы внутрь и назад: один слушатель на весь экран, потому что
+    // содержимое перерисовывается целиком при каждом сохранении.
+    document.querySelectorAll("[data-open]").forEach((row) => {
+      row.addEventListener("click", () => showPanel(row.dataset.open));
+    });
+    document.querySelectorAll("[data-close]").forEach((row) => {
+      row.addEventListener("click", () => showPanel(null));
+    });
+
     const staffBtn = document.getElementById("settings-go-staff");
     if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
     document.getElementById("settings-models").addEventListener("click", () => Router.navigate("models"));
@@ -524,7 +620,10 @@ const SettingsScreen = (() => {
       form.style.display = form.style.display === "none" ? "block" : "none";
     });
     document.getElementById("settings-cat-submit").addEventListener("click", addCategory);
-    document.getElementById("settings-save").addEventListener("click", saveFields);
+    document.getElementById("settings-save")
+      .addEventListener("click", () => saveFields("settings-save", "settings-fields-error"));
+    document.getElementById("settings-links-save")
+      .addEventListener("click", () => saveFields("settings-links-save", "settings-links-error"));
     document.getElementById("settings-public-save")
       .addEventListener("click", savePublicOrders);
     document.getElementById("settings-act-save").addEventListener("click", saveAct);

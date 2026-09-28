@@ -1626,3 +1626,35 @@ select {
   .tab { flex: 0 0 96px; }
   .fallback-main-button { left: 50%; transform: translateX(-50%); width: 360px; }
 }
+
+/* --- Настройки списком --- */
+/* Экран настроек был одной длинной лентой: правка категорий, сроки входа, бот
+   и обслуживание подряд. Теперь на входе список, правка — на уровень ниже. */
+
+/* Группой в карточке, как системные настройки: рамка вокруг всего списка,
+   волосяные линии между строками, у последней линии нет. Так список читается
+   одним предметом, а не семью висящими в воздухе строками. */
+.menu {
+  border-radius: var(--r-lg);
+  background: var(--group-bg);
+  overflow: hidden;
+}
+.menu-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 14px var(--s4);
+  background: none; border: 0; border-bottom: 1px solid var(--hairline);
+  color: var(--ink); text-align: left; cursor: pointer;
+  font: inherit;
+}
+.menu-row:last-child { border-bottom: 0; }
+.menu-row:active { background: var(--surface-strong); }
+.menu-row-main { flex: 1; display: grid; gap: 3px; }
+.menu-row-label { font-size: 16px; }
+.menu-row-hint { font-size: 13px; color: var(--muted); }
+.menu-row-go { color: var(--muted); font-size: 20px; line-height: 1; flex: none; }
+
+/* Возврат к списку. Стрелка слева, как во всех системных настройках. */
+.sub-back {
+  background: none; border: 0; padding: 0 0 10px;
+  color: var(--accent); font: inherit; font-size: 15px; cursor: pointer;
+}
