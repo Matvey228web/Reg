@@ -283,7 +283,10 @@ input:focus-visible, textarea:focus-visible {
 
 /* Кнопка и счётчик занимают ровно одну площадь: иначе карточка прыгает в
    момент подмены, и решётка дёргается целиком. */
-.card-add { padding: 0 12px 12px; }
+/* Кнопку держим по центру карточки: на широком экране карточка вдвое шире
+   кнопки, и прижатая к левому краю она читается как недоделанная вёрстка. */
+.card-add { padding: 0 12px 12px; display: flex; justify-content: center; }
+.card-add > * { width: 100%; }
 .add, .card-add .stepper--wide {
   width: 100%; max-width: 220px; height: 40px; box-sizing: border-box;
 }
@@ -508,6 +511,11 @@ input:focus-visible, textarea:focus-visible {
 }
 .cart-warn { grid-column: 1 / -1; margin: 0; color: var(--accent-text); font-size: 12px; }
 
+/* «Забыть мои данные» стоит под формой, а не в строке корзины: своя высота и
+   отступ сверху, чтобы не приклеивалось к комментарию и не путалось с
+   «Забронировать». */
+#forget { padding: 12px 0; margin-top: 4px; }
+
 .field { display: grid; gap: 5px; margin-bottom: 12px; }
 .row {
   display: grid; grid-template-columns: 1fr auto;
@@ -577,11 +585,46 @@ input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity
 
 footer {
   border-top: 1px solid var(--line);
-  padding: 20px var(--pad) calc(20px + env(safe-area-inset-bottom));
   color: var(--dim);
   font-size: 12px; line-height: 18px;
 }
 footer a { color: var(--dim); }
+
+/* Подвал в колонки: лого и назначение, каталог по категориям, условия. На
+   телефоне колонки складываются в одну — раскладывать три списка по 130
+   точек ширины бессмысленно. */
+.foot {
+  display: grid;
+  gap: 24px;
+  padding: 28px var(--pad) 24px;
+}
+.foot-name {
+  display: block;
+  font-size: 18px; font-weight: 700; letter-spacing: .02em;
+  color: var(--ink);
+}
+.foot-note { margin: 8px 0 0; max-width: 260px; }
+.foot-h {
+  margin: 0 0 12px;
+  font-size: 13px; font-weight: 700; letter-spacing: .02em;
+  color: var(--ink);
+}
+.foot-list { margin: 0; padding: 0; list-style: none; }
+.foot-list li { margin-bottom: 2px; }
+/* Ссылки категорий — цель для пальца, а не строчка текста: отступы внутрь
+   ссылки, иначе между ними остаётся щель, в которую и попадают. */
+.foot-list a {
+  display: inline-block; padding: 6px 0;
+  color: var(--dim); text-decoration: none;
+}
+.foot-list a:active, .foot-list a:hover { color: var(--ink); }
+
+/* Учредитель и его сайт — отдельной полосой в самом низу: это не раздел
+   сайта, а подпись под всем документом. */
+.foot-legal {
+  border-top: 1px solid var(--line);
+  padding: 16px var(--pad) calc(18px + env(safe-area-inset-bottom));
+}
 
 /* --- Широкий экран --- */
 
@@ -589,7 +632,12 @@ footer a { color: var(--dim); }
   /* Карточки по-прежнему делят всю ширину — иначе справа остаётся мёртвое
      поле, а решётка рвётся. От растяжения спасают потолок у фотографии и у
      счётчика, а не узкая колонка. */
-  .grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+  /* Ровно три карточки в ряд. Раньше стояло auto-fill, и на мониторе в ряд
+     влезало четыре и больше: названия сжимались, фотография мельчала, а
+     взгляд по такой решётке уже не идёт построчно. */
+  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Подвал в четыре доли: лого пошире, три списка равными. */
+  .foot { grid-template-columns: 1.4fr 1fr 1fr; gap: 40px; padding: 40px var(--pad) 32px; }
   /* «Каталог» и поиск в один ряд. Раньше в первой колонке стоял блок дат, его
      убрали — и поиск с «Каталогом» встали лестницей через пустую клетку. */
   .controls { grid-template-columns: auto 1fr; align-items: center; }

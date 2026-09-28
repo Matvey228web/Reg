@@ -25,6 +25,23 @@
       '. <a href="cart.html">Открыть корзину</a></p>';
   }
 
+  // «← Каталог» возвращает туда, откуда пришли: с выбранной категорией, с
+  // прежним местом прокрутки. Простая ссылка на index.html открывала витрину
+  // заново — с начала и со «Всё». Пришли не с витрины (ссылку переслали) —
+  // остаётся обычный переход по ссылке.
+  (function backLink() {
+    var link = Site.$("crumb-back");
+    if (!link) return;
+    link.addEventListener("click", function (e) {
+      var from = document.referrer || "";
+      if (history.length > 1 && from.indexOf(location.origin) === 0 &&
+          /index\.html|\/$/.test(from)) {
+        e.preventDefault();
+        history.back();
+      }
+    });
+  })();
+
   function render() {
     $("item").innerHTML =
       '<div class="item-shot">' +

@@ -6,7 +6,7 @@
 <title>Корзина · MifsRent</title>
 <meta name="description" content="Корзина: аренда оборудования Киноколледжа #40." />
 <meta name="theme-color" content="#0d0d0f" />
-<link rel="stylesheet" href="style.css?v=20260929d" />
+<link rel="stylesheet" href="style.css?v=20260929f" />
 </head>
 <body>
 
@@ -42,11 +42,33 @@
 </main>
 
 <footer>
-  <div class="wrap">ГБПОУ «Киноколледж № 40 „Московская международная киношкола“» ·
+  <div class="wrap foot">
+    <div class="foot-brand">
+      <span class="foot-name">MifsRent</span>
+      <p class="foot-note">Прокат съёмочной техники для студентов
+        Киноколледжа&nbsp;#40.</p>
+    </div>
+    <nav class="foot-col" aria-label="Каталог по категориям">
+      <h2 class="foot-h">Каталог</h2>
+      <!-- Список категорий ставит common.js из снимка каталога: держать его
+           копию в трёх файлах вёрстки — значит забыть обновить один из них. -->
+      <ul class="foot-list" id="foot-cats"></ul>
+    </nav>
+    <div class="foot-col">
+      <h2 class="foot-h">Условия</h2>
+      <ul class="foot-list">
+        <li>Техника выдаётся студентам колледжа.</li>
+        <li>Заявка — ещё не бронь: её подтверждает склад.</li>
+        <li>Выдача и возврат — под акт сдачи-приёмки.</li>
+        <li>Несовершеннолетнему нужен представитель.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="wrap foot-legal">ГБПОУ «Киноколледж № 40 „Московская международная киношкола“» ·
   <a href="https://spo-40.mskobr.ru" rel="noopener">spo-40.mskobr.ru</a></div>
 </footer>
 
-<script src="common.js?v=20260929d"></script>
-<script src="cart.js?v=20260929d"></script>
+<script src="common.js?v=20260929f"></script>
+<script src="cart.js?v=20260929f"></script>
 </body>
 </html>

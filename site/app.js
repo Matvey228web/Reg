@@ -5,8 +5,18 @@
 
   var $ = Site.$, esc = Site.escapeHtml;
   var catalog = { categories: [], models: [] };
-  var category = "all";
+  // Категория живёт в адресе: ссылку из подвала можно открыть с любой
+  // страницы, выбор переживает возврат «назад» и его можно переслать.
+  var category = (new URLSearchParams(location.search)).get("cat") || "all";
   var query = "";
+
+  // Меняем адрес, не перезагружая страницу: раздел уже так работает.
+  function keepInUrl() {
+    var q = new URLSearchParams(location.search);
+    if (category === "all") q.delete("cat"); else q.set("cat", category);
+    var tail = q.toString();
+    history.replaceState(null, "", location.pathname + (tail ? "?" + tail : ""));
+  }
 
   // Что стоит в ячейке под названием: кнопка, пока позиции в корзине нет, и
   // счётчик, когда есть. Число видно прямо на витрине — раньше узнать его
@@ -149,6 +159,7 @@
       e.preventDefault();
       Site.setSection(link.dataset.section);
       category = "all";
+      keepInUrl();
       renderSections();
       renderCatalog();
       render();
@@ -160,6 +171,7 @@
       if (!item) return;
       category = item.dataset.cat;
       $("catalog").open = false;
+      keepInUrl();
       renderCatalog();
       render();
       // Отклик на выбор: решётка не подменяется молча, а выезжает. Без этого

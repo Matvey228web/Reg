@@ -100,7 +100,10 @@
   function render() {
     var list = lines();
     var dates = Site.cartDates();
-    var keep = snapshot();
+    // Что было в полях. При перерисовке — то, что человек только что набрал;
+    // при первом заходе — то, что он вводил в прошлый раз: уйти в каталог за
+    // забытым штативом и вернуться к пустой форме — это издевательство.
+    var keep = snapshot() || Site.formRead();
 
     if (!list.length) {
       // Пустая корзина после набранного на витрине — это не «ничего не выбрал»,
@@ -170,6 +173,9 @@
           '<input type="text" id="workshop" /></label>' +
         '<label class="field"><span class="cap">Комментарий</span>' +
           '<textarea id="note" rows="3"></textarea></label>' +
+        // Данные лежат в этом телефоне, и убрать их человек должен уметь сам:
+        // на складе один телефон иногда ходит по рукам.
+        '<button class="link-danger" type="button" id="forget">Забыть мои данные</button>' +
       "</div>" +
 
       '<div class="block">' +
@@ -208,10 +214,17 @@
 
   function restore(kept) {
     if (!kept) return;
-    $("adult").checked = kept.adult;
+    $("adult").checked = !!kept.adult;
     TEXT_FIELDS.forEach(function (id) {
-      if ($(id)) $(id).value = kept[id];
+      if ($(id) && kept[id] !== undefined) $(id).value = kept[id];
     });
+  }
+
+  // Запоминаем после каждого нажатия клавиши: «сохранить» здесь нет и быть
+  // не должно, а закрыть страницу на полуслове — обычное дело.
+  function remember() {
+    var now = snapshot();
+    if (now) Site.formWrite(now);
   }
 
   // Нули в ценах не заглушка: в настоящих сообщениях бота они ровно такие.
@@ -363,6 +376,7 @@
         loadFree();
       }
       clearBad(e.target);
+      remember();
       updatePreview();
     });
 
@@ -373,12 +387,24 @@
       }
       if (e.target.id === "tg") applyMask(e.target, maskTg);
       clearBad(e.target);
+      remember();
       if ((tag === "INPUT" && e.target.type !== "date") || tag === "TEXTAREA") {
         updatePreview();
       }
     });
 
     $("send").addEventListener("click", send);
+
+    $("forget").addEventListener("click", function () {
+      Site.formForget();
+      TEXT_FIELDS.forEach(function (id) { if ($(id)) $(id).value = ""; });
+      $("adult").checked = false;
+      updateGuardian();
+      var note = $("sendnote");
+      note.hidden = false;
+      note.classList.remove("hint--bad");
+      note.textContent = "Данные забыты. В следующий раз форма откроется пустой.";
+    });
 
     $("copy").addEventListener("click", function () {
       var btn = $("copy");

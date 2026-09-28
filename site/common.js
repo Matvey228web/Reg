@@ -14,6 +14,11 @@ var Site = (function () {
   // Витрина от этого не зависит вовсе: каталог лежит снимком рядом со страницей.
   var BACKEND = "https://mifs-rent-api.odintsovmatvey08.workers.dev";
   var CART_KEY = "mifs_cart";
+  // Данные заявки. Отдельно от корзины: корзину человек меняет весь день, а
+  // ФИО с телефоном вводит один раз — и терять их при уходе в каталог нельзя.
+  // Учёток пока нет, поэтому это единственная память о человеке, и живёт она
+  // только в его телефоне: наружу ничего не уходит.
+  var FORM_KEY = "mifs_form";
 
   var SECTIONS = [
     { code: "cine", label: "Кино", mark: "CINE" },
@@ -89,6 +94,32 @@ var Site = (function () {
   function humanDate(iso) {
     var p = String(iso || "").split("-");
     return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : String(iso || "");
+  }
+
+  // --- Данные заявки ---
+
+  var memForm = null;
+
+  function formRead() {
+    try {
+      var raw = localStorage.getItem(FORM_KEY);
+      var data = raw ? JSON.parse(raw) : null;
+      if (!data || typeof data !== "object") throw 0;
+      memForm = data;
+      return data;
+    } catch (e) {
+      return memForm || {};
+    }
+  }
+
+  function formWrite(data) {
+    memForm = data || {};
+    try { localStorage.setItem(FORM_KEY, JSON.stringify(memForm)); } catch (e) { /* приватный режим */ }
+  }
+
+  function formForget() {
+    memForm = {};
+    try { localStorage.removeItem(FORM_KEY); } catch (e) { /* и забывать нечем */ }
   }
 
   // --- Каталог ---
@@ -320,10 +351,24 @@ var Site = (function () {
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
     paintCount: paintCount, refreshCart: refreshCart,
+    formRead: formRead, formWrite: formWrite, formForget: formForget,
   };
 })();
 
 document.addEventListener("DOMContentLoaded", Site.paintCount);
+
+// Категории в подвале. Снимок каталога уже нужен каждой странице, и повторного
+// запроса здесь нет: loadCatalog помнит загруженное.
+document.addEventListener("DOMContentLoaded", function () {
+  var box = Site.$("foot-cats");
+  if (!box) return;
+  Site.loadCatalog().then(function (data) {
+    box.innerHTML = (data.categories || []).map(function (c) {
+      return '<li><a href="index.html?cat=' + Site.escapeHtml(c.code) + '">' +
+        Site.escapeHtml(c.label) + "</a></li>";
+    }).join("");
+  }).catch(function () { /* нет снимка — подвал остаётся без списка */ });
+});
 
 // Возврат кнопкой «назад» страницу заново не выполняет: браузер достаёт её из
 // своего кэша ровно такой, какой она была. Набранное в карточке на витрину при
