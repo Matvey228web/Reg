@@ -133,9 +133,31 @@ footer { flex: none; }
 }
 
 .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.date { display: grid; gap: 5px; }
+.date { display: grid; gap: 5px; min-width: 0; }
 
-input[type="date"], input[type="search"], input[type="text"], input[type="tel"],
+/* Поле времени раньше не попадало в общий список полей ниже и рисовалось
+   браузером по-своему: другой шрифт, другая высота, другая ширина — рядом
+   с датой это било в глаза. Теперь оба поля одной строки. */
+.picker { position: relative; display: block; }
+.picker input { display: block; }
+/* Пример поверх пустого поля. Значение прячем цветом, а не подменой типа
+   поля: так уходит и браузерное «дд.мм.гггг», в любом браузере. */
+.picker input.is-empty { color: transparent; }
+.picker .ph {
+  position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+  pointer-events: none; color: var(--dim); font-size: 16px;
+}
+.picker input:not(.is-empty) + .ph { display: none; }
+/* Иконку календаря не прячем — она объясняет, что будет по нажатию, — но
+   нажимать можно в любое место строки. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.55);
+  cursor: pointer;
+}
+
+input[type="date"], input[type="time"], input[type="search"],
+input[type="text"], input[type="tel"],
 textarea {
   font: inherit;
   font-size: 16px;            /* ниже 16 iOS увеличивает страницу при фокусе */
@@ -274,10 +296,11 @@ input:focus-visible, textarea:focus-visible {
 }
 .add:hover { border-color: var(--accent); color: var(--accent-text); }
 
-/* Заливка наплывает слева направо и ОСТАЁТСЯ: позиция в корзине — состояние,
+/* Заливка наплывает снизу вверх и ОСТАЁТСЯ: позиция в корзине — состояние,
    а не мигнувшее событие. Уходит только при отмене, тем же движением назад.
-   Колонки задаём здесь: базовое .stepper стоит в файле ниже и перебивало их,
-   из-за чего число стояло слева, а не по центру. */
+   Снизу — потому что так двигается уровень: налитое поднимается, вылитое
+   опускается. Колонки задаём здесь: базовое .stepper стоит в файле ниже и
+   перебивало их, из-за чего число стояло слева, а не по центру. */
 .card-add .stepper--wide {
   grid-template-columns: 1fr auto 1fr;
   position: relative; overflow: hidden;
@@ -286,7 +309,7 @@ input:focus-visible, textarea:focus-visible {
 .card-add .stepper--wide button { color: #fff; }
 .card-add .stepper--wide::before {
   content: ""; position: absolute; inset: 0; z-index: 0;
-  background: var(--accent); transform: scaleX(1); transform-origin: left;
+  background: var(--accent); transform: scaleY(1); transform-origin: bottom;
 }
 .card-add .stepper--wide > * { position: relative; z-index: 1; }
 
@@ -299,8 +322,8 @@ input:focus-visible, textarea:focus-visible {
   animation: add-sweep .26s cubic-bezier(.4, 0, 1, 1) reverse both;
 }
 @keyframes add-sweep {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
 }
 
 /* Во всю ширину, но не шире разумного: на широкой карточке «−» и «+» иначе
@@ -361,10 +384,17 @@ input:focus-visible, textarea:focus-visible {
 .page { padding-bottom: 32px; }
 .crumbs {
   margin: 0;
-  padding: 14px var(--pad);
+  padding: 3px var(--pad);
   border-bottom: 1px solid var(--line);
 }
-.crumbs a { color: var(--dim); text-decoration: none; }
+/* «← Каталог» — единственный путь назад на странице позиции, и промах по нему
+   стоит дорого. Строка текста высотой 17 точек для пальца не цель: добавляем
+   отступы внутрь ссылки, а не вокруг неё, чтобы росла область нажатия. */
+.crumbs a {
+  display: inline-block; padding: 11px 0;
+  color: var(--dim); text-decoration: none;
+}
+.crumbs a:active { color: var(--ink); }
 
 .item-shot {
   aspect-ratio: 4 / 3;
@@ -483,6 +513,10 @@ input:focus-visible, textarea:focus-visible {
   display: grid; grid-template-columns: 1fr auto;
   align-items: center; gap: 12px; margin-bottom: 16px;
 }
+/* Нажимается тумблер и подпись рядом с ним, а не вся строка: раньше ярлык
+   занимал её целиком, и «18 лет» переключалось от тапа в пустоту. */
+.row-label { justify-self: start; }
+.switch { display: inline-flex; padding: 6px; margin: -6px; cursor: pointer; }
 
 /* Переключатель прямоугольный, как и всё остальное. */
 input[type="checkbox"] {
@@ -503,6 +537,10 @@ input[type="checkbox"]:checked::after {
 
 .hint { margin: 0 0 12px; color: var(--dim); font-size: 13px; line-height: 18px; }
 .hint--bad { color: var(--accent-text); }
+
+/* Пропущенное обязательное поле. Рамкой, а не текстом под каждым полем:
+   перечисление того, чего не хватает, и так стоит у кнопки. */
+input.is-bad, textarea.is-bad { border-color: var(--accent); }
 
 /* Поле-ловушка для роботов. Убрано с экрана, но не display:none — иначе его не
    заполнит и робот, а в этом весь смысл. */

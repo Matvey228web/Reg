@@ -905,12 +905,10 @@ const MockAPI = {
       // Шаблон акта. В демо документа нет — запоминаем выдуманный
       // идентификатор, чтобы экран настроек можно было проверить.
       case "/act/template": {
-        const staff_id = MockStore.requireToken(token);
-        const who = MockStore.findStaffById(staff_id);
-        if (!who || who.staff_id !== 1) {
-          const e = new Error("Действие доступно только главному администратору");
-          e.status = 403; throw e;
-        }
+        // Проверяем так же, как весь остальной мок: главный администратор —
+        // это ownerStaffId, а не «сотрудник №1». Раньше здесь стояла единица,
+        // и в демо шаблон не мог создать даже владелец.
+        MockStore.requireOwner(token);
         if (mockSettings.act_template_id && !body.replace) {
           const e = new Error("Шаблон уже есть"); e.status = 409; throw e;
         }
@@ -928,8 +926,9 @@ const MockAPI = {
         const lines = MockStore.orderItems.filter((i) => String(i.order_id) === String(order.order_id));
         if (!lines.length) { const e = new Error("В заказе нет ни одной позиции"); e.status = 409; throw e; }
         const unpriced = lines.filter((l) => !Number(l.total || 0)).length;
+        order.act_url = "https://docs.google.com/document/d/demo-act/edit";
         return {
-          url: "https://docs.google.com/document/d/demo-act/edit",
+          url: order.act_url,
           document_id: "demo-act", lines: lines.length,
           total: lines.reduce((s2, l) => s2 + Number(l.total || 0), 0), unpriced,
         };
@@ -1040,7 +1039,7 @@ const MockAPI = {
           currency: body.currency || "", source_url: body.source_url || "",
           status: "New", raw_text: body.raw_text || "", created_at: new Date().toISOString(),
           created_by: staff_id, created_by_name: staffRow ? staffRow.full_name : "",
-          closed_at: "",
+          closed_at: "", act_url: "",
         });
         (body.items || []).forEach((line, idx) => {
           MockStore.orderItems.push({
@@ -1050,7 +1049,14 @@ const MockAPI = {
             issued_qty: 0, note: "",
           });
         });
-        return { order_id, student_id: student ? student.student_id : "", student_created };
+        // Акт собирается сам, как на живом бэкенде: есть шаблон — есть ссылка.
+        const act_url = mockSettings.act_template_id
+          ? "https://docs.google.com/document/d/demo-act-" + order_id + "/edit" : "";
+        if (act_url) {
+          MockStore.orders[MockStore.orders.length - 1].act_url = act_url;
+        }
+        return { order_id, student_id: student ? student.student_id : "",
+                 student_created, act_url };
       }
 
       case "/orders/list": {

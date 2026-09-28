@@ -2154,5 +2154,46 @@ check('у невыданных позиций столбец пуст, а не �
 check('заказа без позиций акт не делает',
   call('/act/build', { order_id: 999 }, actAdmin).status === 404);
 
+console.log('\n== акт собирается сам ==');
+// Кнопки «собрать акт» нет: акт нужен всегда, а значит его незачем просить.
+// Проверяем, что он появляется вместе с заказом и ссылка ложится в строку.
+const madeOrder = call('/order/create', {
+  order_no: '260930-7777',
+  student_name: 'Соколов Роман Игоревич',
+  student_phone: '+79990007777',
+  project: 'курсовая',
+  issue_date: '30-09-2026',
+  return_date: '02-10-2026',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+check('заказ записан', madeOrder.ok === true, madeOrder);
+check('акт собрался сам, без отдельной просьбы',
+  /docs.google.com/.test(String(madeOrder.data.act_url)), madeOrder.data);
+const actCard = call('/order/card', { order_id: madeOrder.data.order_id }, actAdmin);
+check('ссылка на акт лежит в заказе',
+  actCard.data.order.act_url === madeOrder.data.act_url, actCard.data.order.act_url);
+const tgTexts = () => sent
+  .filter((r) => /sendMessage/.test(r.url))
+  .map((r) => JSON.parse(r.opts.payload).text);
+check('в чат ушло сообщение того же вида, что раньше',
+  tgTexts().some((m) => /^АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} .* >>> https/.test(m)),
+  tgTexts().slice(-3));
+
+// Шаблон сломали — заказ всё равно должен записаться: это договорённость со
+// студентом, а не документ.
+const broke = call('/settings/set',
+  { settings: { act_template_id: 'AAAAAAAAAAAAAAAAAAAAAA' } }, actAdmin);
+check('настройку шаблона удалось подменить', broke.ok === true, broke);
+const stillOrder = call('/order/create', {
+  order_no: '260930-7778',
+  student_name: 'Петрова Анна Сергеевна',
+  student_phone: '+79990007778',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+check('со сломанным шаблоном заказ всё равно записан', stillOrder.ok === true, stillOrder);
+check('ссылки на акт при этом нет', !stillOrder.data.act_url, stillOrder.data.act_url);
+check('и о неудаче сказано в чат',
+  tgTexts().some((m) => /не собрался/.test(m)), tgTexts().slice(-2));
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

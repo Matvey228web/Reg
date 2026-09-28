@@ -70,7 +70,14 @@ var Site = (function () {
     return !value || value.indexOf(mark.mark) !== -1;
   }
 
-  function photo(m) { return "photos/" + key(m) + ".jpg"; }
+  // Пусто, если фотографии нет. Список тех, что есть, лежит в снимке каталога
+  // (собирает site/build-catalog.js по папке site/photos): просить у сервера
+  // картинку «на всякий случай» — это 404 на каждую позицию.
+  function photo(m) {
+    var have = (catalog && catalog.photos) || [];
+    var k = key(m);
+    return have.indexOf(k) === -1 ? "" : "photos/" + k + ".jpg";
+  }
 
   // Пока фотографии нет. Картинка приходит поверх и прячет знак — см. style.css.
   function shotIcon() {

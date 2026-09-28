@@ -28,8 +28,11 @@
   function render() {
     $("item").innerHTML =
       '<div class="item-shot">' +
-        '<img src="' + esc(Site.photo(model)) + '" alt="" decoding="async"' +
-        ' onerror="this.remove()" />' + Site.shotIcon() +
+        // Нет файла — нет и запроса: иначе на каждую позицию уходит 404.
+        (Site.photo(model)
+          ? '<img src="' + esc(Site.photo(model)) + '" alt="" decoding="async"' +
+            ' onerror="this.remove()" />'
+          : "") + Site.shotIcon() +
       "</div>" +
       '<div class="item-main">' +
         // Код позиции здесь не показываем: это складское обозначение, человеку

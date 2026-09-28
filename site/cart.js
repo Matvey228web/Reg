@@ -87,6 +87,16 @@
       " похоже, приватный режим. Соберите и отправьте её за один заход.</p>";
   }
 
+  // Строка «когда»: подпись, поле и пример поверх пустого поля.
+  function whenField(cap, id, type, value, ph) {
+    return '<label class="date"><span class="cap">' + esc(cap) + "</span>" +
+      '<span class="picker">' +
+        '<input type="' + type + '" id="' + id + '" value="' + esc(value) + '"' +
+          (value ? "" : ' class="is-empty"') + " />" +
+        '<span class="ph">' + esc(ph) + "</span>" +
+      "</span></label>";
+  }
+
   function render() {
     var list = lines();
     var dates = Site.cartDates();
@@ -121,25 +131,25 @@
 
       '<div class="block">' +
         "<h2>Когда нужно</h2>" +
-        // Свои поля выбора: набирать дату руками не нужно, открывается
-        // календарь и часы. Вид поля задаёт язык браузера — зато ошибиться
-        // в нём нельзя, а это важнее.
+        // Набирать дату руками не нужно: нажатие в любое место строки
+        // открывает календарь или часы. Пустое поле показывает пример —
+        // «дд.мм.гггг» от браузера прячем, он ничего не объясняет.
         '<div class="dates">' +
-          '<label class="date"><span class="cap">Выдача</span>' +
-            '<input type="date" id="from" value="' + esc(dates.from) + '" /></label>' +
-          '<label class="date"><span class="cap">Время</span>' +
-            '<input type="time" id="from-time" value="' + esc(dates.fromTime) + '" /></label>' +
-          '<label class="date"><span class="cap">Возврат</span>' +
-            '<input type="date" id="to" value="' + esc(dates.to) + '" /></label>' +
-          '<label class="date"><span class="cap">Время</span>' +
-            '<input type="time" id="to-time" value="' + esc(dates.toTime) + '" /></label>' +
+          whenField("Выдача", "from", "date", dates.from, "05-10-2026") +
+          whenField("Время", "from-time", "time", dates.fromTime, "10:00") +
+          whenField("Возврат", "to", "date", dates.to, "12-10-2026") +
+          whenField("Время", "to-time", "time", dates.toTime, "18:00") +
         "</div>" +
       "</div>" +
 
       '<div class="block">' +
         "<h2>Кто берёт</h2>" +
-        '<label class="row"><span>Мне есть 18 лет</span>' +
-          '<input type="checkbox" id="adult" /></label>' +
+        // Раньше вся строка была ярлыком поля, и тумблер переключался от
+        // нажатия в пустое место справа от подписи. Теперь нажимается сам
+        // тумблер и слова рядом с ним, а не полоса во всю ширину.
+        '<div class="row"><span class="row-label">Мне есть 18 лет</span>' +
+          '<label class="switch"><input type="checkbox" id="adult"' +
+            ' aria-label="Мне есть 18 лет" /></label></div>' +
         '<label class="field"><span class="cap">ФИО</span>' +
           '<input type="text" id="name" autocomplete="name" /></label>' +
         '<label class="field"><span class="cap">Телефон</span>' +
@@ -220,15 +230,17 @@
     out.push("Информация о покупателе:");
 
     var adult = $("adult").checked;
-    out.push("Are_you_an_adult: " + (adult ? "Да" : "Нет"));
-    // Совершеннолетний — не minor. Разбор на складе оба написания знает с
-    // первого дня (pickField в Code.gs), а в заявке не должно быть строки,
-    // которая противоречит строке выше.
+    // Совершеннолетие — обычное дело, и писать о нём незачем: раз в заявке нет
+    // ни «Нет», ни представителя, значит человеку есть 18. Отмечаем только
+    // обратное — то, из-за чего меняется порядок выдачи. Разбор на складе
+    // (mapOrderFields в Code.gs) так и считает: нет строки и нет взрослого —
+    // заказчик совершеннолетний.
     if (adult) {
-      out.push("Full_name_adult: " + val("name"));
-      out.push("Phone_adult: " + val("phone"));
-      out.push("Telegram_adult: " + val("tg"));
+      out.push("Full_name: " + val("name"));
+      out.push("Phone: " + val("phone"));
+      out.push("Telegram: " + val("tg"));
     } else {
+      out.push("Are_you_an_adult: Нет");
       out.push("Full_name_minor: " + val("name"));
       out.push("Phone_minors: " + val("phone"));
       out.push("Telegram_Minors: " + val("tg"));
@@ -246,6 +258,21 @@
   }
 
   function val(id) { return ($(id) && $(id).value || "").trim(); }
+
+  var WHEN = ["from", "to", "from-time", "to-time"];
+
+  // Пример показываем только у пустого поля: заполненное поле рисует значение
+  // само, и два текста наложились бы друг на друга.
+  function markEmpty() {
+    WHEN.forEach(function (id) {
+      var el = $(id);
+      if (el) el.classList.toggle("is-empty", !el.value);
+    });
+  }
+
+  function clearBad(el) {
+    if (el && el.classList) el.classList.remove("is-bad");
+  }
 
   // Мастерская и комментарий едут одной строкой «Input»: в таблице под них
   // одна колонка (extra_input), и так же называлось поле в форме на Tilda —
@@ -285,8 +312,27 @@
     updatePreview();
   }
 
+  // Нажатие в строку даты или времени открывает выбор. Нативную иконку
+  // календаря видно, но целиться в неё пальцем — издевательство: строка
+  // высотой 44 точки, иконка 16. Без этого поле выглядело мёртвым.
+  //
+  // Ярлык пересылает нажатие полю, поэтому на один тап приходят два события;
+  // второй вызов закрыл бы только что открытое окно — отсекаем по времени.
+  var picked = 0;
+  function openPicker(input) {
+    var now = Date.now();
+    if (now - picked < 400) return;
+    picked = now;
+    try {
+      if (input.showPicker) { input.showPicker(); return; }
+    } catch (err) { /* без жеста браузер откажет — тогда просто фокус */ }
+    input.focus();
+  }
+
   function bind() {
     $("cart").addEventListener("click", function (e) {
+      var pick = e.target.closest(".picker");
+      if (pick) { openPicker(pick.querySelector("input")); return; }
       var btn = e.target.closest("[data-act]");
       if (!btn) return;
       var row = btn.closest(".cart-line");
@@ -305,7 +351,7 @@
         e.target.value = Site.setQty(row.dataset.key, Number(e.target.value));
       }
       if (e.target.id === "adult") updateGuardian();
-      if (["from", "to", "from-time", "to-time"].indexOf(e.target.id) !== -1) {
+      if (WHEN.indexOf(e.target.id) !== -1) {
         var from = $("from").value, to = $("to").value;
         // Перепутали местами — меняем, а не отказываем: человек имел в виду срок.
         if (from && to && to < from) {
@@ -313,8 +359,10 @@
           from = $("from").value; to = $("to").value;
         }
         Site.cartDates(from, to, $("from-time").value, $("to-time").value);
+        markEmpty();
         loadFree();
       }
+      clearBad(e.target);
       updatePreview();
     });
 
@@ -324,6 +372,7 @@
         applyMask(e.target, maskPhone);
       }
       if (e.target.id === "tg") applyMask(e.target, maskTg);
+      clearBad(e.target);
       if ((tag === "INPUT" && e.target.type !== "date") || tag === "TEXTAREA") {
         updatePreview();
       }
@@ -353,12 +402,54 @@
 
   // Отправка. Обязательное проверяем здесь же: отказ после двадцати секунд
   // ожидания — худший способ узнать, что не введён телефон.
+  // Обязательно всё, кроме комментария: заявка без времени возврата или без
+  // мастерской всё равно вернётся вопросом в чат, только через час и уже от
+  // человека. Комментарий — единственное поле «по желанию».
+  var REQUIRED = [
+    { id: "name", what: "ФИО" },
+    { id: "phone", what: "телефон" },
+    { id: "tg", what: "ник в Telegram" },
+    { id: "gname", what: "ФИО представителя", minor: true },
+    { id: "gphone", what: "телефон представителя", minor: true },
+    { id: "project", what: "проект" },
+    { id: "workshop", what: "мастерскую и курс" },
+    { id: "from", what: "дату выдачи" },
+    { id: "from-time", what: "время выдачи" },
+    { id: "to", what: "дату возврата" },
+    { id: "to-time", what: "время возврата" },
+  ];
+
+  function missing() {
+    var adult = $("adult").checked;
+    return REQUIRED.filter(function (f) {
+      if (f.minor && adult) return false;
+      return !val(f.id);
+    });
+  }
+
   function send() {
     var note = $("sendnote");
-    if (!val("name") || !val("phone")) {
-      note.textContent = "Заполните ФИО и телефон — без них склад не поймёт, кому выдавать.";
+    var gaps = missing();
+    if (gaps.length) {
+      REQUIRED.forEach(function (f) { clearBad($(f.id)); });
+      gaps.forEach(function (f) { $(f.id).classList.add("is-bad"); });
+      note.hidden = false;
+      note.textContent = gaps.length === 1
+        ? "Не хватает одного: " + gaps[0].what + "."
+        : "Не хватает: " + gaps.map(function (f) { return f.what; }).join(", ") + ".";
       note.classList.add("hint--bad");
-      ($("name").value ? $("phone") : $("name")).focus();
+      var first = $(gaps[0].id);
+      if (WHEN.indexOf(gaps[0].id) !== -1) openPicker(first); else first.focus();
+      first.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    // Номер целиком: «+7 999» разбор примет, а позвонить по нему нельзя.
+    if (val("phone").replace(/\D/g, "").length < 11) {
+      $("phone").classList.add("is-bad");
+      note.hidden = false;
+      note.classList.add("hint--bad");
+      note.textContent = "Телефон не целиком — нужны все десять цифр после +7.";
+      $("phone").focus();
       return;
     }
     if (($("trap") && $("trap").value).trim()) return;
@@ -401,12 +492,27 @@
     note.textContent = "Текст выделен — скопируйте его вручную.";
   }
 
+  // Ответ о свободном перерисовывал корзину целиком — вместе с формой. На
+  // телефоне это закрывало только что открытые часы: человек выбирал время,
+  // приходил ответ, поле рождалось заново, и окно пропадало. Теперь меняются
+  // только строчки предупреждений.
   function loadFree() {
     var dates = Site.cartDates();
     if (!dates.from && !dates.to) return;
     Site.availability(dates.from, dates.to)
-      .then(function (res) { free = res.free; render(); })
+      .then(function (res) { free = res.free; paintWarn(); })
       .catch(function () { /* остаёмся на общих количествах */ });
+  }
+
+  function paintWarn() {
+    lines().forEach(function (l) {
+      var row = document.querySelector('.cart-line[data-key="' + l.key + '"]');
+      if (!row) return;
+      var old = row.querySelector(".cart-warn");
+      if (old) old.remove();
+      var html = warnHtml(l);
+      if (html) row.insertAdjacentHTML("beforeend", html);
+    });
   }
 
   // Вернулись «назад» или правили в соседней вкладке.

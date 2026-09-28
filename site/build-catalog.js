@@ -69,20 +69,35 @@ async function ask(endpoint, payload) {
   });
   categories.sort((a, b) => a.label.localeCompare(b.label, "ru"));
 
+  // Какие фотографии есть на самом деле. Без этого списка витрина просила у
+  // сервера картинку на каждую позицию и получала 404: восемьдесят пять
+  // напрасных запросов в коридоре с плохим интернетом. Теперь <img> ставится
+  // только там, где файл действительно лежит.
+  const photosDir = path.join(__dirname, "photos");
+  const photos = fs.existsSync(photosDir)
+    ? fs.readdirSync(photosDir)
+        .filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f))
+        .map((f) => f.replace(/\.[^.]+$/, ""))
+        .sort()
+    : [];
+
   const snapshot = {
     built_at: new Date().toISOString(),
     categories,
     models,
+    photos,
   };
 
   const json = JSON.stringify(snapshot);
   if (process.argv.includes("--print")) {
     console.log(`моделей ${models.length}, категорий ${categories.length}, ` +
+                `фотографий ${photos.length}, ` +
                 `${(json.length / 1024).toFixed(1)} КБ`);
     console.log(JSON.stringify(models.slice(0, 5), null, 1));
     return;
   }
   fs.writeFileSync(OUT, json);
   console.log(`снимок собран: моделей ${models.length}, категорий ` +
-              `${categories.length}, ${(json.length / 1024).toFixed(1)} КБ`);
+              `${categories.length}, фотографий ${photos.length}, ` +
+              `${(json.length / 1024).toFixed(1)} КБ`);
 })().catch((err) => { console.error("ОШИБКА:", err.message); process.exit(1); });

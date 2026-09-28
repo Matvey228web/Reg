@@ -11,12 +11,12 @@
   // Что стоит в ячейке под названием: кнопка, пока позиции в корзине нет, и
   // счётчик, когда есть. Число видно прямо на витрине — раньше узнать его
   // можно было только на странице позиции.
-  // fresh — только что нажали «Добавить» на этой карточке: счётчик появляется
+  // fresh — только что нажали «В корзину» на этой карточке: счётчик появляется
   // с наплывом заливки. При перерисовке всей решётки анимации быть не должно,
   // иначе восемьдесят карточек мигнут разом.
   function addHtml(k, fresh) {
     var n = Site.qtyOf(k);
-    if (!n) return '<button type="button" class="add" data-act="add">Добавить</button>';
+    if (!n) return '<button type="button" class="add" data-act="add">В корзину</button>';
     return '<div class="stepper stepper--wide' + (fresh ? " is-new" : "") + '">' +
       '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
       '<span class="stepper-num">' + n + "</span>" +
@@ -38,6 +38,16 @@
       boxes[i].innerHTML = addHtml(boxes[i].dataset.add);
     }
   });
+
+  // Картинку ставим только тогда, когда файл есть: пустой src браузер грузит
+  // как саму страницу, а выдуманный — как 404 на каждую позицию. Нет файла —
+  // остаётся знак «фотографии пока нет», он и так под картинкой.
+  function photoTag(m, extra) {
+    var src = Site.photo(m);
+    if (!src) return "";
+    return '<img src="' + esc(src) + '" alt=""' + (extra || "") +
+      ' decoding="async" onerror="this.remove()" />';
+  }
 
   function render() {
     if (Site.section() === "my") return renderMy();
@@ -64,8 +74,7 @@
           return '<div class="cell">' +
             '<a class="card" href="item.html?m=' + k + '">' +
               '<div class="shot">' +
-                '<img src="' + esc(Site.photo(m)) + '" alt="" loading="lazy"' +
-                ' decoding="async" onerror="this.remove()" />' + Site.shotIcon() +
+                photoTag(m, ' loading="lazy"') + Site.shotIcon() +
               "</div>" +
               '<div class="card-body"><div class="card-name">' +
                 esc(m.model_name) + "</div></div>" +

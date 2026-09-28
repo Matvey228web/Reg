@@ -132,10 +132,12 @@ const OrderScreen = (() => {
         ${open.length ? `<button class="btn ${o.status === "Cancelled" ? "" : "btn--secondary"}" id="order-receive">Принять по заказу</button>` : ""}
       </div>
 
-      <div id="order-act-error"></div>
-      <button class="btn btn--secondary" id="order-act" style="margin-top:8px;">Собрать акт</button>
-      <p class="hint">Акт уйдёт ссылкой в чат склада. Позиции без цены встанут
-        прочерком — цены задаются на экране «Модели».</p>
+      ${o.act_url
+        ? `<button class="btn btn--secondary" id="order-act"
+                   data-url="${escapeHtml(o.act_url)}" style="margin-top:8px;">Открыть акт</button>`
+        : `<p class="hint">Акта нет. Он собирается сам при появлении заказа —
+             если его нет, значит в «Настройки → Акт сдачи-приёмки» ещё не
+             создан шаблон.</p>`}
 
       <div id="order-archive-error"></div>
       ${o.archived_at
@@ -254,7 +256,9 @@ const OrderScreen = (() => {
       });
     }
     const actBtn = document.getElementById("order-act");
-    if (actBtn) actBtn.addEventListener("click", () => buildAct(order, actBtn));
+    // Ссылку открываем наружу: документ живёт в Google Docs, внутри
+    // мини-приложения он не откроется.
+    if (actBtn) actBtn.addEventListener("click", () => TG.openLink(actBtn.dataset.url));
     document.querySelectorAll(".order-issue-line").forEach((btn) => {
       btn.addEventListener("click", () => issueLine(order, btn));
     });
@@ -330,29 +334,6 @@ const OrderScreen = (() => {
       TG.showAlert(err.message);
       btn.disabled = false;
       btn.textContent = back ? "Вернуть из архива" : "Убрать в архив";
-    }
-  }
-
-  // Сборка акта. Документ делает бэкенд: копирует шаблон, расставляет позиции
-  // по строкам и шлёт ссылку в чат склада. Здесь только кнопка и честный отчёт
-  // о том, у скольких позиций не оказалось цены.
-  async function buildAct(order, btn) {
-    btn.disabled = true;
-    btn.textContent = "Собираем…";
-    showBoxError("order-act-error", "");
-    try {
-      const res = await apiPost("/act/build", { order_id: Number(order.order_id) });
-      TG.hapticSuccess();
-      const noPrice = res.unpriced
-        ? `\nБез цены: ${res.unpriced} из ${res.lines} — в акте прочерк.`
-        : "";
-      TG.showAlert(`Акт готов, ссылка ушла в чат склада.${noPrice}`);
-      btn.textContent = "Акт готов";
-    } catch (err) {
-      TG.hapticError();
-      showBoxError("order-act-error", err.message);
-      btn.textContent = "Собрать акт";
-      btn.disabled = false;
     }
   }
 

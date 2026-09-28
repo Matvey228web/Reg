@@ -133,7 +133,10 @@ var SCHEMA = {
            "source_url", "status", "raw_text", "created_at", "created_by",
            // archived_at: заказ убран с глаз, но не из таблицы. Удалять записи
            // о договорённостях нельзя — «мало ли что», и это правильно.
-           "created_by_name", "closed_at", "archived_at"],
+           // act_url: акт сдачи-приёмки. Собирается сам при появлении заказа,
+           // ссылка уходит в чат и остаётся в строке — чтобы не собирать
+           // документ заново на каждый взгляд на заказ.
+           "created_by_name", "closed_at", "archived_at", "act_url"],
 
   // Строки состава заказа. Позиции на сайте названы моделями и идут с
   // количеством («4 x OSTERRIG SIRIUS 100CM»), а не нашими номерами, поэтому
@@ -2200,7 +2203,30 @@ function findOrCreateStudent(order) {
 
 function handleOrderCreate(payload, token) {
   var staffRow = checkAuth(token);
-  return writeOrder(payload, staffRow.staff_id, staffRow.full_name);
+  var res = writeOrder(payload, staffRow.staff_id, staffRow.full_name);
+  res.act_url = autoAct(res.order_id, staffRow.full_name);
+  return res;
+}
+
+// Акт собирается сам, как только заказ появился, и ссылка уходит в чат — так
+// это и работало до переделки. Кнопки «собрать акт» нет и не будет: акт нужен
+// всегда, а значит его незачем просить.
+//
+// Отдельно от записи заказа и после снятия замка: копия документа делается
+// секунды, и держать на это время замок — значит подвесить всех остальных.
+// Неудача акта заказ не отменяет: заказ уже записан, а про акт скажем в чат.
+function autoAct(orderId, masterName) {
+  var settings = getSettings();
+  if (!String(settings.act_template_id || "")) return "";
+  try {
+    var res = buildAct(orderId, masterName || "");
+    return res.url;
+  } catch (err) {
+    tgSend("Акт по заказу №" + orderId + " не собрался: " +
+      (err && err.message ? err.message : err) +
+      "\nЗаказ записан, акт можно собрать после исправления настроек.");
+    return "";
+  }
 }
 
 // Запись заказа. Одна на два пути: складмен вставляет сообщение руками, сайт
@@ -3155,6 +3181,8 @@ function handlePublicOrder(payload) {
   // Ссылка на приложение — из настройки: короткого имени мини-приложения код
   // знать не может, его заводят в BotFather. Не задана — говорим словами, куда
   // смотреть, а не даём ссылку в никуда.
+  var actUrl = autoAct(order.order_id, "");
+
   var appLink = String(settings.app_link || "").trim();
   tgSend("Заявка с сайта №" + parsed.order_no + "\n" +
     fields.student_name + ", " + fields.student_phone + "\n" +
@@ -3166,7 +3194,8 @@ function handlePublicOrder(payload) {
         : "") : "") +
     (appLink ? "\n" + appLink : "\nОткройте «Заказы» в приложении."));
 
-  return { order_id: order.order_id, order_no: parsed.order_no, repeat: false };
+  return { order_id: order.order_id, order_no: parsed.order_no, repeat: false,
+           act_url: actUrl };
 }
 
 // Предел на приём заявок. Считаем в кэше: он живёт час и переживает вызовы, а
@@ -3666,8 +3695,9 @@ var SETTINGS_SPEC = {
     hint: "https://t.me/ваш_бот/имя_приложения или пусто",
   },
 
-  // Шаблон акта в Google Docs и папка для готовых. Пусто — акт не собирается,
-  // и кнопка это объясняет: молча отдавать пустой документ хуже.
+  // Шаблон акта в Google Docs и папка для готовых. Пусто — акт не собирается
+  // вовсе, и карточка заказа это объясняет: молча отдавать пустой документ
+  // хуже, чем сказать, что шаблона нет.
   act_template_id: {
     def: "",
     text: true,
@@ -4338,15 +4368,21 @@ function actLines(orderId) {
 
 // Сборка акта. Шаблон копируется, подстановки заменяются, таблица позиций
 // заполняется построчно, файл получает имя «<дата> <ФИО>» — как было.
+// Ручной путь остался запаской: настройки поправили, шаблон появился — акт по
+// давнему заказу собирается этой ручкой. В приложении кнопки нет.
 function handleActBuild(payload, token) {
   var staffRow = checkAuth(token);
+  return buildAct(String(payload.order_id || ""), staffRow.full_name);
+}
+
+function buildAct(orderId, masterName) {
   var settings = getSettings();
   var templateId = String(settings.act_template_id || "");
   if (!templateId) {
-    throw apiError(409, "Шаблон акта не создан. Настройки → «Акт» → «Создать шаблон»");
+    throw apiError(409, "Шаблон акта не создан. Настройки → «Акт сдачи-приёмки» → «Создать шаблон»");
   }
 
-  var orderId = String(payload.order_id || "");
+  orderId = String(orderId || "");
   var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
   if (!order) throw apiError(404, "Заказ не найден");
 
@@ -4385,8 +4421,8 @@ function handleActBuild(payload, token) {
     "{{ПО}}": humanRuDate(order.return_date),
     "{{СУММА}}": total ? moneyDigits(total) : "—",
     "{{СУММА_СЛОВАМИ}}": total ? moneyInWords(total) : "Стоимость не указана",
-    "{{МАСТЕР}}": String(settings.act_master || staffRow.full_name || ""),
-    "{{МАСТЕР_КРАТКО}}": shortName(String(settings.act_master || staffRow.full_name || "")),
+    "{{МАСТЕР}}": String(settings.act_master || masterName || ""),
+    "{{МАСТЕР_КРАТКО}}": shortName(String(settings.act_master || masterName || "")),
     "{{ДИРЕКТОР}}": String(settings.act_director || "Директора"),
   };
   for (var key in fields) {
@@ -4395,6 +4431,10 @@ function handleActBuild(payload, token) {
 
   doc.saveAndClose();
   var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
+
+  // Ссылку держим в строке заказа: карточка показывает её без обращения к
+  // Диску, и повторная сборка не плодит документы на один заказ.
+  updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
 
   // Сообщение того же вида, что приходило раньше.
   tgSend("АКТ от " + stamp + " " + fio + " >>> " + url);
