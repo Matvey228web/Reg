@@ -274,20 +274,33 @@ input:focus-visible, textarea:focus-visible {
 }
 .add:hover { border-color: var(--accent); color: var(--accent-text); }
 
-/* Наплыв заливки в момент появления счётчика: красное проходит слева направо
-   и уходит, оставляя обычный вид. Подмену видно, а мигания нет. */
-.card-add .stepper--wide { position: relative; overflow: hidden; }
+/* Заливка наплывает слева направо и ОСТАЁТСЯ: позиция в корзине — состояние,
+   а не мигнувшее событие. Уходит только при отмене, тем же движением назад.
+   Колонки задаём здесь: базовое .stepper стоит в файле ниже и перебивало их,
+   из-за чего число стояло слева, а не по центру. */
+.card-add .stepper--wide {
+  grid-template-columns: 1fr auto 1fr;
+  position: relative; overflow: hidden;
+  border-color: var(--accent); color: #fff;
+}
+.card-add .stepper--wide button { color: #fff; }
 .card-add .stepper--wide::before {
   content: ""; position: absolute; inset: 0; z-index: 0;
-  background: var(--accent); transform: scaleX(0); transform-origin: left;
-  opacity: 0;
+  background: var(--accent); transform: scaleX(1); transform-origin: left;
 }
 .card-add .stepper--wide > * { position: relative; z-index: 1; }
-.card-add .stepper--wide.is-new::before { animation: add-sweep .34s ease-out forwards; }
+
+/* Полсекунды и с оттяжкой на конце: движение должно читаться как «легло», а
+   не как мигание. Уход — быстрее: отмену не смакуют. */
+.card-add .stepper--wide.is-new::before {
+  animation: add-sweep .52s cubic-bezier(.16, .84, .24, 1) both;
+}
+.card-add .stepper--wide.is-off::before {
+  animation: add-sweep .26s cubic-bezier(.4, 0, 1, 1) reverse both;
+}
 @keyframes add-sweep {
-  0% { transform: scaleX(0); opacity: .9; }
-  55% { transform: scaleX(1); opacity: .9; }
-  100% { transform: scaleX(1); opacity: 0; }
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
 }
 
 /* Во всю ширину, но не шире разумного: на широкой карточке «−» и «+» иначе
@@ -330,6 +343,18 @@ input:focus-visible, textarea:focus-visible {
 .card-free.none { color: var(--accent-text); }
 
 .empty { padding: 48px var(--pad); color: var(--dim); text-align: center; }
+
+/* Отклик на смену раздела или категории: содержимое заходит, а не
+   подменяется молча. Коротко — это подтверждение нажатия, а не представление. */
+#groups.swap { animation: group-swap .22s ease-out both; }
+@keyframes group-swap {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Нажатие на строку каталога отзывается сразу, до перерисовки: палец ушёл —
+   отклик уже был, и ждать ответа от разметки не приходится. */
+.catalog-item:active:not([disabled]) { background: var(--accent); color: #fff; }
 
 /* --- Страница позиции --- */
 

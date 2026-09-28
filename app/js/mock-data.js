@@ -882,26 +882,24 @@ const MockAPI = {
         return { order_id: order.order_id, line_no: line.line_no, issued, left: left - want };
       }
 
-      // Удаление заказа. Пока по нему ничего не выдано.
-      case "/order/delete": {
+      // Архив заказа. Не удаление: запись о договорённости остаётся целой.
+      case "/order/archive": {
         MockStore.requireAdmin(token);
-        const idx = MockStore.orders.findIndex((o) => String(o.order_id) === String(body.order_id));
-        if (idx === -1) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
-        const order = MockStore.orders[idx];
-        const used = MockStore.transactions.filter((t) => String(t.order_id) === String(order.order_id));
-        if (used.length) {
-          const e = new Error("По этому заказу уже есть выдачи — удалять нельзя");
+        const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
+        if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        if (body.back) {
+          order.archived_at = "";
+          return { order_id: order.order_id, archived_at: "" };
+        }
+        const open = MockStore.transactions.filter(
+          (t) => String(t.order_id) === String(order.order_id) && t.status === "Open");
+        if (open.length) {
+          const e = new Error("По этому заказу " + open.length +
+            " ед. на руках — сначала примите их обратно");
           e.status = 409; throw e;
         }
-        let lines = 0;
-        for (let i = MockStore.orderItems.length - 1; i >= 0; i--) {
-          if (String(MockStore.orderItems[i].order_id) === String(order.order_id)) {
-            MockStore.orderItems.splice(i, 1);
-            lines += 1;
-          }
-        }
-        MockStore.orders.splice(idx, 1);
-        return { order_id: order.order_id, lines };
+        order.archived_at = new Date().toISOString();
+        return { order_id: order.order_id, archived_at: order.archived_at };
       }
 
       // Шаблон акта. В демо документа нет — запоминаем выдуманный
@@ -1065,8 +1063,11 @@ const MockAPI = {
             .filter((i) => String(i.order_id) === String(o.order_id))
             .map((i) => i.raw_name).join(", ");
           return { ...rest, status: mockOrderStatus(o, open, txs.length),
-                   issued_open: open, issued_total: txs.length, items_text: itemsText };
-        });
+                   issued_open: open, issued_total: txs.length, items_text: itemsText,
+                   archived_at: o.archived_at || "" };
+        })
+        // Архив по умолчанию не показываем — как и настоящий бэкенд.
+        .filter((o) => (body.archived ? !!o.archived_at : !o.archived_at));
       }
 
       case "/order/card": {

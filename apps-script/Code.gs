@@ -131,7 +131,9 @@ var SCHEMA = {
            "project", "issue_date", "issue_time", "return_date", "return_time",
            "extra_input", "amount", "currency",
            "source_url", "status", "raw_text", "created_at", "created_by",
-           "created_by_name", "closed_at"],
+           // archived_at: заказ убран с глаз, но не из таблицы. Удалять записи
+           // о договорённостях нельзя — «мало ли что», и это правильно.
+           "created_by_name", "closed_at", "archived_at"],
 
   // Строки состава заказа. Позиции на сайте названы моделями и идут с
   // количеством («4 x OSTERRIG SIRIUS 100CM»), а не нашими номерами, поэтому
@@ -983,7 +985,7 @@ function doPost(e) {
       case "/order/update": data = handleOrderUpdate(payload, token); break;
       case "/order/line-update": data = handleOrderLineUpdate(payload, token); break;
       case "/order/issue": data = handleOrderIssue(payload, token); break;
-      case "/order/delete": data = handleOrderDelete(payload, token); break;
+      case "/order/archive": data = handleOrderArchive(payload, token); break;
       case "/students/list": data = handleStudentsList(payload, token); break;
       case "/student/history": data = handleStudentHistory(payload, token); break;
       // Ниже — предыдущая модель «клиент/проект». Осталась ради старых строк
@@ -2342,9 +2344,16 @@ function handleOrdersList(payload, token) {
       created_at: r.created_at,
       created_by_name: r.created_by_name || "",
       items_text: itemsText[String(r.order_id)] || "",
+      archived_at: String(r.archived_at || ""),
       // raw_text в список не отдаём: это всё сообщение целиком, включая даты
       // рождения. Оно нужно только в карточке одного заказа.
     };
+  });
+
+  // Архив по умолчанию не показываем, но и не прячем навсегда: отдельным
+  // запросом он открывается целиком.
+  rows = rows.filter(function (r) {
+    return payload.archived ? !!r.archived_at : !r.archived_at;
   });
 
   if (payload.status && payload.status !== "all") {
@@ -4542,37 +4551,39 @@ function handleOrderIssue(payload, token) {
   return { order_id: Number(orderId), line_no: lineNo, issued: issued, left: rest };
 }
 
-// Удаление заказа. Заказ — это запись о договорённости, и пока по нему ничего
-// не выдано, лишняя строка только мешает (проверки связи, дубли, опечатки).
-// Как только выдача прошла, удалять нельзя: пропадёт след того, у кого вещь.
-function handleOrderDelete(payload, token) {
+// Архив заказа. Не удаление: заказ — запись о договорённости, и стирать её
+// нельзя даже когда она явно лишняя (проверка связи, дубль, опечатка).
+// Мало ли что: через полгода понадобится показать, что именно было.
+//
+// Возврат из архива — тем же эндпоинтом с back: true.
+function handleOrderArchive(payload, token) {
   requireAdmin(token);
   var orderId = String(payload.order_id || "");
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
     var sheet = getSheet(SHEETS.ORDERS);
+    ensureColumns(sheet, ["archived_at"]);
     var order = findRowByValue(sheet, "order_id", orderId);
     if (!order) throw apiError(404, "Заказ не найден");
 
-    var txRows = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(function (t) {
-      return String(t.order_id || "") === orderId;
-    });
-    if (txRows.length) {
-      throw apiError(409, "По этому заказу уже есть выдачи — удалять нельзя, " +
-        "иначе пропадёт след того, у кого вещь. Такой заказ отменяют, а не удаляют");
+    if (payload.back) {
+      updateRow(sheet, order.__row, { archived_at: "" });
+      return { order_id: Number(orderId), archived_at: "" };
     }
 
-    // Строки состава удаляем снизу вверх: иначе после первого же удаления
-    // остальные номера строк съезжают.
-    var itemSheet = getSheet(SHEETS.ORDER_ITEMS);
-    var rows = readRows(itemSheet).filter(function (r) {
-      return String(r.order_id) === orderId;
-    }).sort(function (a, b) { return b.__row - a.__row; });
-    rows.forEach(function (r) { itemSheet.deleteRow(r.__row); });
+    // Вещь на руках — заказ убирать с глаз нельзя: по нему ещё ждут возврата.
+    var open = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(function (t) {
+      return String(t.order_id || "") === orderId && t.status === "Open";
+    });
+    if (open.length) {
+      throw apiError(409, "По этому заказу " + open.length +
+        " ед. на руках — сначала примите их обратно");
+    }
 
-    sheet.deleteRow(order.__row);
-    return { order_id: Number(orderId), lines: rows.length };
+    var now = new Date().toISOString();
+    updateRow(sheet, order.__row, { archived_at: now });
+    return { order_id: Number(orderId), archived_at: now };
   } finally {
     lock.releaseLock();
   }

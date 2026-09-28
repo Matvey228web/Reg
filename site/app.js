@@ -79,8 +79,7 @@
     $("groups").innerHTML = html;
     $("empty").hidden = shown.length > 0;
     $("controls").hidden = false;
-    $("status").textContent = shown.length + " " +
-      Site.plural(shown.length, "позиция", "позиции", "позиций");
+    $("status").textContent = "";
   }
 
   // Свои вещи студентов. Механики нет — и раздел не делает вида, что есть.
@@ -90,6 +89,15 @@
     $("empty").hidden = true;
     $("groups").className = "soonwrap";
     $("groups").innerHTML = '<p class="soon">soon…</p>';
+  }
+
+  // Короткий заход содержимого. Перезапуск честный: класс снимаем и ставим
+  // заново, иначе при быстрых нажатиях анимация проигрывается только раз.
+  function flashGroups() {
+    var box = $("groups");
+    box.classList.remove("swap");
+    void box.offsetWidth;
+    box.classList.add("swap");
   }
 
   function renderSections() {
@@ -135,6 +143,7 @@
       renderSections();
       renderCatalog();
       render();
+      flashGroups();
     });
 
     $("catalog-list").addEventListener("click", function (e) {
@@ -144,6 +153,9 @@
       $("catalog").open = false;
       renderCatalog();
       render();
+      // Отклик на выбор: решётка не подменяется молча, а выезжает. Без этого
+      // после нажатия непонятно, случилось ли что-нибудь вообще.
+      flashGroups();
     });
 
     $("search").addEventListener("input", function (e) {
@@ -159,10 +171,23 @@
       var box = btn.closest("[data-add]");
       if (!box) return;
       var k = box.dataset.add;
-      var first = btn.dataset.act === "add";
-      if (btn.dataset.act === "minus") Site.addToCart(k, -1);
+      var act = btn.dataset.act;
+      var was = Site.qtyOf(k);
+      if (act === "minus") Site.addToCart(k, -1);
       else Site.addToCart(k, 1);
-      paintAdd(k, first);
+
+      // Уход заливки надо показать, а не проглотить: даём анимации отыграть и
+      // только потом ставим на место кнопку.
+      if (act === "minus" && was === 1) {
+        var stepper = box.querySelector(".stepper--wide");
+        if (stepper) {
+          stepper.classList.remove("is-new");
+          stepper.classList.add("is-off");
+          setTimeout(function () { paintAdd(k, false); }, 260);
+          return;
+        }
+      }
+      paintAdd(k, act === "add");
     });
   }
 

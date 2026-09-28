@@ -137,13 +137,16 @@ const OrderScreen = (() => {
       <p class="hint">Акт уйдёт ссылкой в чат склада. Позиции без цены встанут
         прочерком — цены задаются на экране «Модели».</p>
 
-      ${data.transactions.length ? "" : `
-        <div id="order-delete-error"></div>
-        <button class="btn btn--secondary btn--danger" id="order-delete"
-                style="margin-top:8px;">Удалить заказ</button>
-        <p class="hint">Пока по заказу ничего не выдано, его можно удалить —
-          проверки связи и дубли висеть не должны. После первой выдачи удалить
-          нельзя: пропадёт след того, у кого вещь.</p>`}
+      <div id="order-archive-error"></div>
+      ${o.archived_at
+        ? `<button class="btn btn--secondary" id="order-archive"
+                   data-back="1" style="margin-top:8px;">Вернуть из архива</button>
+           <p class="hint">Заказ в архиве: в общем списке его не видно,
+             но он цел — состав, даты, исходный текст.</p>`
+        : `<button class="btn btn--secondary" id="order-archive"
+                   style="margin-top:8px;">Убрать в архив</button>
+           <p class="hint">Архив прячет заказ из списка, но ничего не стирает —
+             мало ли что. Пока по заказу есть вещи на руках, убрать нельзя.</p>`}
 
       <div class="section">
         <div class="section-title">Арендатор</div>
@@ -255,8 +258,8 @@ const OrderScreen = (() => {
     document.querySelectorAll(".order-issue-line").forEach((btn) => {
       btn.addEventListener("click", () => issueLine(order, btn));
     });
-    const delBtn = document.getElementById("order-delete");
-    if (delBtn) delBtn.addEventListener("click", () => removeOrder(order, delBtn));
+    const arcBtn = document.getElementById("order-archive");
+    if (arcBtn) arcBtn.addEventListener("click", () => archiveOrder(order, arcBtn));
     document.querySelectorAll(".order-line-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         Router.navigate("scan", { itemId: btn.dataset.item, mode: "checkin" });
@@ -297,24 +300,36 @@ const OrderScreen = (() => {
     }
   }
 
-  // Удаление заказа. Только пока по нему ничего не выдано — это бэкенд и
-  // проверяет. Спрашиваем дважды: строка уходит вместе с составом.
-  async function removeOrder(order, btn) {
-    const go = await new Promise((resolve) => TG.showConfirm(
-      `Удалить заказ №${order.order_no}? Строка и весь состав исчезнут.`, resolve));
-    if (!go) return;
+  // Архив, а не удаление: запись о договорённости не стирают. Возврат из
+  // архива — та же кнопка, тем же запросом.
+  async function archiveOrder(order, btn) {
+    const back = btn.dataset.back === "1";
+    if (!back) {
+      const go = await new Promise((resolve) => TG.showConfirm(
+        `Убрать заказ №${order.order_no} в архив? Из списка исчезнет, ` +
+        "но сохранится целиком.", resolve));
+      if (!go) return;
+    }
     btn.disabled = true;
-    btn.textContent = "Удаляем…";
+    btn.textContent = back ? "Возвращаем…" : "Убираем…";
     try {
-      await apiPost("/order/delete", { order_id: Number(order.order_id) });
+      await apiPost("/order/archive", { order_id: Number(order.order_id), back });
+      // Список заказов держится в кэше: без сброса убранный заказ остаётся на
+      // экране, и человек жмёт «в архив» второй раз, думая, что не сработало.
+      Cache.clear("orders");
       TG.hapticSuccess();
-      TG.showAlert("Заказ удалён");
-      Router.navigate("orders");
+      if (back) {
+        TG.showAlert("Заказ вернулся в список");
+        await load({ force: true });
+      } else {
+        TG.showAlert("Заказ в архиве");
+        Router.navigate("orders");
+      }
     } catch (err) {
       TG.hapticError();
       TG.showAlert(err.message);
       btn.disabled = false;
-      btn.textContent = "Удалить заказ";
+      btn.textContent = back ? "Вернуть из архива" : "Убрать в архив";
     }
   }
 

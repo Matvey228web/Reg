@@ -2018,33 +2018,43 @@ check('несопоставленную строку выдать нельзя',
 check('несуществующую строку тоже',
   call('/order/issue', { order_id: issOrder, line_no: 99 }, issAdmin).status === 404);
 
-console.log('\n== удаление заказа ==');
-check('заказ с выдачами удалить нельзя',
-  call('/order/delete', { order_id: issOrder }, issAdmin).status === 409,
-  call('/order/delete', { order_id: issOrder }, issAdmin));
+console.log('\n== архив заказа ==');
+check('заказ с вещью на руках в архив не уходит',
+  call('/order/archive', { order_id: issOrder }, issAdmin).status === 409,
+  call('/order/archive', { order_id: issOrder }, issAdmin));
 
 let empty = call('/order/create', {
-  order_no: 'DELETE-ME', student_name: 'Проверка Связи', student_phone: '+79000000000',
+  order_no: 'ARCHIVE-ME', student_name: 'Проверка Связи', student_phone: '+79000000000',
   items: [{ line_no: 1, raw_name: 'Что-то', qty: 1 }],
 }, issAdmin);
 const emptyId = empty.data.order_id;
-const beforeDel = call('/orders/list', {}, issAdmin).data.length;
-let del = call('/order/delete', { order_id: emptyId }, issAdmin);
-check('заказ без выдач удалён', del.ok === true && del.data.lines === 1, del);
-check('в списке его больше нет',
-  call('/orders/list', {}, issAdmin).data.length === beforeDel - 1);
-check('состав удалён вместе с ним',
-  call('/order/card', { order_id: emptyId }, issAdmin).status === 404);
-// Своя учётка: у заведённых выше к этому месту уже меняли PIN и ловили
-// блокировку, и войти ими нельзя.
-call('/staff/create', { full_name: 'Складмен Удалений', login: 'delcheck',
+const beforeArc = call('/orders/list', {}, issAdmin).data.length;
+let arc = call('/order/archive', { order_id: emptyId }, issAdmin);
+check('заказ без выдач убран в архив', arc.ok === true && !!arc.data.archived_at, arc);
+check('из обычного списка пропал',
+  call('/orders/list', {}, issAdmin).data.length === beforeArc - 1);
+check('но в архиве он есть',
+  call('/orders/list', { archived: true }, issAdmin).data
+    .some((o) => String(o.order_id) === String(emptyId)));
+// Самое важное: ничего не потеряно.
+const arcCard = call('/order/card', { order_id: emptyId }, issAdmin);
+check('карточка открывается, состав цел',
+  arcCard.ok === true && arcCard.data.items.length === 1, arcCard.ok && arcCard.data.items);
+check('видно, что заказ в архиве', !!arcCard.data.order.archived_at,
+  arcCard.data.order.archived_at);
+
+let back = call('/order/archive', { order_id: emptyId, back: true }, issAdmin);
+check('из архива возвращается', back.ok === true && back.data.archived_at === '', back);
+check('и снова в обычном списке',
+  call('/orders/list', {}, issAdmin).data.length === beforeArc);
+
+call('/staff/create', { full_name: 'Складмен Архива', login: 'arccheck',
                         pin: '5566', role: 'Warehouse Staff' }, issAdmin);
-const delStaff = call('/auth/login', { login: 'delcheck', pin: '5566' });
-check('учётка сотрудника склада заведена', delStaff.ok === true, delStaff);
-check('сотруднику склада удаление запрещено',
-  call('/order/delete', { order_id: issOrder }, delStaff.data.token).status === 403);
+const arcStaff = call('/auth/login', { login: 'arccheck', pin: '5566' });
+check('сотруднику склада архив запрещён',
+  call('/order/archive', { order_id: emptyId }, arcStaff.data.token).status === 403);
 check('а выдавать без скана он может',
-  call('/order/issue', { order_id: issOrder, line_no: 1 }, delStaff.data.token).status === 409);
+  call('/order/issue', { order_id: issOrder, line_no: 1 }, arcStaff.data.token).status === 409);
 
 console.log('\n== акт: сумма прописью ==');
 check('ноль словами', numberInWords(0) === 'ноль');
