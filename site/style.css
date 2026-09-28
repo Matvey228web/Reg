@@ -112,6 +112,10 @@ a { color: inherit; }
 
 /* --- Управление --- */
 
+/* display: grid перебивает браузерное [hidden] { display: none }, и блок
+   остаётся на экране. Поэтому прячем явно. */
+.controls[hidden] { display: none; }
+
 .controls {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -471,13 +475,15 @@ footer a { color: var(--dim); }
 
 /* --- Раздел, которого ещё нет --- */
 
-.soon { padding: 40px var(--pad) 56px; max-width: 46ch; }
-.soon h2 {
-  margin: 0 0 16px;
-  font-size: clamp(26px, 6vw, 40px);
-  line-height: 1.05;
+.soon {
+  margin: 0;
+  padding: 18vh var(--pad);
+  text-align: center;
+  font-size: clamp(64px, 20vw, 180px);
+  line-height: 1;
   font-weight: 800;
-  letter-spacing: -.02em;
-  text-transform: uppercase;
+  letter-spacing: -.04em;
+  color: var(--dim);
+  opacity: .45;
+  user-select: none;
 }
-.soon p { margin: 0 0 12px; color: var(--dim); }
