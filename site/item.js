@@ -32,13 +32,10 @@
         ' onerror="this.remove()" />' + Site.shotIcon() +
       "</div>" +
       '<div class="item-main">' +
+        // Код позиции здесь не показываем: это складское обозначение, человеку
+        // на витрине оно ничего не говорит. В адресе страницы он остаётся.
+        '<p class="cap item-cat">' + esc(model.category_label) + "</p>" +
         "<h1>" + esc(model.model_name) + "</h1>" +
-        '<div class="specs">' +
-          '<div class="spec"><span class="cap">Категория</span><b>' +
-            esc(model.category_label) + "</b></div>" +
-          '<div class="spec"><span class="cap">Код позиции</span><b>' +
-            esc(Site.key(model)) + "</b></div>" +
-        "</div>" +
         '<div class="item-add">' +
           '<div class="stepper">' +
             '<button type="button" id="minus" aria-label="Меньше">−</button>' +

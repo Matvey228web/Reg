@@ -303,17 +303,7 @@ input:focus-visible, textarea:focus-visible {
   text-transform: uppercase;
 }
 
-/* Свойства строками по линиям: так же, как в накладной. */
-.specs { border-top: 1px solid var(--line); margin-bottom: 20px; }
-.spec {
-  display: flex; justify-content: space-between; gap: 16px;
-  padding: 11px 0;
-  border-bottom: 1px solid var(--line);
-  font-variant-numeric: tabular-nums;
-}
-.spec b { font-weight: 700; }
-.spec.none { color: var(--accent-text); }
-
+.item-cat { margin: 0 0 8px; }
 .item-add { display: flex; gap: 10px; align-items: stretch; }
 .item-note { margin: 14px 0 0; color: var(--dim); font-size: 13px; }
 .item-note a { color: var(--accent-text); }
@@ -451,7 +441,7 @@ footer a { color: var(--dim); }
   .searchbar { grid-column: 2; }
   .chips { grid-column: 1 / -1; }
   .item-shot { aspect-ratio: 16 / 9; }
-  .item-main, .specs { max-width: 640px; }
+  .item-main { max-width: 640px; }
   .item-add .btn { flex: 0 0 auto; }
 }
 
