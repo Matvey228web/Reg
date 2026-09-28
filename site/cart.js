@@ -32,14 +32,24 @@
       : "На эти даты всё забронировано. Выберите другие или уберите позицию.") + "</p>";
   }
 
+  // Браузер запретил запись — заявка не переживёт переход между страницами.
+  function storageWarnHtml() {
+    return '<p class="hint hint--bad" id="nostore">Браузер не сохраняет заявку —' +
+      " похоже, приватный режим. Соберите и отправьте её за один заход.</p>";
+  }
+
   function render() {
     var list = lines();
     var dates = Site.cartDates();
     var keep = snapshot();
 
     if (!list.length) {
+      // Пустая заявка после набранного на витрине — это не «ничего не выбрал»,
+      // а запрет хранилища. Молчать об этом хуже всего: человек уверен, что
+      // выбирал, и не понимает, куда всё делось.
       $("cart").innerHTML = '<p class="empty">Заявка пуста. ' +
-        '<a href="index.html">Выбрать оборудование</a></p>';
+        '<a href="index.html">Выбрать оборудование</a></p>' +
+        (Site.storageOk() ? "" : storageWarnHtml());
       return;
     }
 
@@ -108,6 +118,7 @@
         "</div>" +
         '<p class="hint" id="sendnote">Ответ идёт до 20 секунд — столько думает' +
         " склад. Не получилось — скопируйте заявку и отправьте любым способом.</p>" +
+        (Site.storageOk() ? "" : storageWarnHtml()) +
         '<p class="hint" id="copied" hidden>Заявка скопирована.</p>' +
         "<pre id=\"preview\" class=\"preview\"></pre>" +
       "</div>";

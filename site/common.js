@@ -140,8 +140,18 @@ var Site = (function () {
   }
 
   // --- Корзина ---
-  // В браузере: сервера для черновиков нет. Приватный режим может запретить
-  // запись — тогда сайт работает без памяти, а не падает.
+  // Сервера для черновиков нет, поэтому заявка живёт в браузере. Приватный
+  // режим и запрет хранилища возможны — тогда сайт работает в пределах одной
+  // страницы и честно об этом говорит, а не притворяется, что сохранил.
+  //
+  // Кук здесь нет намеренно. Safari стирает script-writable хранилище после
+  // семи дней без захода на сайт, и кука из JavaScript попадает под то же
+  // правило — при этом она вмещает 4 КБ и едет с каждым запросом. Пережить это
+  // может только кука от сервера, а сервера у статики нет. Подробности в
+  // README.
+
+  var memCart = null;      // копия в памяти: на ней страница работает всегда
+  var stored = null;       // прижилась ли запись; null — ещё не проверяли
 
   function readCart() {
     try {
@@ -149,20 +159,52 @@ var Site = (function () {
       var data = raw ? JSON.parse(raw) : null;
       if (!data || typeof data !== "object") throw 0;
       if (!Array.isArray(data.lines)) data.lines = [];
+      memCart = data;
       return data;
     } catch (e) {
-      return { lines: [], from: "", to: "" };
+      // Хранилище не отдало ничего — работаем по памяти, если она есть.
+      return memCart || { lines: [], from: "", to: "" };
     }
   }
 
   function writeCart(cart) {
-    try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch (e) { /* без памяти */ }
+    memCart = cart;
+    var text = JSON.stringify(cart);
+    try {
+      localStorage.setItem(CART_KEY, text);
+      // Записалось — не значит сохранилось: в приватном режиме запись молча
+      // не доживает до чтения.
+      stored = localStorage.getItem(CART_KEY) === text;
+    } catch (e) {
+      stored = false;
+    }
     paintCount();
     return cart;
   }
 
+  // Записывать ради проверки нечего, поэтому пробуем отдельным ключом: на
+  // странице заявки к этому моменту может не быть ни одной записи, а сказать
+  // правду о памяти нужно до того, как человек всё наберёт.
+  function storageOk() {
+    if (stored === null) {
+      try {
+        localStorage.setItem(CART_KEY + "_probe", "1");
+        stored = localStorage.getItem(CART_KEY + "_probe") === "1";
+        localStorage.removeItem(CART_KEY + "_probe");
+      } catch (e) {
+        stored = false;
+      }
+    }
+    return stored;
+  }
+
   function cartCount() {
     return readCart().lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
+  }
+
+  function qtyOf(modelKey) {
+    var line = readCart().lines.filter(function (l) { return l.key === modelKey; })[0];
+    return line ? line.qty : 0;
   }
 
   // Потолка нет: сколько свободно — вопрос дат, а о брони предупреждает
@@ -220,6 +262,7 @@ var Site = (function () {
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability, sendOrder: sendOrder,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
+    qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
     paintCount: paintCount,
   };

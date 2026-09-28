@@ -8,6 +8,26 @@
   var category = "all";
   var query = "";
 
+  // Что стоит в ячейке под названием: кнопка, пока позиции в заявке нет, и
+  // счётчик, когда есть. Число видно прямо на витрине — раньше узнать его
+  // можно было только на странице позиции.
+  function addHtml(k) {
+    var n = Site.qtyOf(k);
+    if (!n) return '<button type="button" class="add" data-act="add">Добавить</button>';
+    return '<div class="stepper stepper--wide">' +
+      '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
+      '<span class="stepper-num">' + n + "</span>" +
+      '<button type="button" data-act="plus" aria-label="Больше">+</button>' +
+    "</div>";
+  }
+
+  // Перерисовываем одну ячейку, а не решётку: иначе на каждом нажатии теряется
+  // место прокрутки.
+  function paintAdd(k) {
+    var box = document.querySelector('[data-add="' + k + '"]');
+    if (box) box.innerHTML = addHtml(k);
+  }
+
   function render() {
     if (Site.section() === "my") return renderMy();
 
@@ -27,13 +47,20 @@
       if (!list || !list.length) return;
       html += '<h2 class="group-title">' + esc(c.label) + "</h2>" +
         '<div class="grid">' + list.map(function (m) {
-          return '<a class="card" href="item.html?m=' + esc(Site.key(m)) + '">' +
-            '<div class="shot">' +
-              '<img src="' + esc(Site.photo(m)) + '" alt="" loading="lazy"' +
-              ' decoding="async" onerror="this.remove()" />' + Site.shotIcon() +
-            "</div>" +
-            '<div class="card-body"><div class="card-name">' +
-              esc(m.model_name) + "</div></div></a>";
+          var k = esc(Site.key(m));
+          // Кнопки — рядом со ссылкой, а не внутри: кнопка внутри ссылки это
+          // сломанная разметка и случайные переходы вместо нажатия.
+          return '<div class="cell">' +
+            '<a class="card" href="item.html?m=' + k + '">' +
+              '<div class="shot">' +
+                '<img src="' + esc(Site.photo(m)) + '" alt="" loading="lazy"' +
+                ' decoding="async" onerror="this.remove()" />' + Site.shotIcon() +
+              "</div>" +
+              '<div class="card-body"><div class="card-name">' +
+                esc(m.model_name) + "</div></div>" +
+            "</a>" +
+            '<div class="card-add" data-add="' + k + '">' + addHtml(k) + "</div>" +
+          "</div>";
         }).join("") + "</div>";
     });
 
@@ -111,6 +138,19 @@
     $("search").addEventListener("input", function (e) {
       query = e.target.value.trim().toLowerCase();
       render();
+    });
+
+    // Один слушатель на всю решётку: карточек под сотню, и вешать по три
+    // обработчика на каждую незачем.
+    $("groups").addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-act]");
+      if (!btn) return;
+      var box = btn.closest("[data-add]");
+      if (!box) return;
+      var k = box.dataset.add;
+      if (btn.dataset.act === "minus") Site.addToCart(k, -1);
+      else Site.addToCart(k, 1);
+      paintAdd(k);
     });
   }
 
