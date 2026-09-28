@@ -132,6 +132,11 @@ const OrderScreen = (() => {
         ${open.length ? `<button class="btn ${o.status === "Cancelled" ? "" : "btn--secondary"}" id="order-receive">Принять по заказу</button>` : ""}
       </div>
 
+      <div id="order-act-error"></div>
+      <button class="btn btn--secondary" id="order-act" style="margin-top:8px;">Собрать акт</button>
+      <p class="hint">Акт уйдёт ссылкой в чат склада. Позиции без цены встанут
+        прочерком — цены задаются на экране «Модели».</p>
+
       <div class="section">
         <div class="section-title">Арендатор</div>
         <div class="card-sub">${escapeHtml(o.student_name || "—")}</div>
@@ -231,6 +236,8 @@ const OrderScreen = (() => {
         render(card);
       });
     }
+    const actBtn = document.getElementById("order-act");
+    if (actBtn) actBtn.addEventListener("click", () => buildAct(order, actBtn));
     document.querySelectorAll(".order-line-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         Router.navigate("scan", { itemId: btn.dataset.item, mode: "checkin" });
@@ -238,6 +245,29 @@ const OrderScreen = (() => {
     });
     const allBtn = document.getElementById("order-checkin-all");
     if (allBtn) allBtn.addEventListener("click", () => checkinAll(open));
+  }
+
+  // Сборка акта. Документ делает бэкенд: копирует шаблон, расставляет позиции
+  // по строкам и шлёт ссылку в чат склада. Здесь только кнопка и честный отчёт
+  // о том, у скольких позиций не оказалось цены.
+  async function buildAct(order, btn) {
+    btn.disabled = true;
+    btn.textContent = "Собираем…";
+    showBoxError("order-act-error", "");
+    try {
+      const res = await apiPost("/act/build", { order_id: Number(order.order_id) });
+      TG.hapticSuccess();
+      const noPrice = res.unpriced
+        ? `\nБез цены: ${res.unpriced} из ${res.lines} — в акте прочерк.`
+        : "";
+      TG.showAlert(`Акт готов, ссылка ушла в чат склада.${noPrice}`);
+      btn.textContent = "Акт готов";
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("order-act-error", err.message);
+      btn.textContent = "Собрать акт";
+      btn.disabled = false;
+    }
   }
 
   // Приём всего заказа. Запросов столько же, сколько позиций: каждый приём

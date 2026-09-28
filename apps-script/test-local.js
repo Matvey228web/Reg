@@ -189,6 +189,93 @@ global.CacheService = {
   }),
 };
 global.__cacheStore = cacheStore;
+
+// Google Docs и Диск. Заглушки простые, но не пустые: они хранят строки и
+// таблицы, потому что проверять надо именно раскладку позиций по ячейкам —
+// ровно то, что в старом акте не было сделано.
+function makeDocBody() {
+  const body = {
+    items: [],           // абзацы и таблицы по порядку
+    clear() { body.items.length = 0; return body; },
+    appendParagraph(text) {
+      const p = { kind: 'p', text: String(text),
+        setHeading() { return p; }, setAlignment() { return p; },
+        setItalic() { return p; }, setBold() { return p; },
+        setGlyphType() { return p; },
+        setText(v) { p.text = String(v); return p; },
+        asParagraph() { return p; }, getChild() { return p; },
+        editAsText() { return p; } };
+      body.items.push(p);
+      return p;
+    },
+    appendListItem(text) { return body.appendParagraph(text); },
+    appendPageBreak() { return body.appendParagraph('\f'); },
+    appendTable(rows) {
+      const grid = (rows || []).map((r) => r.slice());
+      const table = {
+        kind: 't', grid,
+        getText: () => grid.map((r) => r.join(' ')).join('\n'),
+        getNumRows: () => grid.length,
+        getRow: (i) => ({
+          getText: () => grid[i].join(' '),
+          getCell: (j) => ({
+            setText: (v) => { grid[i][j] = String(v); },
+            getChild: () => ({ asParagraph: () => ({ setAlignment() {} }) }),
+          }),
+          editAsText: () => ({ setBold() {} }),
+          appendTableCell: (v) => { grid[i].push(String(v)); return table.getRow(i); },
+          getParentRow: () => table.getRow(i),
+        }),
+        appendTableRow() {
+          grid.push([]);
+          const idx = grid.length - 1;
+          const row = {
+            appendTableCell: (v) => { grid[idx].push(String(v)); return row; },
+            getParentRow: () => row,
+            editAsText: () => ({ setBold() {} }),
+          };
+          return row;
+        },
+        removeRow(i) { grid.splice(i, 1); },
+      };
+      body.items.push(table);
+      return table;
+    },
+    getTables: () => body.items.filter((i) => i.kind === 't'),
+    replaceText(pattern, value) {
+      const re = new RegExp(pattern, 'g');
+      body.items.forEach((i) => {
+        if (i.kind === 'p') i.text = i.text.replace(re, value);
+        else i.grid.forEach((row) => {
+          for (let j = 0; j < row.length; j++) row[j] = String(row[j]).replace(re, value);
+        });
+      });
+      return body;
+    },
+    getText: () => body.items.map((i) => (i.kind === 'p' ? i.text : i.getText())).join('\n'),
+  };
+  return body;
+}
+
+const docs = new Map();
+global.DocumentApp = {
+  ParagraphHeading: { HEADING1: 'h1', HEADING2: 'h2' },
+  HorizontalAlignment: { CENTER: 'center' },
+  GlyphType: { NUMBER: 'number' },
+  create(name) {
+    const id = 'doc' + (docs.size + 1);
+    const doc = { id, name, body: makeDocBody(),
+      getBody: () => doc.body, getId: () => id, saveAndClose() {} };
+    docs.set(id, doc);
+    return doc;
+  },
+  openById(id) {
+    const doc = docs.get(id);
+    if (!doc) throw new Error('нет документа ' + id);
+    return doc;
+  },
+};
+global.__docs = docs;
 global.Utilities = {
   DigestAlgorithm: { SHA_256: 'SHA_256' },
   Charset: { UTF_8: 'UTF_8' },
@@ -260,6 +347,26 @@ global.DriveApp = {
     };
   },
   createFolder: (name) => fakeFolder(name),
+  // Документы акта: копия шаблона живёт в том же наборе, что и сам шаблон.
+  getFileById(id) {
+    const doc = docs.get(id);
+    if (!doc) throw new Error('нет файла ' + id);
+    return {
+      makeCopy(name) {
+        const copyId = 'doc' + (docs.size + 1);
+        const body = makeDocBody();
+        doc.body.items.forEach((i) => {
+          if (i.kind === 'p') body.appendParagraph(i.text);
+          else body.appendTable(i.grid.map((r) => r.slice()));
+        });
+        const copy = { id: copyId, name, body,
+          getBody: () => body, getId: () => copyId, saveAndClose() {} };
+        docs.set(copyId, copy);
+        return copy;
+      },
+    };
+  },
+  getFolderById(id) { return { id }; },
 };
 global.MimeType = { CSV: 'text/csv' };
 
@@ -1874,6 +1981,104 @@ check('тот же PIN по-прежнему пускает',
   call('/auth/login', { login: 'pin_a', pin: '5150' }).ok === true);
 check('чужой PIN не пускает',
   call('/auth/login', { login: 'pin_a', pin: '5151' }).status === 401);
+
+console.log('\n== акт: сумма прописью ==');
+check('ноль словами', numberInWords(0) === 'ноль');
+check('одна тысяча, а не один тысяча', numberInWords(1000) === 'одна тысяча');
+check('двадцать одна тысяча', numberInWords(21000) === 'двадцать одна тысяча');
+check('сумма из старого акта',
+  numberInWords(476718) === 'четыреста семьдесят шесть тысяч семьсот восемнадцать',
+  numberInWords(476718));
+check('рубль согласован', moneyInWords(1) === 'Один рубль 00 копеек', moneyInWords(1));
+check('рубля согласовано', moneyInWords(2) === 'Два рубля 00 копеек', moneyInWords(2));
+check('копейки на месте',
+  moneyInWords(1500.5) === 'Одна тысяча пятьсот рублей 50 копеек', moneyInWords(1500.5));
+check('разряды пробелами', moneyDigits(476718) === '476 718', moneyDigits(476718));
+check('дата как в старом акте', humanRuDate('2026-10-01') === '01-10-2026г.');
+check('фамилия сокращается', shortName('Гриднев Егор Олегович') === 'Гриднев Е.О.');
+
+console.log('\n== акт: шаблон ==');
+const actAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+let act = call('/act/build', { order_id: 1 }, actAdmin);
+check('без шаблона сборка отказывает понятно',
+  act.ok === false && act.status === 409 && /Шаблон акта не создан/.test(act.error), act);
+
+const helper = call('/staff/create', {
+  full_name: 'Складмен Актов', login: 'actstaff', pin: '7788', role: 'Warehouse Staff',
+}, actAdmin);
+const helperToken = call('/auth/login', { login: 'actstaff', pin: '7788' }).data.token;
+check('сотруднику склада шаблон создавать нельзя',
+  call('/act/template', {}, helperToken).status === 403, helper.ok);
+
+let tpl = call('/act/template', {}, actAdmin);
+check('шаблон создан', tpl.ok === true && !!tpl.data.template_id, tpl);
+check('и запомнен в настройках',
+  call('/settings/get', {}, actAdmin).data.settings.act_template_id === tpl.data.template_id);
+check('повторное создание без подтверждения отклонено',
+  call('/act/template', {}, actAdmin).status === 409);
+check('в шаблоне нет ничьих персональных данных',
+  !/Куприянова|Мария/.test(__docs.get(tpl.data.template_id).body.getText()));
+
+console.log('\n== акт: каждая позиция в свою ячейку ==');
+act = call('/act/build', { order_id: 1 }, actAdmin);
+check('акт собран', act.ok === true && !!act.data.url, act);
+const built = __docs.get(act.data.document_id);
+const itemsTable = built.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
+check('таблица позиций найдена', !!itemsTable);
+check('строк по числу позиций (плюс заголовок)',
+  itemsTable && itemsTable.grid.length === act.data.lines + 1,
+  itemsTable && itemsTable.grid.length);
+check('строки-образца не осталось',
+  itemsTable && !itemsTable.getText().includes('{{'), itemsTable && itemsTable.getText());
+check('в первой ячейке одно наименование, а не все подряд',
+  itemsTable && itemsTable.grid[1][1].indexOf(';') === -1 &&
+  itemsTable.grid[1][1].split(' - ').length === 1, itemsTable && itemsTable.grid[1][1]);
+check('номера строк по порядку',
+  itemsTable && itemsTable.grid.slice(1).every((r, i) => r[0] === String(i + 1)),
+  itemsTable && itemsTable.grid.slice(1).map((r) => r[0]));
+check('количество в своём столбце',
+  itemsTable && itemsTable.grid.slice(1).every((r) => /^\d+$/.test(r[2])),
+  itemsTable && itemsTable.grid.slice(1).map((r) => r[2]));
+check('подстановок в документе не осталось',
+  !built.body.getText().includes('{{'),
+  (built.body.getText().match(/\{\{[^}]+\}\}/g) || []).slice(0, 4));
+check('ФИО арендатора подставлено',
+  built.body.getText().includes('Ильина-Ноктина Полина Ильинична'));
+check('имя файла — дата и ФИО',
+  /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /.test(built.name), built.name);
+
+console.log('\n== акт: цены и заводские номера ==');
+// В этом заказе часть позиций с ценой из заявки (Tilda), часть без.
+check('у позиции без цены прочерк, а не ноль',
+  itemsTable && itemsTable.grid.slice(1).some((r) => r[4] === '—'),
+  itemsTable && itemsTable.grid.slice(1).map((r) => r[4]));
+check('сумма посчитана по тем, у которых цена есть',
+  act.data.total > 0, act.data.total);
+check('непроставленные цены посчитаны и названы',
+  act.data.unpriced > 0, act.data.unpriced);
+check('сумма прописью попала в документ',
+  /рубл/.test(built.body.getText()));
+
+// Предметы в этом наборе заводились без заводских номеров, поэтому сначала
+// проставим номер выданной единице — и только потом проверим, что он доехал
+// до акта. Иначе проверка ничего не значит.
+const issuedTx = call('/order/card', { order_id: 1 }, actAdmin).data.transactions
+  .filter((t) => /^\d+$/.test(String(t.order_line)))[0];
+check('в заказе есть выданная единица', !!issuedTx, issuedTx);
+call('/item/numbers', { item_id: issuedTx.item_id, serial_number: 'SN-АКТ-001' }, actAdmin);
+
+const act2 = call('/act/build', { order_id: 1 }, actAdmin);
+const built2 = __docs.get(act2.data.document_id);
+const table2 = built2.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
+check('заводской номер доехал до акта',
+  table2.grid.slice(1).some((r) => r[3] === 'SN-АКТ-001'),
+  table2.grid.slice(1).map((r) => r[3]));
+check('у невыданных позиций столбец пуст, а не с чужим номером',
+  table2.grid.slice(1).filter((r) => r[3] === 'SN-АКТ-001').length === 1,
+  table2.grid.slice(1).map((r) => r[3]));
+
+check('заказа без позиций акт не делает',
+  call('/act/build', { order_id: 999 }, actAdmin).status === 404);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

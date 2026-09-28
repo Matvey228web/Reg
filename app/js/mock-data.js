@@ -17,6 +17,10 @@ const mockSettings = {
   site_url: "",
   public_orders: 0,
   public_orders_per_hour: 20,
+  act_template_id: "",
+  act_master: "",
+  act_director: "",
+  act_folder_id: "",
 };
 const MOCK_SETTINGS_SPEC = {
   site_url: { def: "", text: true, check: (v) => v === "" || /^https:\/\/[^\s]+$/.test(String(v)),
@@ -29,6 +33,10 @@ const MOCK_SETTINGS_SPEC = {
   import_source_id: { text: true, hint: "идентификатор таблицы Google или пусто" },
   public_orders: { min: 0, max: 1, hint: "1 — сайт отправляет заявку сам, 0 — только копипастом" },
   public_orders_per_hour: { min: 1, max: 200, hint: "от 1 до 200" },
+  act_template_id: { text: true, hint: "идентификатор документа-шаблона или пусто" },
+  act_master: { text: true, hint: "ФИО мастера целиком или пусто" },
+  act_director: { text: true, hint: "как указывать директора в договоре" },
+  act_folder_id: { text: true, hint: "идентификатор папки для готовых актов или пусто" },
 };
 let mockCats = CONFIG.CATEGORIES.map((c) => ({
   ...c,
@@ -801,6 +809,56 @@ const MockAPI = {
           changed += 1;
         });
         return { changed, asked: wanted.length, missing };
+      }
+
+      // Цена модели — для акта. В демо просто запоминаем.
+      case "/models/price": {
+        MockStore.requireAdmin(token);
+        const cat = String(body.category || "").toUpperCase();
+        const code = String(body.model_code || "").padStart(2, "0");
+        const raw = String(body.price === undefined || body.price === null ? "" : body.price).trim();
+        const price = raw === "" ? "" : Number(raw.replace(/\s/g, "").replace(",", "."));
+        if (price !== "" && (!isFinite(price) || price < 0)) {
+          const e = new Error("Цена — неотрицательное число или пусто"); e.status = 400; throw e;
+        }
+        const m = MockStore.models.find((x) => x.category === cat &&
+          String(x.model_code).padStart(2, "0") === code);
+        if (!m) { const e = new Error("Такой модели нет: " + cat + "·" + code); e.status = 404; throw e; }
+        m.price = price;
+        return { category: cat, model_code: code, price };
+      }
+
+      // Шаблон акта. В демо документа нет — запоминаем выдуманный
+      // идентификатор, чтобы экран настроек можно было проверить.
+      case "/act/template": {
+        const staff_id = MockStore.requireToken(token);
+        const who = MockStore.findStaffById(staff_id);
+        if (!who || who.staff_id !== 1) {
+          const e = new Error("Действие доступно только главному администратору");
+          e.status = 403; throw e;
+        }
+        if (mockSettings.act_template_id && !body.replace) {
+          const e = new Error("Шаблон уже есть"); e.status = 409; throw e;
+        }
+        mockSettings.act_template_id = "demo-template-" + Date.now();
+        return { template_id: mockSettings.act_template_id,
+                 url: "https://docs.google.com/document/d/" + mockSettings.act_template_id + "/edit" };
+      }
+
+      // Акт. Документ делает настоящий бэкенд через Google Docs; в демо
+      // отдаём ссылку-заглушку, чтобы экран можно было проверить.
+      case "/act/build": {
+        MockStore.requireToken(token);
+        const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
+        if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        const lines = MockStore.orderItems.filter((i) => String(i.order_id) === String(order.order_id));
+        if (!lines.length) { const e = new Error("В заказе нет ни одной позиции"); e.status = 409; throw e; }
+        const unpriced = lines.filter((l) => !Number(l.total || 0)).length;
+        return {
+          url: "https://docs.google.com/document/d/demo-act/edit",
+          document_id: "demo-act", lines: lines.length,
+          total: lines.reduce((s2, l) => s2 + Number(l.total || 0), 0), unpriced,
+        };
       }
 
       // Перенос модели. В моке важно воспроизвести именно перенумерацию и

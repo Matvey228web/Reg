@@ -99,7 +99,11 @@ var SCHEMA = {
   // Значения CINE, PHOTO или "CINE,PHOTO". Пусто — не размечено, и такая
   // модель видна в обоих разделах: забытая отметка не должна прятать
   // технику с витрины.
-  Models: ["category", "model_code", "model_name", "created_at", "section"],
+  // price: стоимость единицы для акта о материальной ответственности. Нигде
+  // больше её нет — ни в исходной таблице колледжа, ни в заявках с сайта.
+  // Пусто — акт ставит прочерк, а не ноль: ноль в таком документе означает
+  // «вещь ничего не стоит», а это неправда.
+  Models: ["category", "model_code", "model_name", "created_at", "section", "price"],
   // Синонимы колонок исходной таблицы, через запятую. Проверяются по порядку,
   // первый совпавший выигрывает. Особые записи: colN — колонка по счёту
   // (col0 — первая), ВКЛАДКА:colN — то же, но только на этой вкладке.
@@ -957,6 +961,8 @@ function doPost(e) {
       // ничего, по чему можно опознать конкретную единицу техники.
       case "/public/catalog": data = handlePublicCatalog(payload); break;
       case "/public/order": data = handlePublicOrder(payload); break;
+      case "/act/template": data = handleActTemplate(payload, token); break;
+      case "/act/build": data = handleActBuild(payload, token); break;
       case "/item/lookup": data = handleItemLookup(payload, token); break;
       case "/item/create": data = handleItemCreate(payload, token); break;
       case "/item/numbers": data = handleItemNumbers(payload, token); break;
@@ -967,6 +973,7 @@ function doPost(e) {
       case "/equipment/list": data = handleEquipmentList(payload, token); break;
       case "/models/list": data = handleModelsList(payload, token); break;
       case "/models/sections": data = handleModelsSections(payload, token); break;
+      case "/models/price": data = handleModelsPrice(payload, token); break;
       case "/model/create": data = handleModelCreate(payload, token); break;
       case "/order/parse": data = handleOrderParse(payload, token); break;
       case "/order/create": data = handleOrderCreate(payload, token); break;
@@ -1284,6 +1291,37 @@ function handleModelsSections(payload, token) {
       changed += 1;
     });
     return { changed: changed, asked: wanted.length, missing: missing };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Цена модели — для акта о материальной ответственности. Отдельным
+// эндпоинтом, а не вместе с разделом: раздел правит витрину, цена — документ,
+// и путать их в одном запросе незачем.
+function handleModelsPrice(payload, token) {
+  requireAdmin(token);
+  var category = String(payload.category || "").trim().toUpperCase();
+  var code = pad2(Number(payload.model_code));
+  // Пустая строка — «цены нет», и это допустимо: акт поставит прочерк.
+  var raw = String(payload.price === undefined || payload.price === null ? "" : payload.price).trim();
+  var price = raw === "" ? "" : Number(raw.replace(/\s/g, "").replace(",", "."));
+  if (price !== "" && (!isFinite(price) || price < 0)) {
+    throw apiError(400, "Цена — неотрицательное число или пусто");
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.MODELS);
+    ensureColumns(sheet, ["price"]);
+    var row = null;
+    readRows(sheet).forEach(function (r) {
+      if (r.category === category && pad2(Number(r.model_code)) === code) row = r;
+    });
+    if (!row) throw apiError(404, "Такой модели нет: " + category + "·" + code);
+    updateRow(sheet, row.__row, { price: price });
+    return { category: category, model_code: code, price: price };
   } finally {
     lock.releaseLock();
   }
@@ -3578,6 +3616,35 @@ var SETTINGS_SPEC = {
     check: function (v) { return v === "" || /^https:\/\/[^\s]+$/.test(v); },
     hint: "адрес сайта проката целиком, начиная с https:// — или пусто",
   },
+  // Шаблон акта в Google Docs и папка для готовых. Пусто — акт не собирается,
+  // и кнопка это объясняет: молча отдавать пустой документ хуже.
+  act_template_id: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v); },
+    hint: "идентификатор документа-шаблона или пусто",
+  },
+  act_folder_id: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v); },
+    hint: "идентификатор папки для готовых актов или пусто — тогда рядом с таблицей",
+  },
+  // Кто подписывает акт. В настройках, а не в коде: мастера и директора
+  // меняют, и правка фамилии не должна требовать выкладки.
+  act_master: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || v.length <= 120; },
+    hint: "ФИО мастера целиком или пусто — тогда подставится вошедший",
+  },
+  act_director: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || v.length <= 120; },
+    hint: "как указывать директора в договоре, например «Директора Керзиной О.А.»",
+  },
+
   // Приём заявок прямо с сайта. Выключено по умолчанию намеренно: это
   // единственная ручка, в которую можно писать без входа, и включать её должен
   // человек, а не выкладка кода.
@@ -3902,4 +3969,452 @@ function benchPin() {
   var ms = Date.now() - started;
   Logger.log("PIN_ROUNDS=" + PIN_ROUNDS + " → " + ms + " мс на один хеш");
   return ms;
+}
+
+// ---- Акт сдачи-приёмки ----
+
+// Сумма прописью. В старом акте под числом стояла приписка «!Прописать
+// буквами!» — её и закрываем. Согласование родов и падежей тут не украшение:
+// «476718 рублей» в документе о материальной ответственности читается как
+// недоделка, а так и было.
+var WORDS_UNITS_M = ["", "один", "два", "три", "четыре", "пять", "шесть",
+                     "семь", "восемь", "девять"];
+var WORDS_UNITS_F = ["", "одна", "две", "три", "четыре", "пять", "шесть",
+                     "семь", "восемь", "девять"];
+var WORDS_TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать",
+                   "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать",
+                   "восемнадцать", "девятнадцать"];
+var WORDS_TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят",
+                  "шестьдесят", "семьдесят", "восемьдесят", "девяносто"];
+var WORDS_HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот",
+                      "шестьсот", "семьсот", "восемьсот", "девятьсот"];
+
+// Разряды: слово в трёх формах и род. Тысяча женского рода — «одна тысяча».
+var WORDS_SCALE = [
+  { forms: ["", "", ""], female: false },
+  { forms: ["тысяча", "тысячи", "тысяч"], female: true },
+  { forms: ["миллион", "миллиона", "миллионов"], female: false },
+  { forms: ["миллиард", "миллиарда", "миллиардов"], female: false },
+];
+
+function pluralRu(n, one, few, many) {
+  var abs = Math.abs(n) % 100, last = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (last > 1 && last < 5) return few;
+  if (last === 1) return one;
+  return many;
+}
+
+// Одна группа из трёх цифр словами.
+function tripleInWords(value, female) {
+  var out = [];
+  var hundreds = Math.floor(value / 100);
+  var rest = value % 100;
+  if (hundreds) out.push(WORDS_HUNDREDS[hundreds]);
+  if (rest >= 10 && rest < 20) {
+    out.push(WORDS_TEENS[rest - 10]);
+  } else {
+    var tens = Math.floor(rest / 10);
+    var units = rest % 10;
+    if (tens) out.push(WORDS_TENS[tens]);
+    if (units) out.push((female ? WORDS_UNITS_F : WORDS_UNITS_M)[units]);
+  }
+  return out.join(" ");
+}
+
+function numberInWords(value) {
+  var n = Math.floor(Math.abs(Number(value) || 0));
+  if (!n) return "ноль";
+  var groups = [];
+  while (n > 0) { groups.push(n % 1000); n = Math.floor(n / 1000); }
+  var parts = [];
+  for (var i = groups.length - 1; i >= 0; i--) {
+    var group = groups[i];
+    if (!group) continue;
+    var scale = WORDS_SCALE[i] || WORDS_SCALE[0];
+    parts.push(tripleInWords(group, scale.female));
+    if (scale.forms[0]) {
+      parts.push(pluralRu(group, scale.forms[0], scale.forms[1], scale.forms[2]));
+    }
+  }
+  return parts.join(" ");
+}
+
+// «476 718 рублей 00 копеек» словами, с большой буквы — так пишут в актах.
+function moneyInWords(value) {
+  var total = Math.round((Number(value) || 0) * 100);
+  var rubles = Math.floor(total / 100);
+  var kopeks = total % 100;
+  var words = numberInWords(rubles);
+  var text = words + " " + pluralRu(rubles, "рубль", "рубля", "рублей") +
+    " " + (kopeks < 10 ? "0" + kopeks : String(kopeks)) + " " +
+    pluralRu(kopeks, "копейка", "копейки", "копеек");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// Разряды пробелами: 476718 → «476 718». В документе так читается, а не
+// пересчитывается пальцем.
+function moneyDigits(value) {
+  var n = Math.round(Number(value) || 0);
+  var s = String(Math.abs(n));
+  var out = "";
+  for (var i = 0; i < s.length; i++) {
+    if (i && (s.length - i) % 3 === 0) out += " ";
+    out += s[i];
+  }
+  return (n < 0 ? "−" : "") + out;
+}
+
+// Текст договора — тот же, что в присланном документе, слово в слово, без
+// данных студента. После создания шаблон становится обычным документом:
+// правьте формулировки, имена и шапку в нём, код к нему больше не вернётся.
+var ACT_CONTRACT = [
+  "В целях обеспечения сохранности материальных ценностей, принадлежащих ГБПОУ города Москвы «Киноколледж № 40 «Московская международная киношкола», именуемое в дальнейшем «Киношкола», в лице {{ДИРЕКТОР}}, действующий на основании Устава, с одной стороны, и студент (или родитель)",
+];
+
+var ACT_DUTIES_STUDENT = [
+  "Принять на себя полную материальную ответственность за обеспечение вверенных ему Киношколой материальных ценностей.",
+  "Бережно относиться к переданным ему на хранение или для других целей материальным ценностям Киношколы и принимать меры по предотвращению ущерба.",
+  "Строго придерживаться и не нарушать правила лицензионного использования программных продуктов, установленных на компьютерах (ноутбуках) Киношколы.",
+  "Не копировать Программные продукты на иные компьютеры (ноутбуки).",
+  "Не устанавливать нелицензионные, контрафактные копии Программных продуктов на компьютеры (ноутбуки) Киношколы.",
+  "Не модифицировать, не изменять, не декомпилировать Программные продукты на компьютерах (ноутбуках) Киношколы.",
+  "Своевременно сообщать Киношколе обо всех обстоятельствах, угрожающих обеспечению сохранности вверенных ему материальных ценностей.",
+  "Вести учёт, составлять и предоставлять в установленном порядке товарно-денежные и другие отчёты о движении и остатках вверенных ему материальных ценностей.",
+  "Принимать участие в проверке состояния имущества при получении и сдаче, а также в инвентаризации вверенных ему материальных ценностей.",
+  "Возместить причинённый материальным ценностям ущерб в случае их хищения, порчи, утраты товарной стоимости и проч. в соответствии с действующим законодательством.",
+  "Стоимость материальных ценностей определяется исходя из рыночной стоимости вещей на момент возмещения.",
+  "Возвратить все вверенные ему материальные ценности точно в указанный в акте сдачи-приёмки срок.",
+  "В случае несвоевременного возврата материальных ценностей выплатить в течение 3 суток в кассу Киношколы пеню в размере 5% от общей стоимости, означенной в акте сдачи-приёмки, за каждые лишние сутки использования ценностей.",
+  "В случае невозвращения материальных ценностей в течение более 10 суток с момента, означенного договором, выплатить в кассу Киношколы полную стоимость материальных ценностей, означенную в акте сдачи-приёмки, в течение 3 суток.",
+  "Не разглашать конфиденциальную информацию Киношколы. Под конфиденциальной информацией понимаются регистрационные номера, ключи, пароли к Программным продуктам, а также любая иная информация, позволяющая активировать Программный продукт.",
+  "Каждая из сторон настоящего договора будет предпринимать меры к недопущению разглашения Конфиденциальной информации и способствовать другой стороне в принятии таких мер.",
+];
+
+var ACT_DUTIES_SCHOOL = [
+  "Ознакомить студента с действующим законодательством о материальной ответственности за ущерб, причинённый учреждению, а также с действующими инструкциями, нормативами и правилами хранения, приёмки, обработки и применения переданных ему материальных ценностей.",
+  "В случае необеспечения по вине студента сохранности вверенных ему материальных ценностей провести определение размера причинённого ущерба, а также вида и срока возмещения этого ущерба.",
+];
+
+var ACT_EXTRA = [
+  "Материальные ценности передаются студенту согласно акту сдачи-приёмки.",
+  "Акт сдачи-приёмки подписывается Сторонами и является неотъемлемым приложением к настоящему договору.",
+];
+
+var ACT_TERMS = [
+  "Настоящий договор вступает в силу с момента его подписания Сторонами и действует всё время работы студента с предоставленными ему материальными ценностями.",
+  "Настоящий договор составлен в двух экземплярах, один из которых находится у Киношколы, другой у студента.",
+];
+
+// Столбцы таблицы позиций. «МОДЕЛЬ» из старого акта заменена на «КОЛ-ВО»:
+// отдельного поля модели у нас нет, а количество в старом документе
+// втискивали в название («OSTERRIG SIRIUS 50CM - 2x29000»).
+var ACT_COLUMNS = ["№", "НАИМЕНОВАНИЕ", "КОЛ-ВО", "ЗАВОДСКОЙ №", "СТОИМОСТЬ (руб.)"];
+
+// Шаблон строится кодом, а не копией присланного документа: в том документе
+// данные студента, а здесь их быть не должно. Заодно шаблон попадает под
+// версии вместе с остальным.
+function buildActTemplate() {
+  var doc = DocumentApp.create("Шаблон акта — Mifs Rent");
+  var body = doc.getBody();
+  body.clear();
+
+  function heading(text) {
+    var p = body.appendParagraph(text);
+    p.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    return p;
+  }
+  function center(text) {
+    var p = body.appendParagraph(text);
+    p.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    return p;
+  }
+  function numbered(items) {
+    items.forEach(function (t) {
+      body.appendListItem(t).setGlyphType(DocumentApp.GlyphType.NUMBER);
+    });
+  }
+  // Поле под заполнение от руки: рамка на всю ширину, как в исходнике.
+  function frame(text) {
+    var t = body.appendTable([[text]]);
+    t.getRow(0).getCell(0).setText(text);
+    t.getRow(0).getCell(0).getChild(0).asParagraph()
+      .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+    return t;
+  }
+
+  center("ДОГОВОР № {{НОМЕР}}").setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  center("О ПОЛНОЙ МАТЕРИАЛЬНОЙ ОТВЕТСТВЕННОСТИ")
+    .setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph("г. Москва                                        «{{ДАТА}}»");
+
+  ACT_CONTRACT.forEach(function (t) { body.appendParagraph(t); });
+  frame("{{ФИО}}");
+  center("(фамилия, имя, отчество студента или родителя)").setItalic(true);
+  body.appendParagraph("именуемый в дальнейшем «студент», с другой стороны, совместно " +
+    "именуемые Стороны, заключили настоящий договор о нижеследующем:");
+
+  heading("1. Предмет договора");
+  body.appendParagraph("Предметом настоящего договора является ответственность студента " +
+    "Киношколы перед Киношколой за обеспечение сохранности вверенных студенту " +
+    "материальных ценностей.");
+
+  heading("2. Студент обязуется");
+  numbered(ACT_DUTIES_STUDENT);
+
+  heading("3. Киношкола обязуется");
+  numbered(ACT_DUTIES_SCHOOL);
+
+  heading("4. Дополнительные положения");
+  numbered(ACT_EXTRA);
+
+  heading("5. Сроки действия договора");
+  numbered(ACT_TERMS);
+
+  heading("6. Адреса и реквизиты Сторон");
+  var sides = body.appendTable([[
+    "Студент {{ФИО}}\nДата рождения:\nСерия и номер:\nДата выдачи:\nКем выдан и код подразделения:\nАдрес прописки:\nтел.: {{ТЕЛЕФОН}}",
+    "Киношкола\nГБПОУ города Москвы «Киноколледж № 40 «Московская международная киношкола»\n115419, Россия, г. Москва, ул. Шаболовка, д. 44\nтел.: +7 (495) 954 40-02, +7 (495) 954 40-23",
+  ]]);
+  sides.appendTableRow().appendTableCell("________________ / расшифровка")
+    .getParentRow().appendTableCell("________________ / {{МАСТЕР_КРАТКО}}");
+
+  body.appendPageBreak();
+
+  center("Приложение № 1").setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  center("к договору № {{НОМЕР}} от «{{ДАТА}}»");
+  center("АКТ № {{НОМЕР}}-A").setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  center("СДАЧИ-ПРИЁМКИ").setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  body.appendParagraph("г. Москва                                        «{{ДАТА}}»");
+  body.appendParagraph("В соответствии с п. 4.1 Договора о полной индивидуальной " +
+    "материальной ответственности № {{НОМЕР}} от {{ДАТА}} ГБПОУ города Москвы " +
+    "«Киноколледж № 40 «Московская международная киношкола» передала, студент " +
+    "(или родитель)");
+  frame("{{ФИО}}");
+  center("(фамилия, имя, отчество студента или родителя)").setItalic(true);
+  body.appendParagraph("принял на полную материальную ответственность следующие ценности:");
+
+  // Одна строка-заголовок и одна строка-образец. Сборка акта добавляет строки
+  // по числу позиций и удаляет образец: держать в шаблоне пятнадцать пустых
+  // строк, как было, незачем.
+  var items = body.appendTable([ACT_COLUMNS.slice(), ["1", "{{ПОЗИЦИИ}}", "", "", ""]]);
+  items.getRow(0).editAsText().setBold(true);
+
+  body.appendParagraph("Общая стоимость передаваемых ценностей в момент передачи: " +
+    "{{СУММА}} руб.");
+  body.appendParagraph("{{СУММА_СЛОВАМИ}}");
+  body.appendParagraph("Указанные материальные ценности предназначены для:");
+  frame("{{ПРОЕКТ}}");
+  body.appendParagraph("Указанные материальные ценности передаются на срок: " +
+    "с «{{С}}» по «{{ПО}}»");
+  body.appendParagraph("Указанные материальные ценности переданы в исправном состоянии " +
+    "и пригодны для их применения по назначению.");
+
+  var signs = body.appendTable([
+    ["СДАЛ, Киношкола", "ПРИНЯЛ, Студент"],
+    ["________________\n{{МАСТЕР}}", "________________\n{{ФИО}}"],
+  ]);
+  signs.getRow(0).editAsText().setBold(true);
+
+  doc.saveAndClose();
+  return doc.getId();
+}
+
+// Создание шаблона. Только главный администратор: документ становится частью
+// делопроизводства колледжа, и заводить его должен тот, кто за это отвечает.
+function handleActTemplate(payload, token) {
+  requireOwner(token);
+  var current = String(getSettings().act_template_id || "");
+  if (current && !payload.replace) {
+    throw apiError(409, "Шаблон уже есть. Правьте его как обычный документ, " +
+      "а пересоздать можно с подтверждением — прежний при этом останется в Диске");
+  }
+  var id = buildActTemplate();
+  metaSet("setting_act_template_id", id);
+  return { template_id: id, url: "https://docs.google.com/document/d/" + id + "/edit" };
+}
+
+// Состав акта: по строке на позицию. Именно это в старом документе не было
+// сделано — все пятнадцать наименований лежали в одной ячейке с припиской
+// «!Расставить по ячейкам!».
+function actLines(orderId) {
+  var items = readRows(getSheet(SHEETS.ORDER_ITEMS)).filter(function (r) {
+    return String(r.order_id) === String(orderId);
+  });
+  items.sort(function (a, b) { return Number(a.line_no) - Number(b.line_no); });
+
+  var txRows = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(function (t) {
+    return String(t.order_id || "") === String(orderId);
+  });
+  var equipment = readRows(getSheet(SHEETS.EQUIPMENT));
+  var byId = {};
+  equipment.forEach(function (e) { byId[String(e.item_id)] = e; });
+
+  var models = readRows(getSheet(SHEETS.MODELS));
+  var priceOf = {};
+  models.forEach(function (m) {
+    priceOf[String(m.category) + "-" + pad2(Number(m.model_code))] = Number(m.price || 0);
+  });
+
+  return items.map(function (r) {
+    // Заводские номера — только реально выданного. Выдачи не было — столбец
+    // пустой: вписать туда номер «который выдадим» значит соврать в документе.
+    var serials = txRows
+      .filter(function (t) { return String(t.order_line) === String(r.line_no); })
+      .map(function (t) {
+        var e = byId[String(t.item_id)];
+        return e ? String(e.serial_number || e.inventory_number || "").trim() : "";
+      })
+      .filter(function (v) { return v; });
+
+    var qty = Number(r.qty || 1);
+    // Цена из заявки главнее: в старых заказах с Tilda она настоящая. Иначе
+    // берём цену модели. Нет ни там, ни там — прочерк, а не ноль.
+    var unit = Number(r.price || 0);
+    if (!unit && r.model_code !== "" && r.category) {
+      unit = priceOf[String(r.category) + "-" + pad2(Number(r.model_code))] || 0;
+    }
+    var sum = Number(r.total || 0) || unit * qty;
+
+    return {
+      name: String(r.raw_name || "").trim(),
+      qty: qty,
+      serials: serials.join(", "),
+      sum: sum,
+      priced: sum > 0,
+    };
+  });
+}
+
+// Сборка акта. Шаблон копируется, подстановки заменяются, таблица позиций
+// заполняется построчно, файл получает имя «<дата> <ФИО>» — как было.
+function handleActBuild(payload, token) {
+  var staffRow = checkAuth(token);
+  var settings = getSettings();
+  var templateId = String(settings.act_template_id || "");
+  if (!templateId) {
+    throw apiError(409, "Шаблон акта не создан. Настройки → «Акт» → «Создать шаблон»");
+  }
+
+  var orderId = String(payload.order_id || "");
+  var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
+  if (!order) throw apiError(404, "Заказ не найден");
+
+  var lines = actLines(orderId);
+  if (!lines.length) throw apiError(409, "В заказе нет ни одной позиции");
+
+  var stamp = actStamp();
+  var fio = String(order.student_name || "").trim() || "без имени";
+  var total = lines.reduce(function (sum, l) { return sum + l.sum; }, 0);
+  var unpriced = lines.filter(function (l) { return !l.priced; }).length;
+
+  var copy;
+  try {
+    var file = DriveApp.getFileById(templateId);
+    var folderId = String(settings.act_folder_id || "");
+    copy = folderId
+      ? file.makeCopy(stamp + " " + fio, DriveApp.getFolderById(folderId))
+      : file.makeCopy(stamp + " " + fio);
+  } catch (err) {
+    throw apiError(502, "Не удалось скопировать шаблон: " + err.message +
+      ". Проверьте идентификатор шаблона в настройках");
+  }
+
+  var doc = DocumentApp.openById(copy.getId());
+  var body = doc.getBody();
+
+  fillActItems(body, lines);
+
+  var fields = {
+    "{{НОМЕР}}": String(order.order_no || orderId),
+    "{{ДАТА}}": stamp,
+    "{{ФИО}}": fio,
+    "{{ТЕЛЕФОН}}": String(order.student_phone || ""),
+    "{{ПРОЕКТ}}": String(order.project || ""),
+    "{{С}}": humanRuDate(order.issue_date),
+    "{{ПО}}": humanRuDate(order.return_date),
+    "{{СУММА}}": total ? moneyDigits(total) : "—",
+    "{{СУММА_СЛОВАМИ}}": total ? moneyInWords(total) : "Стоимость не указана",
+    "{{МАСТЕР}}": String(settings.act_master || staffRow.full_name || ""),
+    "{{МАСТЕР_КРАТКО}}": shortName(String(settings.act_master || staffRow.full_name || "")),
+    "{{ДИРЕКТОР}}": String(settings.act_director || "Директора"),
+  };
+  for (var key in fields) {
+    body.replaceText(escapeForReplace(key), fields[key]);
+  }
+
+  doc.saveAndClose();
+  var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
+
+  // Сообщение того же вида, что приходило раньше.
+  tgSend("АКТ от " + stamp + " " + fio + " >>> " + url);
+
+  return {
+    url: url, document_id: copy.getId(), lines: lines.length,
+    total: total, unpriced: unpriced,
+  };
+}
+
+// Заполнение таблицы позиций. Таблицу находим по подстановке в ней самой:
+// привязываться к «третьей таблице от начала» нельзя — шаблон правят руками.
+function fillActItems(body, lines) {
+  var tables = body.getTables();
+  var target = null;
+  for (var i = 0; i < tables.length; i++) {
+    if (tables[i].getText().indexOf("{{ПОЗИЦИИ}}") !== -1) { target = tables[i]; break; }
+  }
+  if (!target) {
+    throw apiError(409, "В шаблоне не найдена таблица позиций: в одной из её ячеек " +
+      "должно стоять {{ПОЗИЦИИ}}");
+  }
+
+  // Строка-образец задаёт оформление; дописываем по одной на позицию и
+  // удаляем образец последним, чтобы таблица не осталась без строк.
+  var sample = null;
+  for (var r = 0; r < target.getNumRows(); r++) {
+    if (target.getRow(r).getText().indexOf("{{ПОЗИЦИИ}}") !== -1) { sample = r; break; }
+  }
+
+  lines.forEach(function (line, idx) {
+    var row = target.appendTableRow();
+    var cells = [
+      String(idx + 1),
+      line.name,
+      String(line.qty),
+      line.serials,
+      line.priced ? moneyDigits(line.sum) : "—",
+    ];
+    cells.forEach(function (text) { row.appendTableCell(text); });
+  });
+
+  target.removeRow(sample);
+}
+
+// «2026-09-28 22:44:10» — тем же видом, что в имени прежних файлов.
+function actStamp() {
+  var d = new Date();
+  function two(n) { return n < 10 ? "0" + n : String(n); }
+  return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate()) + " " +
+    two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds());
+}
+
+// «2026-10-01» → «01-10-2026г.» — как в старом акте.
+function humanRuDate(value) {
+  var s = String(value || "").trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[3] + "-" + m[2] + "-" + m[1] + "г." : s;
+}
+
+// «Гриднев Егор Олегович» → «Гриднев Е.О.»
+function shortName(full) {
+  var parts = String(full || "").trim().split(/\s+/);
+  if (parts.length < 2) return String(full || "");
+  var initials = "";
+  for (var i = 1; i < parts.length && i < 3; i++) initials += parts[i].charAt(0) + ".";
+  return parts[0] + " " + initials;
+}
+
+// replaceText принимает регулярное выражение, а в подстановках фигурные скобки.
+function escapeForReplace(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

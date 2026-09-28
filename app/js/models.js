@@ -114,6 +114,12 @@ const ModelsScreen = (() => {
           ${SECTION_CHOICES.map((c) => `<option value="${escapeHtml(c.value)}"${
             c.value === (m.section || "") ? " selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
         </select>
+      </div>
+      <div class="field">
+        <label for="model-price-${escapeHtml(key(m))}">Цена, ₽</label>
+        <input id="model-price-${escapeHtml(key(m))}" type="number" inputmode="numeric"
+               data-price="${escapeHtml(key(m))}"
+               value="${escapeHtml(String(m.price === undefined || m.price === null ? "" : m.price))}" />
       </div>`;
   }
 
@@ -132,6 +138,9 @@ const ModelsScreen = (() => {
     document.querySelectorAll("[data-move]").forEach((sel) => {
       sel.addEventListener("change", () => move(sel.dataset.move, sel.value, sel));
     });
+    document.querySelectorAll("[data-price]").forEach((input) => {
+      input.addEventListener("change", (e) => setPrice(e.target.dataset.price, e.target.value, e.target));
+    });
     document.querySelectorAll("[data-section]").forEach((sel) => {
       sel.addEventListener("change", () => setSection(sel.dataset.section, sel.value, sel));
     });
@@ -139,6 +148,33 @@ const ModelsScreen = (() => {
 
   // Раздел меняется без подтверждения: в отличие от переноса между
   // категориями, он ничего не перенумеровывает и откатывается тем же выбором.
+  // Цена нужна акту о материальной ответственности: без неё в документе стоит
+  // прочерк. Сохраняем по уходу из поля, а не на каждой цифре — иначе на
+  // каждое нажатие уходил бы запрос на несколько секунд.
+  async function setPrice(modelKey, value, input) {
+    const model = models.filter((m) => key(m) === modelKey)[0];
+    if (!model) return;
+    const was = model.price === undefined || model.price === null ? "" : String(model.price);
+    if (String(value).trim() === was) return;
+    const parts = modelKey.split("|");
+    input.disabled = true;
+    showBoxError("models-error", "");
+    try {
+      const res = await apiPost("/models/price", {
+        category: parts[0], model_code: parts[1], price: String(value).trim(),
+      });
+      model.price = res.price;
+      TG.hapticSuccess();
+    } catch (err) {
+      TG.hapticError();
+      input.value = was;
+      showBoxError("models-error", err.message);
+      TG.showAlert(err.message);
+    } finally {
+      input.disabled = false;
+    }
+  }
+
   async function setSection(modelKey, value, select) {
     const model = models.filter((m) => key(m) === modelKey)[0];
     if (!model) return;

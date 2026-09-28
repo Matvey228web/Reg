@@ -156,6 +156,45 @@ const SettingsScreen = (() => {
       </div>
 
       <div class="section">
+        <h2>Акт сдачи-приёмки</h2>
+        <p class="hint">Акт собирается кнопкой на карточке заказа: копия шаблона,
+          позиции по строкам, сумма прописью, ссылка в чат склада.</p>
+        ${s.act_template_id
+          ? `<p class="hint">Шаблон:
+              <a href="https://docs.google.com/document/d/${escapeHtml(s.act_template_id)}/edit"
+                 target="_blank" rel="noopener">открыть и править</a>.
+              Правьте его как обычный документ — формулировки, фамилии, шапку.
+              Подстановки в двойных фигурных скобках трогать нельзя.</p>`
+          : `<p class="hint">Шаблона ещё нет. Создайте — получится обычный документ
+              в вашем Диске, дальше правьте его как хотите.</p>`}
+        <div id="settings-act-error"></div>
+        <div class="form-group">
+          <div class="field field--stacked">
+            <label for="set-act_master">Мастер, ФИО целиком</label>
+            <input id="set-act_master" type="text" placeholder="Гриднев Егор Олегович"
+                   value="${escapeHtml(String(s.act_master || ""))}" />
+          </div>
+          <div class="field field--stacked">
+            <label for="set-act_director">Директор в договоре</label>
+            <input id="set-act_director" type="text" placeholder="Директора Керзиной О.А."
+                   value="${escapeHtml(String(s.act_director || ""))}" />
+          </div>
+          <div class="field field--stacked">
+            <label for="set-act_folder_id">Папка для готовых актов</label>
+            <input id="set-act_folder_id" type="text" placeholder="идентификатор папки или пусто"
+                   autocapitalize="off" autocorrect="off" spellcheck="false"
+                   value="${escapeHtml(String(s.act_folder_id || ""))}" />
+          </div>
+        </div>
+        <button class="btn" id="settings-act-save">Сохранить</button>
+        ${data.me && data.me.is_owner
+          ? `<button class="btn btn--secondary" id="settings-act-template"
+                     style="margin-top:8px;">${s.act_template_id
+                       ? "Пересоздать шаблон" : "Создать шаблон"}</button>`
+          : `<p class="hint">Шаблон создаёт главный администратор.</p>`}
+      </div>
+
+      <div class="section">
         <h2>Заявки с сайта</h2>
         <p class="hint">Включено — сайт отправляет заявку сам: строка появляется в «Заказах»
           со статусом «Новый», и бот пишет об этом в чат. Выключено — студент копирует
@@ -318,6 +357,59 @@ const SettingsScreen = (() => {
   // Приём заявок с сайта сохраняем отдельно от сроков входа: это выключатель
   // единственного адреса, куда пишут без входа, и трогать его заодно с
   // «блокировка, минут» человек не должен.
+  // Акт: подписи и папка. Шаблон — отдельной кнопкой, потому что это создание
+  // документа в Диске, а не правка настройки.
+  async function saveAct() {
+    const btn = document.getElementById("settings-act-save");
+    showBoxError("settings-act-error", "");
+    btn.disabled = true;
+    btn.textContent = "Сохраняем…";
+    try {
+      const res = await apiPost("/settings/set", {
+        settings: {
+          act_master: document.getElementById("set-act_master").value.trim(),
+          act_director: document.getElementById("set-act_director").value.trim(),
+          act_folder_id: document.getElementById("set-act_folder_id").value.trim(),
+        },
+      });
+      data.settings = res.settings;
+      TG.hapticSuccess();
+      TG.showAlert("Сохранено");
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("settings-act-error", err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Сохранить";
+    }
+  }
+
+  async function createActTemplate() {
+    const btn = document.getElementById("settings-act-template");
+    const again = !!data.settings.act_template_id;
+    if (again) {
+      const go = await new Promise((resolve) => TG.showConfirm(
+        "Создать новый шаблон? Прежний останется в Диске, но акты будут " +
+        "собираться по новому.", resolve));
+      if (!go) return;
+    }
+    showBoxError("settings-act-error", "");
+    btn.disabled = true;
+    btn.textContent = "Создаём…";
+    try {
+      const res = await apiPost("/act/template", again ? { replace: true } : {});
+      data.settings.act_template_id = res.template_id;
+      TG.hapticSuccess();
+      TG.showAlert("Шаблон создан. Он в вашем Google Диске, правьте как обычный документ.");
+      load();
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("settings-act-error", err.message);
+      btn.disabled = false;
+      btn.textContent = again ? "Пересоздать шаблон" : "Создать шаблон";
+    }
+  }
+
   async function savePublicOrders() {
     const btn = document.getElementById("settings-public-save");
     showBoxError("settings-public-error", "");
@@ -434,6 +526,9 @@ const SettingsScreen = (() => {
     document.getElementById("settings-save").addEventListener("click", saveFields);
     document.getElementById("settings-public-save")
       .addEventListener("click", savePublicOrders);
+    document.getElementById("settings-act-save").addEventListener("click", saveAct);
+    const tplBtn = document.getElementById("settings-act-template");
+    if (tplBtn) tplBtn.addEventListener("click", createActTemplate);
     document.getElementById("settings-bot-test")
       .addEventListener("click", () => bot("/notify/test", "settings-bot-test"));
     document.getElementById("settings-bot-overdue")
