@@ -4,7 +4,15 @@
 var Site = (function () {
   "use strict";
 
-  var BACKEND = "https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec";
+  // Сайт обращается не к таблице напрямую, а к воркеру перед ней. Таблица
+  // отвечает 3–14 секунд вразнобой и раз в несколько запросов отдаёт страницу
+  // ошибки Google вместо ответа; воркер отвечает за доли секунды, наличие
+  // держит в кэше, а заявку принимает сам и доносит до таблицы в фоне.
+  //
+  // Если воркер придётся выключить, сюда возвращается прежний адрес:
+  // https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec
+  // Витрина от этого не зависит вовсе: каталог лежит снимком рядом со страницей.
+  var BACKEND = "https://mifs-rent-api.odintsovmatvey08.workers.dev";
   var CART_KEY = "mifs_cart";
 
   var SECTIONS = [
