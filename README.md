@@ -34,6 +34,7 @@
 | [`docs/SETUP.md`](docs/SETUP.md) | Настройка с нуля |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | Как выкладываются все части |
 | [`docs/BOT.md`](docs/BOT.md) | Бот в Telegram: уведомления и этикетки |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Что дальше и в каком порядке |
 | [`docs/IDEAS.md`](docs/IDEAS.md) | Что обсудили, но не сделали |
 | [`docs/ALTERNATIVES.md`](docs/ALTERNATIVES.md) | Почему не взяли готовую систему |
 | [`docs/archive/`](docs/archive/) | Разборы, которые своё отслужили |
