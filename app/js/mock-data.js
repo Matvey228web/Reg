@@ -1234,6 +1234,11 @@ const MockAPI = {
               type: "private", at: new Date().toISOString() },
           ],
           current: String(mockSettings.notify_chat_id || ""),
+          // Имя бота живой бэкенд спрашивает у Telegram (getMe) — в демо
+          // подставляем такое же по форме, иначе экран здесь и на живой
+          // таблице ведёт себя по-разному.
+          bot: { username: "mifs_rent_demo_bot", name: "Mifs Rent" },
+          command: "/id@mifs_rent_demo_bot",
           hint: "",
         };
       }

@@ -355,12 +355,21 @@ global.Utilities = {
 const sent = [];
 // Что Telegram «ответит» на getUpdates. Тест подставляет свои сообщения.
 let __telegramUpdates = [];
+// И на getMe: имя бота, которое приложение показывает вместе с командой.
+// Тест подменяет его, чтобы проверить и отказ по неверному токену.
+let __telegramMe = { ok: true, result: { username: 'mifs_rent_bot', first_name: 'Mifs Rent' } };
 global.UrlFetchApp = {
   fetch(url, opts) {
     sent.push({ url, opts });
     // Загрузка документа в Диск: разбираем multipart так же, как это сделал бы
     // Google, и складываем получившийся документ в набор — дальше по нему
     // собирается акт.
+    if (/\/getMe$/.test(url)) {
+      return {
+        getResponseCode: () => 200,
+        getContentText: () => JSON.stringify(__telegramMe),
+      };
+    }
     if (/getUpdates/.test(url)) {
       return {
         getResponseCode: () => 200,
@@ -2178,10 +2187,29 @@ check('название группы взято из Telegram',
 check('у личной переписки вместо названия имя',
   found.data.chats.some((c) => c.title === 'Матвей'), found.data.chats);
 
+// Имя бота спрашиваем у Telegram: человеку незачем идти за ним в BotFather,
+// чтобы подставить в команду.
+check('имя бота пришло из Telegram',
+  found.data.bot.username === 'mifs_rent_bot', found.data.bot);
+check('команда собрана с этим именем',
+  found.data.command === '/id@mifs_rent_bot', found.data.command);
+
 __telegramUpdates = [];
 found = call('/notify/chats', {}, chatAdmin);
 check('пустой ответ объясняет, что делать',
   found.data.chats.length === 0 && /\/id@/.test(found.data.hint), found.data);
+check('и называет бота по имени, а не «имя_бота»',
+  /@mifs_rent_bot/.test(found.data.hint) && !/имя_бота/.test(found.data.hint),
+  found.data.hint);
+
+// Неверный токен — отдельная причина, и путать её с «бот не в группе» нельзя:
+// пустой список сказал бы человеку не то.
+__telegramMe = { ok: false, description: 'Unauthorized' };
+const badToken = call('/notify/chats', {}, chatAdmin);
+check('неверный токен назван неверным токеном',
+  badToken.ok === false && /не признал токен/.test(badToken.error || '') &&
+  /TELEGRAM_BOT_TOKEN/.test(badToken.error || ''), badToken);
+__telegramMe = { ok: true, result: { username: 'mifs_rent_bot', first_name: 'Mifs Rent' } };
 check('без входа чат не ищется',
   call('/notify/chats', {}, '').ok === false, call('/notify/chats', {}, ''));
 

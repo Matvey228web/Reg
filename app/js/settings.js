@@ -236,17 +236,15 @@ const SettingsScreen = (() => {
       <div class="section" data-panel="act" hidden>
         <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Акт сдачи-приёмки</h2>
-        <p class="hint">Акт собирается кнопкой на карточке заказа: копия шаблона,
-          позиции по строкам, сумма прописью, ссылка в чат склада.</p>
+        <p class="hint">Акт собирается сам, как только появился заказ: ссылка уходит
+          в чат склада и остаётся в карточке заказа.</p>
         ${s.act_template_id
-          ? `<p class="hint">Шаблон:
+          ? `<p class="hint">Шаблон готов —
               <a href="https://docs.google.com/document/d/${escapeHtml(s.act_template_id)}/edit"
-                 target="_blank" rel="noopener">открыть и править</a>.
-              Правьте его как обычный документ — формулировки, фамилии, шапку.
-              Подстановки в двойных фигурных скобках трогать нельзя.</p>`
-          : `<p class="hint">Шаблона ещё нет. «Создать шаблон» сделает его из акта
-              колледжа — того самого документа, только без данных студента:
-              вместо них подстановки. Дальше это обычный документ в вашем Диске.</p>`}
+                 target="_blank" rel="noopener">открыть и править</a>. Это обычный документ:
+              меняйте формулировки и шапку, не трогайте только слова в двойных скобках.</p>`
+          : `<p class="hint">Шаблона пока нет — акты не собираются. Нажмите «Создать шаблон»:
+              получится акт колледжа без данных студента.</p>`}
         <div id="settings-act-error"></div>
         <div class="form-group">
           <div class="field field--stacked">
@@ -258,26 +256,6 @@ const SettingsScreen = (() => {
             <label for="set-act_director">Директор в договоре</label>
             <input id="set-act_director" type="text" placeholder="Директора Керзиной О.А."
                    value="${escapeHtml(String(s.act_director || ""))}" />
-          </div>
-          <div class="field field--stacked">
-            <label for="set-act_template_id">Шаблон: ссылка на документ</label>
-            <input id="set-act_template_id" type="text"
-                   placeholder="https://docs.google.com/document/d/…"
-                   autocapitalize="off" autocorrect="off" spellcheck="false"
-                   value="${escapeHtml(String(s.act_template_id || ""))}" />
-            <p class="hint">Можно подставить свой документ — например, если колледж
-              поменял акт. Вставьте ссылку целиком, идентификатор система возьмёт сама.
-              В документе должны стоять подстановки:
-              <code>{{НОМЕР}} {{ДАТА}} {{ФИО}} {{ТЕЛЕФОН}} {{ПРОЕКТ}} {{С}} {{ПО}}
-              {{СУММА}} {{СУММА_СЛОВАМИ}} {{МАСТЕР}} {{МАСТЕР_КРАТКО}} {{ДИРЕКТОР}}</code>,
-              а в одной ячейке таблицы позиций — <code>{{ПОЗИЦИИ}}</code>: по ней
-              система находит таблицу и строку-образец.</p>
-          </div>
-          <div class="field field--stacked">
-            <label for="set-act_folder_id">Папка для готовых актов</label>
-            <input id="set-act_folder_id" type="text" placeholder="идентификатор папки или пусто"
-                   autocapitalize="off" autocorrect="off" spellcheck="false"
-                   value="${escapeHtml(String(s.act_folder_id || ""))}" />
           </div>
         </div>
         <button class="btn" id="settings-act-save">Сохранить</button>
@@ -323,6 +301,7 @@ const SettingsScreen = (() => {
           ${s.notify_chat_id
             ? `<b>${escapeHtml(String(s.notify_chat_id))}</b>`
             : "не выбран — бот не знает, куда писать"}.</p>
+        <p class="hint" id="settings-bot-who" hidden></p>
         <div id="settings-bot-result"></div>
         <button class="btn btn--secondary" id="settings-bot-find">Найти чат склада</button>
         <button class="btn btn--secondary" id="settings-bot-test" style="margin-top:8px;">Проверить связь с чатом</button>
@@ -474,8 +453,6 @@ const SettingsScreen = (() => {
         settings: {
           act_master: document.getElementById("set-act_master").value.trim(),
           act_director: document.getElementById("set-act_director").value.trim(),
-          act_template_id: document.getElementById("set-act_template_id").value.trim(),
-          act_folder_id: document.getElementById("set-act_folder_id").value.trim(),
         },
       });
       data.settings = res.settings;
@@ -514,10 +491,26 @@ const SettingsScreen = (() => {
       load();
     } catch (err) {
       TG.hapticError();
-      showBoxError("settings-act-error", err.message);
+      showActError(err.message);
       btn.disabled = false;
       btn.textContent = again ? "Пересоздать шаблон" : "Создать шаблон";
     }
+  }
+
+  // Отказ с ссылкой внутри — это разовая настройка на стороне Google. Ссылку
+  // делаем кнопкой: читать адрес с телефона и набирать его руками незачем.
+  function showActError(message) {
+    const box = document.getElementById("settings-act-error");
+    const url = (String(message).match(/https?:\/\/\S+/) || [])[0];
+    if (!url) { showBoxError("settings-act-error", message); return; }
+    const words = String(message).replace(url, "").replace(/\s+/g, " ").trim();
+    box.innerHTML = `
+      <div class="error-box">
+        <p style="margin:0 0 8px;">${escapeHtml(words)}</p>
+        <button class="btn btn--secondary" id="settings-act-fix">Открыть страницу Google</button>
+      </div>`;
+    document.getElementById("settings-act-fix")
+      .addEventListener("click", () => TG.openLink(url));
   }
 
   async function savePublicOrders() {
@@ -588,6 +581,10 @@ const SettingsScreen = (() => {
     out.innerHTML = skeleton(2);
     try {
       const res = await apiPost("/notify/chats", {});
+      // Как зовут бота, знает Telegram — показываем сразу с готовой командой.
+      // Без этого человеку приходилось идти в BotFather за именем, чтобы
+      // подставить его в подсказку вида «/id@имя_бота».
+      showBotName(res);
       if (!res.chats.length) {
         out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(res.hint)}</div></div>`;
         return;
@@ -615,6 +612,18 @@ const SettingsScreen = (() => {
     if (type === "private") return "личная переписка";
     if (type === "channel") return "канал";
     return "группа";
+  }
+
+  // Имя бота и команда. Команду ставим тем же начертанием, каким в Telegram
+  // выглядят команды, — чтобы её переписали в чат как есть.
+  function showBotName(res) {
+    const box = document.getElementById("settings-bot-who");
+    const bot = res.bot || {};
+    if (!box || !bot.username) return;
+    box.hidden = false;
+    box.innerHTML = `Бот: <b>@${escapeHtml(bot.username)}</b>. Чтобы он услышал чат, ` +
+      `напишите в группе <code>${escapeHtml(res.command || "/id@" + bot.username)}</code> — ` +
+      `команда может быть любая, важно только, чтобы она дошла до бота.`;
   }
 
   // Выбранный чат сохраняем сразу: заставлять человека переписывать число

@@ -2821,14 +2821,21 @@ function handleNotifyChats(payload, token) {
       "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
   }
 
-  var res;
-  try {
-    res = UrlFetchApp.fetch("https://api.telegram.org/bot" + botTok +
-      "/getUpdates?limit=100", { muteHttpExceptions: true });
-  } catch (e) {
-    throw apiError(502, "Не получилось спросить Telegram: " + e);
+  // Сначала — как зовут бота. Спрашиваем, а не держим в настройке: имя есть у
+  // Telegram, и человеку незачем его где-то искать, чтобы написать команду.
+  // Заодно проверяется сам токен: неверный виден здесь, а не в ту минуту,
+  // когда бот должен был написать о просрочке.
+  var me = telegramCall(botTok, "getMe");
+  if (!me.ok) {
+    throw apiError(502, "Telegram не признал токен: " +
+      (me.description || "неизвестная причина") +
+      ". Проверьте TELEGRAM_BOT_TOKEN в Script Properties — возможно, токен " +
+      "отозван или скопирован не целиком.");
   }
-  var body = JSON.parse(res.getContentText() || "{}");
+  var username = String((me.result || {}).username || "");
+  var command = username ? "/id@" + username : "/id";
+
+  var body = telegramCall(botTok, "getUpdates?limit=100");
   if (!body.ok) {
     throw apiError(502, "Telegram отказал: " + (body.description || "неизвестная причина"));
   }
@@ -2856,10 +2863,29 @@ function handleNotifyChats(payload, token) {
   return {
     chats: chats,
     current: String(getSettings().notify_chat_id || ""),
+    bot: {
+      username: username,
+      name: String((me.result || {}).first_name || ""),
+    },
+    command: command,
     hint: chats.length ? "" :
-      "Бот пока не слышал ни одного сообщения. Добавьте его в группу склада и " +
-      "напишите там «/id@имя_бота» — команду он слышит даже с включённой приватностью.",
+      "Бот пока не слышал ни одного сообщения. Добавьте " +
+      (username ? "@" + username : "своего бота") + " в группу склада и напишите там «" +
+      command + "» — команду он слышит даже с включённой приватностью.",
   };
+}
+
+// Один запрос к Telegram. Отдельно, потому что ручка спрашивает дважды —
+// сначала имя бота, потом сообщения, — и разбор ответа у них общий.
+function telegramCall(botTok, method) {
+  var res;
+  try {
+    res = UrlFetchApp.fetch("https://api.telegram.org/bot" + botTok + "/" + method,
+      { muteHttpExceptions: true });
+  } catch (e) {
+    throw apiError(502, "Не получилось спросить Telegram: " + e);
+  }
+  return JSON.parse(res.getContentText() || "{}");
 }
 
 function handleNotifyTest(payload, token) {
@@ -4267,7 +4293,19 @@ function htmlToDoc(html, name) {
   var code = res.getResponseCode();
   var body = res.getContentText();
   if (code >= 300) {
-    throw apiError(502, "Диск не принял шаблон (" + code + "): " + body.slice(0, 200));
+    var msg = "";
+    try { msg = JSON.parse(body).error.message || ""; } catch (e) { msg = body.slice(0, 200); }
+    // Так Google отвечает, когда в облачном проекте скрипта не включён доступ
+    // к Диску. Это разовая настройка владельца, и ссылка на неё есть в самом
+    // ответе — вытаскиваем номер проекта и говорим человеку одну фразу вместо
+    // страницы английского текста.
+    var proj = (msg.match(/project (\d+)/) || [])[1];
+    if (code === 403 && proj) {
+      throw apiError(409, "Google просит один раз разрешить доступ к Диску. " +
+        "Откройте https://console.cloud.google.com/apis/library/drive.googleapis.com?project=" +
+        proj + " — нажмите Enable, вернитесь и создайте шаблон снова.");
+    }
+    throw apiError(502, "Диск не принял шаблон (" + code + "): " + msg);
   }
   var data = JSON.parse(body || "{}");
   if (!data.id) throw apiError(502, "Диск не вернул идентификатор шаблона");
