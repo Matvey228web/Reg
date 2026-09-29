@@ -1,0 +1,28 @@
+name = "mifs-rent-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Собственный адрес вида mifs-rent-api.<поддомен>.workers.dev. Свой домен для
+# этого не нужен, а сайт обращается к воркеру с другого адреса — CORS
+# проставляет сам воркер.
+workers_dev = true
+
+# Добор заявок, которые не доехали до таблицы с первого раза. Раз в пять
+# минут: студент ответ уже получил, спешить некуда.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+# Адрес веб-приложения Apps Script (тот же, что раньше стоял в js/config.js).
+# Это не секрет: он всё равно уходил в браузер каждого сотрудника.
+UPSTREAM_URL = "https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec"
+# "0" — отключить кэш целиком, не выкладывая новую версию. Правится в панели
+# Cloudflare: Workers → mifs-rent-api → Settings → Variables.
+CACHE_ENABLED = "1"
+
+# Хранилище: кэш чтений и очередь заявок. Не секрет — это идентификатор, а не
+# доступ. Создаётся один раз:
+#   npx wrangler kv namespace create CACHE
+[[kv_namespaces]]
+binding = "CACHE"
+id = "ce621435546e468baa30c7764592be9f"
