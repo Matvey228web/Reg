@@ -86,9 +86,15 @@ npx wrangler@latest pages deploy <папка> --project-name=mifs-rent \
 Переключение с демо-режима на живой бэкенд — в `app/js/config.js`:
 
 ```js
-WEBHOOK_BASE_URL: "https://script.google.com/macros/s/ВАШ_ID/exec",
+WEBHOOK_BASE_URL: "https://mifs-rent-api.<поддомен>.workers.dev",
 MOCK_MODE: false,
 ```
+
+Адрес Worker, а не таблицы напрямую: Apps Script отвечает 6–9 секунд на каждое
+чтение (замерено), Worker из кэша — 0,3. Сам адрес таблицы живёт в
+`worker/wrangler.toml` как `UPSTREAM_URL`. Worker можно выключить в любой
+момент: поставьте здесь адрес таблицы и выложите приложение — всё продолжит
+работать, просто медленно.
 
 ---
 

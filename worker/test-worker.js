@@ -120,12 +120,31 @@ ok("а неудачная запись — нет", await (async () => {
   return after.cache === "hit";
 })(), "отказ таблицы не должен выбрасывать прогретый кэш");
 
-console.log("\n== что нельзя класть в общий кэш ==");
+console.log("\n== личный ответ кэшируется каждому свой ==");
+// В настройках есть «кто вы», поэтому общий кэш им не годится. Но и мимо
+// кэша их пускать нельзя: это самый медленный экран. Ключ получает отпечаток
+// токена — свой у каждого.
 upstream.calls = [];
 upstream.reply = { ok: true, data: { me: { full_name: "Мария" } }, error: null, status: 200 };
 await call("/settings/get", {}, "tok-1");
-await call("/settings/get", {}, "tok-1");
-ok("настройки не кэшируются — в них есть «кто вы»", upstream.calls.length === 2, upstream.calls);
+let mine = await call("/settings/get", {}, "tok-1");
+ok("своему — из кэша", mine.cache === "hit" && upstream.calls.length === 1, upstream.calls);
+
+// Второй сотрудник входит со своим токеном: Worker обязан пойти в таблицу, а
+// не показать ему ответ, собранный для первого.
+await env.CACHE.put("sess:tok-2", "1");
+upstream.reply = { ok: true, data: { me: { full_name: "Иван" } }, error: null, status: 200 };
+const other = await call("/settings/get", {}, "tok-2");
+ok("чужому — не из кэша", other.cache === "miss", other.cache);
+ok("и ответ его собственный", other.data.data.me.full_name === "Иван", other.data.data);
+mine = await call("/settings/get", {}, "tok-1");
+ok("а первому по-прежнему отдаётся его ответ",
+   mine.cache === "hit" && mine.data.data.me.full_name === "Мария", mine.data.data);
+
+upstream.calls = [];
+const stranger = await call("/settings/get", {}, "чужой-неподтверждённый");
+ok("без подтверждённого токена кэша не видно",
+   stranger.cache === "miss" && upstream.calls.length === 1, stranger.cache);
 
 console.log("\n== вход и принудительное обновление ==");
 upstream.reply = { ok: true, data: { token: "свежий", full_name: "Мария" }, error: null, status: 200 };
@@ -250,6 +269,27 @@ ok("первый запрос идёт в таблицу", r.cache === "miss", r
 r = await call("/public/catalog", { from: "2026-10-01", to: "2026-10-02" });
 ok("второй — из кэша, хотя токена нет", r.cache === "hit" && upstream.calls.length === 1,
    { cache: r.cache, calls: upstream.calls });
+
+console.log("\n== нажатия, которые не должны выбрасывать кэш ==");
+// Поиск чата, проверка связи и пачка этикеток ничего в складе не меняют.
+// Раньше они считались записью, и одно нажатие «Найти чат склада» стоило
+// складу всего прогретого кэша — то есть следующего ожидания в таблице.
+upstream.reply = listReply([{ item_id: "010101" }]);
+await call("/equipment/list", { category: "all" }, "tok-1");
+for (const harmless of ["/notify/chats", "/notify/test", "/labels/send", "/order/parse"]) {
+  upstream.reply = { ok: true, data: { message: "готово" }, error: null, status: 200 };
+  await call(harmless, {}, "tok-1");
+  upstream.reply = listReply([{ item_id: "010101" }]);
+  const after = await call("/equipment/list", { category: "all" }, "tok-1");
+  ok(harmless + " кэш не выбрасывает", after.cache === "hit", after.cache);
+}
+
+// А настоящая запись — выбрасывает, иначе склад показывал бы выданное свободным.
+upstream.reply = { ok: true, data: { ok: true }, error: null, status: 200 };
+await call("/item/numbers", { item_id: "010101", serial_number: "SN-1" }, "tok-1");
+upstream.reply = listReply([{ item_id: "010101", serial_number: "SN-1" }]);
+const afterWrite = await call("/equipment/list", { category: "all" }, "tok-1");
+ok("а правка предмета — выбрасывает", afterWrite.cache === "miss", afterWrite.cache);
 
 console.log("\n" + (bad ? "❌ ПРОВАЛОВ: " + bad : "✅ Worker: проверки пройдены"));
 process.exit(bad ? 1 : 0);

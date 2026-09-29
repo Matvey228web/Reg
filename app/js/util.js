@@ -104,6 +104,16 @@ function showBoxError(elementId, message) {
   el.innerHTML = message ? `<div class="error-box">${escapeHtml(message)}</div>` : "";
 }
 
+// Печатает ли человек прямо сейчас внутри этого блока. Экраны показывают
+// вчерашние данные сразу и обновляют их молча, когда придёт ответ; если в
+// этот момент перерисовать экран, набранное на середине слова пропадёт.
+function isTyping(containerSelector) {
+  const el = document.activeElement;
+  if (!el || !el.closest) return false;
+  if (!/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return false;
+  return !!el.closest(containerSelector);
+}
+
 // Заглушки в форме будущих карточек вместо надписи «Загрузка…»: видно, что
 // именно грузится, и экран не прыгает, когда данные приходят.
 function skeleton(count = 4) {

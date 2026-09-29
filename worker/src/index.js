@@ -43,11 +43,20 @@ const PUBLIC_READS = new Set(["/public/catalog"]);
 // нашей проблемой, а не случайным сбоем.
 const DELIVER_TRIES = 10;
 
-// Записи, которые кэша не касаются: ничего в складе не меняют.
-const HARMLESS = new Set(["/auth/login", "/notify/test", "/notify/overdue", "/order/parse"]);
+// Записи, которые кэша не касаются: ничего в складе не меняют. Разбор
+// вставленного сообщения, отправка в Telegram, поиск чата, пачка этикеток —
+// после них каталог и заказы те же, что были. Если считать их записями, то
+// одно нажатие «Найти чат склада» выбрасывало бы весь прогретый кэш склада.
+const HARMLESS = new Set([
+  "/auth/login", "/notify/test", "/notify/overdue", "/notify/chats",
+  "/order/parse", "/labels/send",
+]);
 
-// Ответы, которые зависят от того, КТО спрашивает: их нельзя класть в общий
-// кэш, иначе складмен увидит панель администратора, а админ — чужое имя.
+// Ответы, которые зависят от того, КТО спрашивает: складмен не должен увидеть
+// панель администратора, а админ — чужое имя. В общий кэш они не идут, но и
+// мимо кэша не идут тоже: ключ получает ещё и отпечаток токена, то есть у
+// каждого он свой. Иначе самый медленный экран — «Настройки» — остался бы
+// медленным, а именно про него и спрашивают.
 const PERSONAL = new Set(["/settings/get"]);
 
 export default {
@@ -75,10 +84,13 @@ export default {
     // Кэш отключается целиком одной переменной окружения: если что-то пойдёт
     // не так на складе, чинить это не должно требовать выкладки.
     const enabled = String(env.CACHE_ENABLED || "1") !== "0";
-    const cacheable = enabled && READS.has(endpoint) && !PERSONAL.has(endpoint) && !body.fresh;
+    const cacheable = enabled && READS.has(endpoint) && !body.fresh;
+    // Личный ответ кладётся под своим ключом — по отпечатку токена. Общий
+    // ответ (каталог, заказы) — под общим: он у всех одинаковый.
+    const who = PERSONAL.has(endpoint) ? token : "";
 
     if (cacheable && PUBLIC_READS.has(endpoint)) {
-      const key = await cacheKey(env, endpoint, body.payload);
+      const key = await cacheKey(env, endpoint, body.payload, who);
       const hit = await env.CACHE.get(key);
       if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
     } else if (cacheable && token) {
@@ -86,7 +98,7 @@ export default {
       // подделанный токен получил бы весь каталог, не заходя в систему.
       const known = await env.CACHE.get("sess:" + token);
       if (known) {
-        const key = await cacheKey(env, endpoint, body.payload);
+        const key = await cacheKey(env, endpoint, body.payload, who);
         const hit = await env.CACHE.get(key);
         if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
       }
@@ -115,8 +127,8 @@ export default {
       ctx.waitUntil(bumpGeneration(env));
     }
 
-    if (cacheable && answer.ok) {
-      const key = await cacheKey(env, endpoint, body.payload);
+    if (cacheable && answer.ok && (token || PUBLIC_READS.has(endpoint))) {
+      const key = await cacheKey(env, endpoint, body.payload, who);
       ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answer), { expirationTtl: TTL.cache }));
     }
 
@@ -264,9 +276,14 @@ async function bumpGeneration(env) {
   await env.CACHE.put("gen", String(current + 1));
 }
 
-async function cacheKey(env, endpoint, payload) {
+// who — пусто для общих ответов и токен для личных. Токен в ключ идёт
+// отпечатком, а не как есть: ключи KV видны в панели Cloudflare, и раздавать
+// там действующие токены незачем.
+async function cacheKey(env, endpoint, payload, who) {
   const gen = await generation(env);
-  return "c:" + gen + ":" + endpoint + ":" + (await hash(JSON.stringify(payload || {})));
+  const mine = who ? ":u" + (await hash(who)) : "";
+  return "c:" + gen + ":" + endpoint + ":" +
+    (await hash(JSON.stringify(payload || {}))) + mine;
 }
 
 async function hash(value) {

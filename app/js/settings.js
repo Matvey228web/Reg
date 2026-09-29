@@ -7,6 +7,7 @@
 
 const SettingsScreen = (() => {
   let data = null;   // { settings, categories, limits, maintenance }
+  const CACHE = "settings";
 
   // Подписи короткие: это названия строк, а не предложения. Объяснение к каждой
   // приходит с бэкенда в limits и печатается пояснением под строкой — раньше
@@ -56,11 +57,29 @@ const SettingsScreen = (() => {
       bindAccount();
       return;
     }
-    box.innerHTML = skeleton(4);
-    try {
-      data = await apiPost("/settings/get", {});
+    // Показываем прошлые настройки сразу, а за свежими идём молча. Экран
+    // настроек — самый медленный в приложении: одно чтение, но оно упирается
+    // в потолок таблицы, и всё это время человек смотрел на заглушки. Сроки
+    // входа и ФИО мастера меняются раз в месяц, поэтому показать вчерашние и
+    // тут же обновить — честнее, чем держать пустой экран.
+    const known = Cache.one(CACHE);
+    if (known) {
+      data = known;
       render();
+      if (Cache.isFresh(CACHE)) return;
+    } else {
+      box.innerHTML = skeleton(4);
+    }
+    try {
+      const fresh = await apiPost("/settings/get", {});
+      Cache.setOne(CACHE, fresh);
+      data = fresh;
+      // Если человек уже что-то печатает в поле, перерисовка стёрла бы
+      // набранное. Данные сохранены, покажем их при следующем заходе.
+      if (!isTyping("#settings-content")) render();
     } catch (err) {
+      // Кэш уже нарисован — незачем менять экран на сообщение об ошибке.
+      if (known) { showBoxError("settings-error", err.message); return; }
       // Пустой экран с одной красной строкой ничего не объясняет. Если бэкенд
       // просто старее приложения — показываем, что именно сделать, и красную
       // строку не дублируем: инструкция и есть сообщение об ошибке.
@@ -456,6 +475,7 @@ const SettingsScreen = (() => {
         },
       });
       data.settings = res.settings;
+      Cache.setOne(CACHE, data);
       TG.hapticSuccess();
       TG.showAlert("Сохранено");
       // Ссылка «открыть и править» и подпись про шаблон зависят от того, что
@@ -486,6 +506,9 @@ const SettingsScreen = (() => {
     try {
       const res = await apiPost("/act/template", again ? { replace: true } : {});
       data.settings.act_template_id = res.template_id;
+      // Кэш здесь надо сбросить, а не подправить: шаблон меняет и подписи на
+      // экране, и то, что вернёт бэкенд, — пусть load() сходит за настоящим.
+      Cache.clear(CACHE);
       TG.hapticSuccess();
       TG.showAlert("Шаблон создан. Он в вашем Google Диске, правьте как обычный документ.");
       load();
@@ -527,6 +550,7 @@ const SettingsScreen = (() => {
         },
       });
       data.settings = res.settings;
+      Cache.setOne(CACHE, data);
       TG.hapticSuccess();
       TG.showAlert(Number(res.settings.public_orders) === 1
         ? "Сайт теперь отправляет заявки сам"
@@ -556,6 +580,7 @@ const SettingsScreen = (() => {
     try {
       const res = await apiPost("/settings/set", { settings: payload });
       data.settings = res.settings;
+      Cache.setOne(CACHE, data);
       // Главная читает адрес сайта из сессии — без этого кнопка появилась бы
       // только после следующего входа.
       const me = Auth.getSession();
@@ -634,6 +659,7 @@ const SettingsScreen = (() => {
     try {
       const res = await apiPost("/settings/set", { settings: { notify_chat_id: chatId } });
       data.settings = res.settings;
+      Cache.setOne(CACHE, data);
       const me = Auth.getSession();
       if (me) Auth.setSession({ ...me, settings: res.settings });
       TG.hapticSuccess();
@@ -691,8 +717,12 @@ const SettingsScreen = (() => {
   // Справочник категорий лежит в сессии, и по нему рисуются фильтры каталога.
   // После правки его надо освежить, иначе каталог продолжит показывать старое
   // название до следующего входа.
+  // После правки категорий идём за свежим минуя кэш — и кладём ответ в кэш
+  // сами. Иначе следующий заход показал бы список без только что добавленной
+  // категории и выглядел бы так, будто правка не сохранилась.
   async function reloadAndRefreshSession() {
-    data = await apiPost("/settings/get", {});
+    data = await apiPost("/settings/get", {}, { fresh: true });
+    Cache.setOne(CACHE, data);
     const session = Auth.getSession();
     if (session) Auth.setSession({ ...session, categories: data.categories, settings: data.settings });
     render();

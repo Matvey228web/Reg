@@ -6,6 +6,7 @@
 // переписыванием ссылок в журналах.
 
 const ModelsScreen = (() => {
+  const CACHE = "models";
   let models = [];      // [{ category, model_code, model_name }]
   let counts = {};      // "CAM|01" -> сколько позиций
   let query = "";
@@ -35,12 +36,26 @@ const ModelsScreen = (() => {
 
   async function load() {
     const box = document.getElementById("models-content");
-    box.innerHTML = skeleton(4);
-    try {
-      models = await apiPost("/models/list", {});
+    // Прошлый список — сразу, свежий — молча вслед. Список моделей меняется
+    // редко (переезд модели между категориями, новая цена), а ждать чтения из
+    // таблицы приходилось на каждом заходе.
+    const known = Cache.items(CACHE);
+    if (known && known.length) {
+      models = known;
       recount();
       render();
+      if (Cache.isFresh(CACHE)) return;
+    } else {
+      box.innerHTML = skeleton(4);
+    }
+    try {
+      const fresh = await apiPost("/models/list", {});
+      Cache.set(CACHE, fresh);
+      models = fresh;
+      recount();
+      if (!isTyping("#models-content")) render();
     } catch (err) {
+      if (known && known.length) { showBoxError("models-error", err.message); return; }
       box.innerHTML = "";
       showBoxError("models-error", err.message);
     }
@@ -164,6 +179,7 @@ const ModelsScreen = (() => {
         category: parts[0], model_code: parts[1], price: String(value).trim(),
       });
       model.price = res.price;
+      Cache.set(CACHE, models);
       TG.hapticSuccess();
     } catch (err) {
       TG.hapticError();
@@ -187,6 +203,7 @@ const ModelsScreen = (() => {
         models: [{ category: parts[0], model_code: parts[1], section: value }],
       });
       model.section = value;
+      Cache.set(CACHE, models);
       TG.hapticSuccess();
     } catch (err) {
       TG.hapticError();
@@ -226,8 +243,10 @@ const ModelsScreen = (() => {
         category: from, model_code: code, to_category: to,
       });
       TG.hapticSuccess();
-      // Номера вещей изменились — кэш каталога устарел целиком.
+      // Номера вещей изменились — кэш каталога устарел целиком, а список
+      // моделей поедет за свежим: load() ниже уже не увидит прежний.
       Cache.clear("equipment");
+      Cache.clear(CACHE);
       TG.showAlert(resultText(res));
       await load();
     } catch (err) {

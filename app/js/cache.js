@@ -29,6 +29,18 @@ const Cache = (() => {
     return entry ? entry.items : null;
   }
 
+  // Один объект вместо списка: так хранятся «Настройки» — там не строки, а
+  // словарь с категориями, сроками и сводкой. Лежит в той же форме, что и
+  // списки, поэтому возраст и свежесть считаются тем же кодом.
+  function one(name) {
+    const list = items(name);
+    return list && list.length ? list[0] : null;
+  }
+
+  function setOne(name, value) {
+    set(name, [value]);
+  }
+
   function set(name, list) {
     try {
       localStorage.setItem(key(name), JSON.stringify({ items: list, saved_at: Date.now() }));
@@ -81,7 +93,7 @@ const Cache = (() => {
     return `обновлено ${hours} часов назад`;
   }
 
-  return { items, get, set, age, ageText, isFresh, patch, clear, FRESH_MS };
+  return { items, one, get, set, setOne, age, ageText, isFresh, patch, clear, FRESH_MS };
 })();
 
 // Строка над списком: когда данные получены и кнопка обновления.
