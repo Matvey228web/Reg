@@ -1222,6 +1222,22 @@ const MockAPI = {
         return { staff_id };
       }
 
+      // Поиск чата. В демо Telegram нет, поэтому отдаём то, что отдал бы он:
+      // группу, личную переписку и признак того, какой чат выбран сейчас.
+      case "/notify/chats": {
+        MockStore.requireAdmin(token);
+        return {
+          chats: [
+            { chat_id: "-1001234567890", title: "Склад Киноколледж #40",
+              type: "supergroup", at: new Date().toISOString() },
+            { chat_id: "482913756", title: "Мария Сидорова",
+              type: "private", at: new Date().toISOString() },
+          ],
+          current: String(mockSettings.notify_chat_id || ""),
+          hint: "",
+        };
+      }
+
       case "/notify/test": {
         MockStore.requireAdmin(token);
         if (!String(body.chat_id || "").trim()) {

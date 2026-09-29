@@ -319,8 +319,13 @@ const SettingsScreen = (() => {
         <p class="hint">Бот пишет в чат склада о дефектах и о просрочках. Токен бота — не здесь,
           а в Script Properties, ключ TELEGRAM_BOT_TOKEN (эти настройки видит любой
           сотрудник). Как завести — в BOT.md.</p>
+        <p class="hint">Чат склада сейчас:
+          ${s.notify_chat_id
+            ? `<b>${escapeHtml(String(s.notify_chat_id))}</b>`
+            : "не выбран — бот не знает, куда писать"}.</p>
         <div id="settings-bot-result"></div>
-        <button class="btn btn--secondary" id="settings-bot-test">Проверить связь с чатом</button>
+        <button class="btn btn--secondary" id="settings-bot-find">Найти чат склада</button>
+        <button class="btn btn--secondary" id="settings-bot-test" style="margin-top:8px;">Проверить связь с чатом</button>
         <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
       </div>
 
@@ -573,6 +578,68 @@ const SettingsScreen = (() => {
     }
   }
 
+  // Поиск чата. В Telegram на телефоне id чата не показывают вовсе, а прежний
+  // способ — открыть в браузере getUpdates с токеном в адресе — заодно уносил
+  // токен в историю браузера. Спрашиваем у бэкенда: он ходит в Telegram сам.
+  async function findChats() {
+    const btn = document.getElementById("settings-bot-find");
+    const out = document.getElementById("settings-bot-result");
+    btn.disabled = true;
+    out.innerHTML = skeleton(2);
+    try {
+      const res = await apiPost("/notify/chats", {});
+      if (!res.chats.length) {
+        out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(res.hint)}</div></div>`;
+        return;
+      }
+      out.innerHTML = res.chats.map((c) => `
+        <div class="card">
+          <div class="card-title">${escapeHtml(c.title)}</div>
+          <div class="card-sub">${escapeHtml(c.chat_id)} · ${escapeHtml(chatKind(c.type))}${
+            String(c.chat_id) === String(res.current) ? " · сейчас выбран" : ""}</div>
+          <button class="btn btn--secondary" data-pick="${escapeHtml(c.chat_id)}"
+                  style="margin-top:8px;">Это чат склада</button>
+        </div>`).join("");
+      out.querySelectorAll("[data-pick]").forEach((b) => {
+        b.addEventListener("click", () => pickChat(b.dataset.pick, b));
+      });
+    } catch (err) {
+      TG.hapticError();
+      out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(err.message)}</div></div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function chatKind(type) {
+    if (type === "private") return "личная переписка";
+    if (type === "channel") return "канал";
+    return "группа";
+  }
+
+  // Выбранный чат сохраняем сразу: заставлять человека переписывать число
+  // руками в другой подраздел — ровно та работа, от которой мы его избавляем.
+  async function pickChat(chatId, btn) {
+    btn.disabled = true;
+    btn.textContent = "Сохраняем…";
+    try {
+      const res = await apiPost("/settings/set", { settings: { notify_chat_id: chatId } });
+      data.settings = res.settings;
+      const me = Auth.getSession();
+      if (me) Auth.setSession({ ...me, settings: res.settings });
+      TG.hapticSuccess();
+      TG.showAlert("Чат склада сохранён. Проверьте связь — бот напишет в него.");
+      render();
+      bind();
+      showPanel("bot");
+    } catch (err) {
+      TG.hapticError();
+      btn.disabled = false;
+      btn.textContent = "Это чат склада";
+      showBoxError("settings-error", err.message);
+    }
+  }
+
   // Проверка связи и сводка просрочек — одно и то же по форме: нажали, ждём,
   // показали, что ответил Telegram. Отказ здесь ожидаем (нет токена, бота не
   // добавили в чат), поэтому объясняем причину, а не прячем её.
@@ -649,6 +716,8 @@ const SettingsScreen = (() => {
     document.getElementById("settings-act-save").addEventListener("click", saveAct);
     const tplBtn = document.getElementById("settings-act-template");
     if (tplBtn) tplBtn.addEventListener("click", createActTemplate);
+    document.getElementById("settings-bot-find")
+      .addEventListener("click", findChats);
     document.getElementById("settings-bot-test")
       .addEventListener("click", () => bot("/notify/test", "settings-bot-test"));
     document.getElementById("settings-bot-overdue")

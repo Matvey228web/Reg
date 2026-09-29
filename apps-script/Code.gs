@@ -1005,6 +1005,7 @@ function doPost(e) {
       case "/staff/delete": data = handleStaffDelete(payload, token); break;
       case "/staff/set-role": data = handleStaffSetRole(payload, token); break;
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
+      case "/notify/chats": data = handleNotifyChats(payload, token); break;
       case "/notify/test": data = handleNotifyTest(payload, token); break;
       case "/labels/send": data = handleLabelsSend(payload, token); break;
       case "/model/move": data = handleModelMove(payload, token); break;
@@ -2805,6 +2806,60 @@ function handleLabelsSend(payload, token) {
 // Тихая отправка: всё, что зовётся по ходу работы склада, идёт через неё.
 function tgNotify(text) {
   try { tgSend(text); } catch (e) { /* уведомление не важнее самой операции */ }
+}
+
+// Откуда берётся id чата. Раньше инструкция звала открыть в браузере адрес
+// getUpdates со вставленным токеном — то есть носить токен по адресной строке
+// и истории браузера, а в Telegram на телефоне id чата попросту не показывают.
+// Теперь спрашивает сам бэкенд: токен остаётся в Script Properties, а человеку
+// достаётся список чатов, из которых бот слышал сообщения.
+function handleNotifyChats(payload, token) {
+  requireAdmin(token);
+  var botTok = botToken();
+  if (!botTok) {
+    throw apiError(400, "Токен бота не задан. Apps Script → Project Settings → " +
+      "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
+  }
+
+  var res;
+  try {
+    res = UrlFetchApp.fetch("https://api.telegram.org/bot" + botTok +
+      "/getUpdates?limit=100", { muteHttpExceptions: true });
+  } catch (e) {
+    throw apiError(502, "Не получилось спросить Telegram: " + e);
+  }
+  var body = JSON.parse(res.getContentText() || "{}");
+  if (!body.ok) {
+    throw apiError(502, "Telegram отказал: " + (body.description || "неизвестная причина"));
+  }
+
+  // Один чат — одна строка, самое свежее сообщение сверху. В группе бот с
+  // включённой приватностью слышит только команды и служебные сообщения,
+  // поэтому и просим написать в чат «/id@бот».
+  var seen = {};
+  var chats = [];
+  (body.result || []).forEach(function (u) {
+    var msg = u.message || u.edited_message || u.channel_post || u.my_chat_member;
+    var chat = msg && msg.chat;
+    if (!chat || seen[String(chat.id)]) return;
+    seen[String(chat.id)] = true;
+    chats.push({
+      chat_id: String(chat.id),
+      title: String(chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(" ") ||
+        chat.username || "без названия"),
+      type: String(chat.type || ""),
+      at: msg.date ? new Date(msg.date * 1000).toISOString() : "",
+    });
+  });
+  chats.reverse();
+
+  return {
+    chats: chats,
+    current: String(getSettings().notify_chat_id || ""),
+    hint: chats.length ? "" :
+      "Бот пока не слышал ни одного сообщения. Добавьте его в группу склада и " +
+      "напишите там «/id@имя_бота» — команду он слышит даже с включённой приватностью.",
+  };
 }
 
 function handleNotifyTest(payload, token) {

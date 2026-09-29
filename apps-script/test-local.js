@@ -353,12 +353,20 @@ global.Utilities = {
 
 // Подставная сеть: наружу из тестов ничего не уходит, но видно, что ушло бы.
 const sent = [];
+// Что Telegram «ответит» на getUpdates. Тест подставляет свои сообщения.
+let __telegramUpdates = [];
 global.UrlFetchApp = {
   fetch(url, opts) {
     sent.push({ url, opts });
     // Загрузка документа в Диск: разбираем multipart так же, как это сделал бы
     // Google, и складываем получившийся документ в набор — дальше по нему
     // собирается акт.
+    if (/getUpdates/.test(url)) {
+      return {
+        getResponseCode: () => 200,
+        getContentText: () => JSON.stringify({ ok: true, result: __telegramUpdates }),
+      };
+    }
     if (/upload\/drive\/v3\/files/.test(url)) {
       const raw = Buffer.from(opts.payload).toString('utf8');
       const meta = JSON.parse(raw.match(/\{[\s\S]*?\}/)[0]);
@@ -2140,6 +2148,42 @@ check('копейки на месте',
 check('разряды пробелами', moneyDigits(476718) === '476 718', moneyDigits(476718));
 check('дата как в старом акте', humanRuDate('2026-10-01') === '01-10-2026г.');
 check('фамилия сокращается', shortName('Гриднев Егор Олегович') === 'Гриднев Е.О.');
+
+console.log('\n== чат склада находится сам ==');
+// В Telegram на телефоне id чата не показывают, а открывать getUpdates в
+// браузере — значит носить токен по адресной строке. Спрашивает бэкенд.
+const chatAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+scriptProps.TELEGRAM_BOT_TOKEN = '';
+check('без токена бота сказано, куда его класть',
+  /TELEGRAM_BOT_TOKEN/.test(call('/notify/chats', {}, chatAdmin).error || ''),
+  call('/notify/chats', {}, chatAdmin));
+scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+
+__telegramUpdates = [
+  { message: { date: 1759100000, chat: { id: -1001234567890, title: 'Склад', type: 'supergroup' } } },
+  { message: { date: 1759100100, chat: { id: -1001234567890, title: 'Склад', type: 'supergroup' } } },
+  { message: { date: 1759100200, chat: { id: 482913756, first_name: 'Матвей', type: 'private' } } },
+];
+let found = call('/notify/chats', {}, chatAdmin);
+check('чаты нашлись', found.ok === true && found.data.chats.length === 2, found);
+check('повторы одного чата не плодятся',
+  found.data.chats.filter((c) => c.chat_id === '-1001234567890').length === 1,
+  found.data.chats);
+check('свежий чат сверху',
+  found.data.chats[0].chat_id === '482913756', found.data.chats.map((c) => c.chat_id));
+check('минус у группы на месте',
+  found.data.chats.some((c) => c.chat_id === '-1001234567890'), found.data.chats);
+check('название группы взято из Telegram',
+  found.data.chats.some((c) => c.title === 'Склад'), found.data.chats);
+check('у личной переписки вместо названия имя',
+  found.data.chats.some((c) => c.title === 'Матвей'), found.data.chats);
+
+__telegramUpdates = [];
+found = call('/notify/chats', {}, chatAdmin);
+check('пустой ответ объясняет, что делать',
+  found.data.chats.length === 0 && /\/id@/.test(found.data.hint), found.data);
+check('без входа чат не ищется',
+  call('/notify/chats', {}, '').ok === false, call('/notify/chats', {}, ''));
 
 console.log('\n== акт: шаблон ==');
 const actAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
