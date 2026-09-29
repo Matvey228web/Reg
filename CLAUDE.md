@@ -28,7 +28,7 @@
 | Подраздел настроек | секции `data-panel` | `app/js/settings.js` |
 | Ответ демо-режима | ветка `case "/notify/hello"` | `app/js/mock-data.js` |
 | Страница сайта | `site/item.html` + `site/item.js` | `site/` |
-| Проверка | `bot_test.js`, `chat_test.js` | наборы Playwright |
+| Проверка | `test-local.js` (бэкенд), `test-worker.js` (Worker) | `apps-script/`, `worker/` |
 
 Новая ручка почти никогда не бывает одинокой: за ней идут `case` в `doPost`,
 ветка в `mock-data.js`, кнопка в приложении и проверка. Аналог даёт весь этот
@@ -62,6 +62,7 @@
 
 - `node apps-script/test-local.js` — бэкенд на эмуляторе таблицы.
 - `node worker/test-worker.js` — Worker с подставными KV и сетью.
-- Наборы Playwright по затронутым экранам.
+- Браузерные наборы (Playwright) по затронутым экранам — живут вне
+  репозитория, это инструмент разработки, а не часть системы (`README.md`).
 - Выкладка — `docs/DEPLOY.md`. Версия `?v=` в `app/index.html` поднимается
   вместе с любой правкой `app/js/*`: Telegram держит файлы в кэше.
