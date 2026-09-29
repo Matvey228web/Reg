@@ -144,8 +144,26 @@ async function push() {
     throw new Error("Ожидался ровно один .gs файл, а их " + server.length +
       ": " + server.map((f) => f.name).join(", ") + ". Останавливаюсь, чтобы не затереть чужое.");
   }
-  const files = current.files.map((f) =>
+  let files = current.files.map((f) =>
     f.type === "SERVER_JS" ? { name: f.name, type: f.type, source } : f);
+
+  // HTML-файлы из репозитория: там лежит шаблон акта — выгрузка присланного
+  // колледжем документа. Код читает его через HtmlService, значит файл должен
+  // быть в самом проекте, а не рядом с ним.
+  fs.readdirSync(path.join(REPO, "apps-script"))
+    .filter((n) => n.endsWith(".html"))
+    .forEach((n) => {
+      const name = n.replace(/\.html$/, "");
+      const html = fs.readFileSync(path.join(REPO, "apps-script", n), "utf8");
+      const was = files.find((f) => f.type === "HTML" && f.name === name);
+      if (was) {
+        was.source = html;
+        console.log(`html ${name}: обновляется (${html.length} знаков)`);
+      } else {
+        files.push({ name, type: "HTML", source: html });
+        console.log(`html ${name}: добавляется (${html.length} знаков)`);
+      }
+    });
 
   const remote = String(server[0].source || "");
   // Забранную копию оставляем на диске: с ней можно сверяться и после выкладки,

@@ -244,8 +244,9 @@ const SettingsScreen = (() => {
                  target="_blank" rel="noopener">открыть и править</a>.
               Правьте его как обычный документ — формулировки, фамилии, шапку.
               Подстановки в двойных фигурных скобках трогать нельзя.</p>`
-          : `<p class="hint">Шаблона ещё нет. Создайте — получится обычный документ
-              в вашем Диске, дальше правьте его как хотите.</p>`}
+          : `<p class="hint">Шаблона ещё нет. «Создать шаблон» сделает его из акта
+              колледжа — того самого документа, только без данных студента:
+              вместо них подстановки. Дальше это обычный документ в вашем Диске.</p>`}
         <div id="settings-act-error"></div>
         <div class="form-group">
           <div class="field field--stacked">
@@ -257,6 +258,20 @@ const SettingsScreen = (() => {
             <label for="set-act_director">Директор в договоре</label>
             <input id="set-act_director" type="text" placeholder="Директора Керзиной О.А."
                    value="${escapeHtml(String(s.act_director || ""))}" />
+          </div>
+          <div class="field field--stacked">
+            <label for="set-act_template_id">Шаблон: ссылка на документ</label>
+            <input id="set-act_template_id" type="text"
+                   placeholder="https://docs.google.com/document/d/…"
+                   autocapitalize="off" autocorrect="off" spellcheck="false"
+                   value="${escapeHtml(String(s.act_template_id || ""))}" />
+            <p class="hint">Можно подставить свой документ — например, если колледж
+              поменял акт. Вставьте ссылку целиком, идентификатор система возьмёт сама.
+              В документе должны стоять подстановки:
+              <code>{{НОМЕР}} {{ДАТА}} {{ФИО}} {{ТЕЛЕФОН}} {{ПРОЕКТ}} {{С}} {{ПО}}
+              {{СУММА}} {{СУММА_СЛОВАМИ}} {{МАСТЕР}} {{МАСТЕР_КРАТКО}} {{ДИРЕКТОР}}</code>,
+              а в одной ячейке таблицы позиций — <code>{{ПОЗИЦИИ}}</code>: по ней
+              система находит таблицу и строку-образец.</p>
           </div>
           <div class="field field--stacked">
             <label for="set-act_folder_id">Папка для готовых актов</label>
@@ -454,12 +469,17 @@ const SettingsScreen = (() => {
         settings: {
           act_master: document.getElementById("set-act_master").value.trim(),
           act_director: document.getElementById("set-act_director").value.trim(),
+          act_template_id: document.getElementById("set-act_template_id").value.trim(),
           act_folder_id: document.getElementById("set-act_folder_id").value.trim(),
         },
       });
       data.settings = res.settings;
       TG.hapticSuccess();
       TG.showAlert("Сохранено");
+      // Ссылка «открыть и править» и подпись про шаблон зависят от того, что
+      // сохранили: перерисовываем, чтобы не врать до следующего входа.
+      render();
+      bind();
     } catch (err) {
       TG.hapticError();
       showBoxError("settings-act-error", err.message);

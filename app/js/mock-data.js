@@ -23,6 +23,14 @@ const mockSettings = {
   act_director: "",
   act_folder_id: "",
 };
+// Из ссылки — идентификатор, как на живом бэкенде (driveIdFrom в Code.gs).
+function mockDriveId(value) {
+  const v = String(value || "").trim();
+  const m = v.match(/\/(?:d|folders)\/([A-Za-z0-9_-]{20,})/) ||
+            v.match(/[?&]id=([A-Za-z0-9_-]{20,})/);
+  return m ? m[1] : v;
+}
+
 const MOCK_SETTINGS_SPEC = {
   site_url: { def: "", text: true, check: (v) => v === "" || /^https:\/\/[^\s]+$/.test(String(v)),
               hint: "адрес сайта проката целиком, начиная с https:// — или пусто" },
@@ -36,10 +44,14 @@ const MOCK_SETTINGS_SPEC = {
   import_source_id: { text: true, hint: "идентификатор таблицы Google или пусто" },
   public_orders: { min: 0, max: 1, hint: "1 — сайт отправляет заявку сам, 0 — только копипастом" },
   public_orders_per_hour: { min: 1, max: 200, hint: "от 1 до 200" },
-  act_template_id: { text: true, hint: "идентификатор документа-шаблона или пусто" },
+  act_template_id: { text: true, clean: mockDriveId,
+                     check: (v) => v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v),
+                     hint: "ссылка на документ-шаблон или пусто" },
   act_master: { text: true, hint: "ФИО мастера целиком или пусто" },
   act_director: { text: true, hint: "как указывать директора в договоре" },
-  act_folder_id: { text: true, hint: "идентификатор папки для готовых актов или пусто" },
+  act_folder_id: { text: true, clean: mockDriveId,
+                   check: (v) => v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v),
+                   hint: "ссылка на папку для готовых актов или пусто" },
 };
 let mockCats = CONFIG.CATEGORIES.map((c) => ({
   ...c,
@@ -1315,7 +1327,8 @@ const MockAPI = {
           if (spec.text) {
             // Текстовые настройки бэкенд тоже проверяет — мок обязан вести себя
             // так же, иначе кривой адрес ловился бы только на живой таблице.
-            const raw = String(incoming[k]).trim();
+            const raw = spec.clean ? spec.clean(String(incoming[k]).trim())
+                                   : String(incoming[k]).trim();
             if (spec.check && !spec.check(raw)) { rejected.push(k + ": " + spec.hint); return; }
             mockSettings[k] = raw;
             return;

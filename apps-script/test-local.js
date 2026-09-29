@@ -9,6 +9,7 @@
 //
 // Этот файл нужен только разработчику — в Apps Script его вставлять не надо.
 const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 
 class FakeSheet {
@@ -257,6 +258,51 @@ function makeDocBody() {
   return body;
 }
 
+// Шаблон акта читается из репозитория — тот самый файл, который выкладывается
+// в проект Apps Script. Значит проверки идут по настоящему документу колледжа,
+// а не по выдумке теста.
+global.HtmlService = {
+  createHtmlOutputFromFile(name) {
+    const file = path.join(__dirname, name + '.html');
+    const html = fs.readFileSync(file, 'utf8');
+    return { getContent: () => html };
+  },
+};
+global.ScriptApp = { getOAuthToken: () => 'test-token' };
+
+// Преобразование HTML в документ у Google на стороне Диска. Здесь — грубый
+// разбор той же разметки: абзацы абзацами, таблицы сетками. Этого хватает,
+// чтобы проверить и подстановки, и расстановку позиций по ячейкам.
+function docFromHtml(html) {
+  const body = makeDocBody();
+  const strip = (s) => s
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (m, n) => String.fromCharCode(Number(n)))
+    .replace(/\s+/g, ' ')
+    .trim();
+  const inner = (html.match(/<body[^>]*>([\s\S]*)<\/body>/) || [null, html])[1];
+  const blocks = inner.split(/(<table[\s\S]*?<\/table>)/);
+  blocks.forEach((block) => {
+    if (!block) return;
+    if (block.startsWith('<table')) {
+      const rows = (block.match(/<tr[\s\S]*?<\/tr>/g) || []).map((tr) =>
+        (tr.match(/<t[dh][\s\S]*?<\/t[dh]>/g) || []).map(strip));
+      if (rows.length) body.appendTable(rows);
+      return;
+    }
+    block.split(/<\/(?:p|li|h1|h2|h3|div)>/).forEach((piece) => {
+      const text = strip(piece);
+      if (text) body.appendParagraph(text);
+    });
+  });
+  return body;
+}
+
 const docs = new Map();
 global.DocumentApp = {
   ParagraphHeading: { HEADING1: 'h1', HEADING2: 'h2' },
@@ -288,8 +334,12 @@ global.Utilities = {
   base64Decode(str) {
     return Array.from(Buffer.from(String(str), 'base64')).map(b => (b > 127 ? b - 256 : b));
   },
+  // Настоящий newBlob принимает и строку, и массив байтов. Строку берёт
+  // шаблон акта: из неё собирается тело multipart-запроса к Диску.
   newBlob(bytes, type, name) {
-    const buf = Buffer.from(bytes.map(b => (b < 0 ? b + 256 : b)));
+    const buf = typeof bytes === 'string'
+      ? Buffer.from(bytes, 'utf8')
+      : Buffer.from(bytes.map(b => (b < 0 ? b + 256 : b)));
     return { _buf: buf, _type: type, _name: name,
              getName() { return this._name; }, getBytes() { return Array.from(this._buf); } };
   },
@@ -306,7 +356,27 @@ const sent = [];
 global.UrlFetchApp = {
   fetch(url, opts) {
     sent.push({ url, opts });
-    return { getContentText: () => JSON.stringify({ ok: true, result: {} }) };
+    // Загрузка документа в Диск: разбираем multipart так же, как это сделал бы
+    // Google, и складываем получившийся документ в набор — дальше по нему
+    // собирается акт.
+    if (/upload\/drive\/v3\/files/.test(url)) {
+      const raw = Buffer.from(opts.payload).toString('utf8');
+      const meta = JSON.parse(raw.match(/\{[\s\S]*?\}/)[0]);
+      const html = raw.split(/Content-Type: text\/html; charset=UTF-8\r\n\r\n/)[1]
+        .replace(/\r\n--mifs\d+--\s*$/, '');
+      const id = 'doc' + (__docs.size + 1);
+      const body = docFromHtml(html);
+      __docs.set(id, { id, name: meta.name, body,
+        getBody: () => body, getId: () => id, saveAndClose() {} });
+      return {
+        getResponseCode: () => 200,
+        getContentText: () => JSON.stringify({ id }),
+      };
+    }
+    return {
+      getResponseCode: () => 200,
+      getContentText: () => JSON.stringify({ ok: true, result: {} }),
+    };
   },
 };
 let scriptProps = {};
@@ -371,7 +441,7 @@ global.DriveApp = {
 global.MimeType = { CSV: 'text/csv' };
 
 // Загружаем настоящий Code.gs в глобальную область
-const code = fs.readFileSync(require('path').join(__dirname, 'Code.gs'), 'utf8');
+const code = fs.readFileSync(path.join(__dirname, 'Code.gs'), 'utf8');
 (0, eval)(code);
 
 // ---- Хелперы теста ----
@@ -2090,8 +2160,29 @@ check('и запомнен в настройках',
   call('/settings/get', {}, actAdmin).data.settings.act_template_id === tpl.data.template_id);
 check('повторное создание без подтверждения отклонено',
   call('/act/template', {}, actAdmin).status === 409);
+const tplText = __docs.get(tpl.data.template_id).body.getText();
 check('в шаблоне нет ничьих персональных данных',
-  !/Куприянова|Мария/.test(__docs.get(tpl.data.template_id).body.getText()));
+  !/Куприянова|Мария|977 677/.test(tplText));
+// Шаблон — присланный колледжем акт, а не нарисованный заново: проверяем, что
+// в нём осталась их формулировка и их реквизиты.
+check('текст договора — колледжа',
+  /О ПОЛНОЙ МАТЕРИАЛЬНОЙ ОТВЕТСТВЕННОСТИ/.test(tplText) &&
+  /Шаболовка/.test(tplText) && /Приложение № 1/.test(tplText),
+  tplText.slice(0, 120));
+check('все подстановки на месте',
+  ['{{НОМЕР}}', '{{ДАТА}}', '{{ФИО}}', '{{ТЕЛЕФОН}}', '{{ПРОЕКТ}}', '{{С}}', '{{ПО}}',
+   '{{СУММА}}', '{{СУММА_СЛОВАМИ}}', '{{МАСТЕР}}', '{{МАСТЕР_КРАТКО}}', '{{ДИРЕКТОР}}',
+   '{{ПОЗИЦИИ}}'].every((k) => tplText.includes(k)),
+  (tplText.match(/\{\{[^}]+\}\}/g) || []).join(' '));
+const tplTable = __docs.get(tpl.data.template_id).body.getTables()
+  .filter((t) => t.grid[0][0] === '№')[0];
+check('в таблице позиций шапка и одна строка-образец',
+  tplTable && tplTable.grid.length === 2, tplTable && tplTable.grid.length);
+check('столбец «КОЛ-ВО» вместо пустой «МОДЕЛЬ»',
+  tplTable && tplTable.grid[0].join('|') === '№|НАИМЕНОВАНИЕ|КОЛ-ВО|ЗАВОДСКОЙ №|СТОИМОСТЬ (руб.)',
+  tplTable && tplTable.grid[0]);
+check('пятнадцати пустых строк из присланного акта не осталось',
+  tplTable && !tplTable.grid.some((r) => r[0] === '5'), tplTable && tplTable.grid.map((r) => r[0]));
 
 console.log('\n== акт: каждая позиция в свою ячейку ==');
 act = call('/act/build', { order_id: 1 }, actAdmin);
