@@ -105,18 +105,24 @@ const OrderScreen = (() => {
     }
   }
 
-  // Телефон и ник — не текст, а два действия: позвонить и написать. Раньше
-  // это были обычные ссылки, и внутри Telegram они не работали как надо:
-  // t.me открывался браузером на странице «Open in Telegram», то есть до чата
-  // оставалось ещё два нажатия.
+  // Телефон и ник остаются строками, как были, — но по ним можно нажать.
+  //
+  // Телефон — настоящая ссылка tel:, а не вызов из кода. Именно в этом была
+  // поломка: WebView отдаёт номер телефону, когда по ссылке нажал человек, а
+  // переход, сделанный скриптом, молча отбрасывает. Поэтому здесь ссылка и
+  // никаких обработчиков на ней.
+  //
+  // Ник, наоборот, обработчиком: ссылка t.me открылась бы браузером на
+  // странице «Open in Telegram», и до чата осталось бы ещё два нажатия.
   function contactRow(phone, tg) {
     const nick = String(tg || "").replace(/^@/, "");
-    const num = String(phone || "");
-    const buttons = [
-      num ? `<button class="chip-btn" type="button" data-call="${escapeHtml(num)}">${escapeHtml(num)}</button>` : "",
-      nick ? `<button class="chip-btn" type="button" data-tg="${escapeHtml(nick)}">@${escapeHtml(nick)}</button>` : "",
-    ].filter(Boolean);
-    return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
+    const num = String(phone || "").replace(/[^\d+]/g, "");
+    return (phone
+      ? `<div class="card-sub"><a class="tap-line" href="tel:${escapeHtml(num)}">${escapeHtml(phone)}</a></div>`
+      : "") + (nick
+      ? `<div class="card-sub"><a class="tap-line" href="https://t.me/${escapeHtml(nick)}"
+             data-tg="${escapeHtml(nick)}">@${escapeHtml(nick)}</a></div>`
+      : "");
   }
 
   function render(data) {
@@ -285,13 +291,13 @@ const OrderScreen = (() => {
     const allBtn = document.getElementById("order-checkin-all");
     if (allBtn) allBtn.addEventListener("click", () => checkinAll(open));
 
-    // Позвонить и написать. Один слушатель на экран: кнопок две у арендатора и
-    // одна у представителя, и рисуются они в разных местах карточки.
+    // Ник — обработчиком, чтобы переписку открыл сам Telegram. Телефон здесь
+    // не перехватываем: ссылка tel: должна уйти в систему как есть.
     document.getElementById("order-content").addEventListener("click", (e) => {
-      const phone = e.target.closest("[data-call]");
-      if (phone) { TG.call(phone.dataset.call); return; }
       const chat = e.target.closest("[data-tg]");
-      if (chat) TG.openTelegramLink("https://t.me/" + chat.dataset.tg);
+      if (!chat) return;
+      e.preventDefault();
+      TG.openTelegramLink("https://t.me/" + chat.dataset.tg);
     });
   }
 

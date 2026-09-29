@@ -86,26 +86,28 @@ const OrdersScreen = (() => {
   function quickRowHtml(order) {
     const tg = String(order.student_tg || "").replace(/^@/, "");
     const phone = String(order.student_phone || "");
+    // Телефон — настоящая ссылка tel:, а не кнопка с вызовом из кода: WebView
+    // отдаёт номер телефону только по нажатию человека на ссылку.
     const buttons = [
       order.act_url
         ? `<button class="chip-btn" type="button" data-act-url="${escapeHtml(order.act_url)}">Акт</button>` : "",
       tg ? `<button class="chip-btn" type="button" data-tg="${escapeHtml(tg)}">Чат</button>` : "",
-      phone ? `<button class="chip-btn" type="button" data-call="${escapeHtml(phone)}">Позвонить</button>` : "",
+      phone
+        ? `<a class="chip-btn" href="tel:${escapeHtml(phone.replace(/[^\d+]/g, ""))}">Позвонить</a>` : "",
     ].filter(Boolean);
     return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
   }
 
-  // Один слушатель на список: заказов бывает под сотню, и вешать по три
+  // Один слушатель на список: заказов бывает под сотню, и вешать по два
   // обработчика на каждый незачем. Нажатие на кнопку до карточки не доходит —
-  // открывать заказ при этом не надо.
+  // открывать заказ при этом не надо. Звонок в обработчике не участвует: там
+  // ссылка tel:, и перехватывать её нельзя.
   function bindQuickRow(list) {
     list.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act-url]");
       if (act) { e.stopPropagation(); TG.openLink(act.dataset.actUrl); return; }
       const chat = e.target.closest("[data-tg]");
-      if (chat) { e.stopPropagation(); TG.openTelegramLink("https://t.me/" + chat.dataset.tg); return; }
-      const phone = e.target.closest("[data-call]");
-      if (phone) { e.stopPropagation(); TG.call(phone.dataset.call); }
+      if (chat) { e.stopPropagation(); TG.openTelegramLink("https://t.me/" + chat.dataset.tg); }
     });
   }
 

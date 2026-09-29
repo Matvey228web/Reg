@@ -1683,3 +1683,14 @@ select {
   cursor: pointer;
 }
 .chip-btn:active { background: var(--surface-strong); }
+
+/* Строка, по которой можно нажать: телефон и ник в карточке заказа. Выглядит
+   тем же текстом, каким была, но получает цвет действия и запас по высоте —
+   строка в 17 точек для пальца не цель. */
+.tap-line {
+  display: inline-block;
+  padding: 6px 0;
+  color: var(--accent);
+  text-decoration: none;
+}
+.tap-line:active { opacity: .6; }
