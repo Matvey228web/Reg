@@ -276,7 +276,8 @@ console.log("\n== нажатия, которые не должны выбрас�
 // складу всего прогретого кэша — то есть следующего ожидания в таблице.
 upstream.reply = listReply([{ item_id: "010101" }]);
 await call("/equipment/list", { category: "all" }, "tok-1");
-for (const harmless of ["/notify/chats", "/notify/test", "/labels/send", "/order/parse"]) {
+for (const harmless of ["/notify/chats", "/notify/hello", "/notify/test",
+                        "/labels/send", "/order/parse"]) {
   upstream.reply = { ok: true, data: { message: "готово" }, error: null, status: 200 };
   await call(harmless, {}, "tok-1");
   upstream.reply = listReply([{ item_id: "010101" }]);

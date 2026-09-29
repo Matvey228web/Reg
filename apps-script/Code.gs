@@ -1006,6 +1006,9 @@ function doPost(e) {
       case "/staff/set-role": data = handleStaffSetRole(payload, token); break;
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
       case "/notify/chats": data = handleNotifyChats(payload, token); break;
+      case "/notify/hello": data = handleNotifyHello(payload, token); break;
+      // Прежняя проверка связи остаётся: выложенное приложение обновляется
+      // не в ту же секунду, что таблица, и ручка не должна исчезать из-под него.
       case "/notify/test": data = handleNotifyTest(payload, token); break;
       case "/labels/send": data = handleLabelsSend(payload, token); break;
       case "/model/move": data = handleModelMove(payload, token); break;
@@ -2892,18 +2895,58 @@ function telegramCall(botTok, method) {
   return JSON.parse(res.getContentText() || "{}");
 }
 
+// Первое, что бот говорит в чате. Раньше это была «Проверка связи: приложение
+// склада на связи с этим чатом» — отчёт для того, кто нажал кнопку, а не
+// сообщение для чата: из него не понять, кто написал и чего ждать дальше.
+//
+// Здесь бот представляется и перечисляет, о чём будет писать. Последняя строка
+// с id чата — не для красоты: по ней видно, что чат тот самый, а не соседний.
+function helloText(chatId) {
+  var link = String(getSettings().app_link || "").trim();
+  var out = [
+    "Здравствуйте! Я бот склада Mifs Rent.",
+    "",
+    "Буду писать сюда:",
+    "• новые заявки с сайта",
+    "• просрочки по заказам",
+    "• дефекты, отмеченные на складе",
+    "• ссылки на акты сдачи-приёмки",
+    "",
+  ];
+  // Обещать кнопку, которой нет, хуже, чем промолчать: ссылка печатается
+  // только когда её задали в настройках.
+  if (link) out.push("Склад: " + link);
+  out.push("Этот чат: " + chatId);
+  return out.join("\n");
+}
+
+function handleNotifyHello(payload, token) {
+  requireAdmin(token);
+  var chat = String(payload.chat_id || "").trim() || notifyChatId();
+  var res = tgSend(helloText(chat), chat);
+  if (res.ok) return { ok: true, message: "Бот поздоровался — посмотрите в чате." };
+  return notifyRefusal(res);
+}
+
 function handleNotifyTest(payload, token) {
   requireAdmin(token);
   var chat = String(payload.chat_id || "").trim();
   var res = tgSend("Проверка связи: приложение склада на связи с этим чатом.", chat);
   if (res.ok) return { ok: true, message: "Сообщение отправлено — проверьте чат." };
+  return notifyRefusal(res);
+}
+
+// Почему бот не написал. Причин три, и путать их нельзя: токен, чат и отказ
+// самого Telegram лечатся в разных местах. Текст один на все ручки, которые
+// шлют в чат, — иначе одна и та же беда объяснялась бы по-разному.
+function notifyRefusal(res) {
   if (res.reason === "no-token") {
     throw apiError(400, "Токен бота не задан. Apps Script → Project Settings → " +
       "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
   }
   if (res.reason === "no-chat") {
-    throw apiError(400, "Не указан чат: впишите числовой id чата склада в настройках " +
-      "и сохраните.");
+    throw apiError(400, "Не выбран чат склада: нажмите «Найти чат склада» и " +
+      "укажите, в какой группе работает бот.");
   }
   throw apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
     ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");

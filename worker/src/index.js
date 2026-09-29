@@ -48,8 +48,8 @@ const DELIVER_TRIES = 10;
 // после них каталог и заказы те же, что были. Если считать их записями, то
 // одно нажатие «Найти чат склада» выбрасывало бы весь прогретый кэш склада.
 const HARMLESS = new Set([
-  "/auth/login", "/notify/test", "/notify/overdue", "/notify/chats",
-  "/order/parse", "/labels/send",
+  "/auth/login", "/notify/test", "/notify/hello", "/notify/overdue",
+  "/notify/chats", "/order/parse", "/labels/send",
 ]);
 
 // Ответы, которые зависят от того, КТО спрашивает: складмен не должен увидеть

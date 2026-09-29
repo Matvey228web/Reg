@@ -2213,6 +2213,51 @@ __telegramMe = { ok: true, result: { username: 'mifs_rent_bot', first_name: 'Mif
 check('без входа чат не ищется',
   call('/notify/chats', {}, '').ok === false, call('/notify/chats', {}, ''));
 
+console.log('\n== бот здоровается ==');
+// Пока бот молчит, непонятно, есть ли он вообще: писать он начинает только
+// когда на складе что-то случилось. Приветствие — первое, что он говорит.
+const tgLast = () => {
+  const msgs = sent.filter((r) => /sendMessage/.test(r.url));
+  return msgs.length ? JSON.parse(msgs[msgs.length - 1].opts.payload) : null;
+};
+
+metaSet('setting_notify_chat_id', '-100777');
+metaSet('setting_app_link', '');
+let hi = call('/notify/hello', { chat_id: '-100555' }, chatAdmin);
+check('приветствие отправлено', hi.ok === true, hi);
+check('ушло в указанный чат, а не в чат из настроек',
+  tgLast().chat_id === '-100555', tgLast());
+check('бот представился',
+  /^Здравствуйте! Я бот склада Mifs Rent\./.test(tgLast().text), tgLast().text);
+check('перечислил, о чём будет писать',
+  /заявки с сайта/.test(tgLast().text) && /просрочки/.test(tgLast().text) &&
+  /дефекты/.test(tgLast().text) && /акт/.test(tgLast().text), tgLast().text);
+check('назвал чат, чтобы было видно — тот самый',
+  /Этот чат: -100555/.test(tgLast().text), tgLast().text);
+check('про склад молчит, пока ссылки нет',
+  !/Склад:/.test(tgLast().text), tgLast().text);
+
+metaSet('setting_app_link', 'https://t.me/mifs_rent_bot/app');
+call('/notify/hello', {}, chatAdmin);
+check('без chat_id берётся чат из настроек', tgLast().chat_id === '-100777', tgLast());
+check('и ссылка на склад появляется, когда задана',
+  /Склад: https:\/\/t\.me\/mifs_rent_bot\/app/.test(tgLast().text), tgLast().text);
+
+scriptProps.TELEGRAM_BOT_TOKEN = '';
+const noTok = call('/notify/hello', { chat_id: '-100555' }, chatAdmin);
+check('без токена сказано, куда его положить',
+  noTok.ok === false && /TELEGRAM_BOT_TOKEN/.test(noTok.error || ''), noTok);
+scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+
+metaSet('setting_notify_chat_id', '');
+const noChat = call('/notify/hello', {}, chatAdmin);
+check('без чата сказано, где его выбрать',
+  noChat.ok === false && /Найти чат склада/.test(noChat.error || ''), noChat);
+metaSet('setting_notify_chat_id', '-1001234567890');
+
+check('складскому сотруднику здороваться нельзя',
+  call('/notify/hello', {}, '').ok === false, call('/notify/hello', {}, ''));
+
 console.log('\n== акт: шаблон ==');
 const actAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
 let act = call('/act/build', { order_id: 1 }, actAdmin);

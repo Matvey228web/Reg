@@ -323,7 +323,7 @@ const SettingsScreen = (() => {
         <p class="hint" id="settings-bot-who" hidden></p>
         <div id="settings-bot-result"></div>
         <button class="btn btn--secondary" id="settings-bot-find">Найти чат склада</button>
-        <button class="btn btn--secondary" id="settings-bot-test" style="margin-top:8px;">Проверить связь с чатом</button>
+        <button class="btn btn--secondary" id="settings-bot-hello" style="margin-top:8px;">Поздороваться в чате</button>
         <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
       </div>
 
@@ -662,8 +662,22 @@ const SettingsScreen = (() => {
       Cache.setOne(CACHE, data);
       const me = Auth.getSession();
       if (me) Auth.setSession({ ...me, settings: res.settings });
+      // Сразу здороваемся: выбор чата и есть проверка связи. Человек нажал
+      // «Это чат склада» — и увидел в чате сообщение от бота, вместо того
+      // чтобы искать вторую кнопку и гадать, работает ли вообще.
+      //
+      // Приветствие не ушло — чат всё равно сохранён, и говорим об этом
+      // прямо: терять сохранённую настройку из-за молчащего Telegram нельзя.
+      let hello = "";
+      try {
+        await apiPost("/notify/hello", { chat_id: chatId });
+      } catch (err) {
+        hello = "\n\nПоздороваться не вышло: " + err.message;
+      }
       TG.hapticSuccess();
-      TG.showAlert("Чат склада сохранён. Проверьте связь — бот напишет в него.");
+      TG.showAlert(hello
+        ? "Чат склада сохранён." + hello
+        : "Чат склада сохранён, бот поздоровался — посмотрите в чате.");
       render();
       bind();
       showPanel("bot");
@@ -757,8 +771,8 @@ const SettingsScreen = (() => {
     if (tplBtn) tplBtn.addEventListener("click", createActTemplate);
     document.getElementById("settings-bot-find")
       .addEventListener("click", findChats);
-    document.getElementById("settings-bot-test")
-      .addEventListener("click", () => bot("/notify/test", "settings-bot-test"));
+    document.getElementById("settings-bot-hello")
+      .addEventListener("click", () => bot("/notify/hello", "settings-bot-hello"));
     document.getElementById("settings-bot-overdue")
       .addEventListener("click", () => bot("/notify/overdue", "settings-bot-overdue"));
     document.getElementById("settings-archive")

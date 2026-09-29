@@ -1246,6 +1246,19 @@ const MockAPI = {
         };
       }
 
+      // Приветствие в чате. Живой бэкенд шлёт его через Telegram; в демо
+      // важно повторить условия отказа — без чата ручка отвечает так же.
+      case "/notify/hello": {
+        MockStore.requireAdmin(token);
+        const chat = String(body.chat_id || "").trim() || String(mockSettings.notify_chat_id || "");
+        if (!chat) {
+          const e = new Error("Не выбран чат склада: нажмите «Найти чат склада» и " +
+            "укажите, в какой группе работает бот.");
+          e.status = 400; throw e;
+        }
+        return { ok: true, message: "Бот поздоровался — посмотрите в чате." };
+      }
+
       case "/notify/test": {
         MockStore.requireAdmin(token);
         if (!String(body.chat_id || "").trim()) {
