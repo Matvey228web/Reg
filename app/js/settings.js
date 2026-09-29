@@ -314,7 +314,7 @@ const SettingsScreen = (() => {
       <div class="section" data-panel="bot" hidden>
         <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Бот в Telegram</h2>
-        <p class="hint">Бот пишет в чат склада о дефектах и о просрочках. Токен бота — не здесь,
+        <p class="hint">Бот пишет в чат склада о новых заказах с сайта и о дефектах. Токен бота — не здесь,
           а в Script Properties, ключ TELEGRAM_BOT_TOKEN (эти настройки видит любой
           сотрудник). Как завести — в BOT.md.</p>
         <p class="hint">Чат склада сейчас:
@@ -326,7 +326,6 @@ const SettingsScreen = (() => {
         <button class="btn btn--secondary" id="settings-bot-find">Найти чат склада</button>
         <button class="btn btn--secondary" id="settings-bot-link" style="margin-top:8px;">Постоянная связь</button>
         <button class="btn btn--secondary" id="settings-bot-hello" style="margin-top:8px;">Поздороваться в чате</button>
-        <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
       </div>
 
       <div class="section" data-panel="maint" hidden>
@@ -730,7 +729,7 @@ const SettingsScreen = (() => {
       </div>`;
   }
 
-  // Проверка связи и сводка просрочек — одно и то же по форме: нажали, ждём,
+  // Проверка связи и приветствие — одно и то же по форме: нажали, ждём,
   // показали, что ответил Telegram. Отказ здесь ожидаем (нет токена, бота не
   // добавили в чат), поэтому объясняем причину, а не прячем её.
   async function bot(endpoint, btnId) {
@@ -816,8 +815,6 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => botLink("status"));
     document.getElementById("settings-bot-hello")
       .addEventListener("click", () => bot("/notify/hello", "settings-bot-hello"));
-    document.getElementById("settings-bot-overdue")
-      .addEventListener("click", () => bot("/notify/overdue", "settings-bot-overdue"));
     document.getElementById("settings-archive")
       .addEventListener("click", () => maintenance("archive", "settings-archive"));
     document.getElementById("settings-trim")

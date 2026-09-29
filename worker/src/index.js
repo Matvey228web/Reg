@@ -48,7 +48,7 @@ const DELIVER_TRIES = 10;
 // после них каталог и заказы те же, что были. Если считать их записями, то
 // одно нажатие «Найти чат склада» выбрасывало бы весь прогретый кэш склада.
 const HARMLESS = new Set([
-  "/auth/login", "/notify/test", "/notify/hello", "/notify/overdue",
+  "/auth/login", "/notify/test", "/notify/hello",
   "/notify/chats", "/notify/webhook", "/order/parse", "/labels/send",
 ]);
 
@@ -260,8 +260,7 @@ function answerText(chat) {
   return [
     "Я бот склада Mifs Rent.",
     "",
-    "Пишу сюда о новых заявках с сайта, просрочках по заказам, дефектах и " +
-      "актах сдачи-приёмки.",
+    "Пишу сюда о новых заявках с сайта, дефектах и актах сдачи-приёмки.",
     "",
     "Этот чат: " + chat.id,
     "Осталось выбрать его в приложении: Настройки → Бот в Telegram → " +

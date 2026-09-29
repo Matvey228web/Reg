@@ -1331,11 +1331,6 @@ const MockAPI = {
                    : files.length + " этикеток отправлены в чат склада одним архивом." };
       }
 
-      case "/notify/overdue": {
-        MockStore.requireAdmin(token);
-        return { overdue: 1, sent: true, message: "Просроченные заказы — 1" };
-      }
-
       case "/inventory/save": {
         const staff_id = MockStore.requireToken(token);
         const found = Object.keys(body.found || {});
