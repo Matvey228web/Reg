@@ -1007,6 +1007,7 @@ function doPost(e) {
       case "/staff/transfer-owner": data = handleStaffTransferOwner(payload, token); break;
       case "/notify/chats": data = handleNotifyChats(payload, token); break;
       case "/notify/hello": data = handleNotifyHello(payload, token); break;
+      case "/notify/webhook": data = handleNotifyWebhook(payload, token); break;
       // Прежняя проверка связи остаётся: выложенное приложение обновляется
       // не в ту же секунду, что таблица, и ручка не должна исчезать из-под него.
       case "/notify/test": data = handleNotifyTest(payload, token); break;
@@ -2842,9 +2843,15 @@ function handleNotifyChats(payload, token) {
   var username = String((me.result || {}).username || "");
   var command = username ? "/id@" + username : "/id";
 
+  // Опрос остаётся для случая, когда постоянная связь выключена. При
+  // включённом вебхуке Telegram запрещает getUpdates — и это не поломка, а
+  // новый порядок: чаты помнит Worker и подставляет их в этот же ответ.
   var body = telegramCall(botTok, "getUpdates?limit=100");
+  var webhookOn = false;
   if (!body.ok) {
-    throw apiError(502, "Telegram отказал: " + (body.description || "неизвестная причина"));
+    if (Number(body.error_code) === 409) body = { result: [] };
+    else throw apiError(502, "Telegram отказал: " + (body.description || "неизвестная причина"));
+    webhookOn = true;
   }
 
   // Один чат — одна строка, самое свежее сообщение сверху. В группе бот с
@@ -2875,11 +2882,110 @@ function handleNotifyChats(payload, token) {
       name: String((me.result || {}).first_name || ""),
     },
     command: command,
-    hint: chats.length ? "" :
+    webhook: webhookOn,
+    hint: chats.length ? "" : (webhookOn ?
+      "Пока ни одного чата. Добавьте " + (username ? "@" + username : "своего бота") +
+        " в группу склада и напишите там «" + command + "» — бот ответит сам, " +
+        "и чат появится здесь." :
       "Бот пока не слышал ни одного сообщения. Добавьте " +
-      (username ? "@" + username : "своего бота") + " в группу склада и напишите там «" +
-      command + "» — команду он слышит даже с включённой приватностью.",
+        (username ? "@" + username : "своего бота") + " в группу склада и напишите там «" +
+        command + "» — команду он слышит даже с включённой приватностью. " +
+        "Если и после этого пусто — включите постоянную связь: опрос отдаёт " +
+        "сообщения один раз и не дольше суток."),
   };
+}
+
+// Постоянная связь с Telegram. Вебхук — это «Telegram сам присылает события на
+// наш адрес» вместо «мы по кнопке спрашиваем, не говорил ли кто чего за сутки».
+// Второе оказалось ненадёжным: события живут 24 часа, и любой второй опрос
+// забирает их себе навсегда — список чатов выглядел пустым при живом боте.
+//
+// Три действия: включить, выключить (возврат к опросу) и спросить состояние.
+// Последнее — честный ответ на «связка жива?»: Telegram сам говорит, сколько
+// событий ждёт доставки и что не получилось в последний раз.
+function handleNotifyWebhook(payload, token) {
+  requireAdmin(token);
+  var botTok = botToken();
+  if (!botTok) notifyRefusal({ reason: "no-token" });
+
+  var mode = String(payload.mode || "status");
+
+  if (mode === "on") {
+    // Адрес Worker спрашивать не нужно: пустая настройка подменяется значением
+    // по умолчанию (getSettings), а непустую не примет проверка формата. То
+    // есть здесь всегда либо наш нынешний адрес, либо заведомо годный чужой.
+    var base = String(getSettings().api_url || "").trim().replace(/\/+$/, "");
+    var secret = webhookSecret(botTok);
+    var set = telegramPost(botTok, "setWebhook", {
+      url: base + "/tg/" + secret,
+      // Тот же отпечаток уходит заголовком: Worker сверяет и адрес, и его.
+      secret_token: secret,
+      // Копившиеся события не нужны: чаты найдутся по первому же сообщению, а
+      // отвечать на команды недельной давности незачем.
+      drop_pending_updates: true,
+    });
+    if (!set.ok) {
+      throw apiError(502, "Telegram не принял адрес: " +
+        (set.description || "неизвестная причина"));
+    }
+    return webhookState(botTok, "Постоянная связь включена. Напишите в чате «/id» — " +
+      "бот ответит сам.");
+  }
+
+  if (mode === "off") {
+    var off = telegramPost(botTok, "deleteWebhook", {});
+    if (!off.ok) {
+      throw apiError(502, "Telegram отказал: " + (off.description || "неизвестная причина"));
+    }
+    return webhookState(botTok, "Постоянная связь выключена: вернулись к опросу по кнопке.");
+  }
+
+  return webhookState(botTok, "");
+}
+
+// Секрет вебхука не хранится нигде: он считается из токена бота, который есть и
+// у таблицы, и у Worker. Поэтому его нечего копировать между Cloudflare и
+// Apps Script и нечего потерять; смена токена меняет адрес сама.
+function webhookSecret(botTok) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, botTok,
+    Utilities.Charset.UTF_8);
+  var out = "";
+  for (var i = 0; i < 16; i++) {
+    var b = bytes[i] < 0 ? bytes[i] + 256 : bytes[i];
+    out += (b < 16 ? "0" : "") + b.toString(16);
+  }
+  return out;
+}
+
+function webhookState(botTok, message) {
+  var info = telegramCall(botTok, "getWebhookInfo");
+  var r = (info.ok && info.result) || {};
+  return {
+    message: message,
+    on: !!String(r.url || ""),
+    url: String(r.url || ""),
+    pending: Number(r.pending_update_count || 0),
+    last_error: String(r.last_error_message || ""),
+    last_error_at: r.last_error_date ?
+      new Date(r.last_error_date * 1000).toISOString() : "",
+  };
+}
+
+// setWebhook и deleteWebhook меняют состояние, поэтому POST, а не GET, как у
+// telegramCall: адрес вебхука в строке запроса светился бы в журналах.
+function telegramPost(botTok, method, body) {
+  var res;
+  try {
+    res = UrlFetchApp.fetch("https://api.telegram.org/bot" + botTok + "/" + method, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(body || {}),
+      muteHttpExceptions: true,
+    });
+  } catch (e) {
+    throw apiError(502, "Не получилось спросить Telegram: " + e);
+  }
+  return JSON.parse(res.getContentText() || "{}");
 }
 
 // Один запрос к Telegram. Отдельно, потому что ручка спрашивает дважды —
@@ -3833,6 +3939,16 @@ var SETTINGS_SPEC = {
     text: true,
     check: function (v) { return v === "" || /^https:\/\/t\.me\/[^\s]+$/.test(v); },
     hint: "https://t.me/ваш_бот/имя_приложения или пусто",
+  },
+  // Адрес Worker: через него ходит приложение, и на него же Telegram присылает
+  // события бота. По умолчанию — нынешний; настройкой, а не константой, потому
+  // что при передаче системы колледжу (#41) Worker будет свой, и переставить
+  // вебхук нужно будет без выкладки.
+  api_url: {
+    def: "https://mifs-rent-api.odintsovmatvey08.workers.dev",
+    text: true,
+    check: function (v) { return v === "" || /^https:\/\/[^\s]+$/.test(v); },
+    hint: "адрес Worker целиком, начиная с https:// — на него Telegram присылает события бота",
   },
 
   // Шаблон акта в Google Docs и папка для готовых. Пусто — акт не собирается

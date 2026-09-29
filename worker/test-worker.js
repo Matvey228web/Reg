@@ -43,7 +43,16 @@ let promises = [];
 const settle = async () => { await Promise.all(promises); promises = []; };
 
 let upstream = { calls: [], reply: null };
+// Что Worker отправил в Telegram. Отдельно от вызовов таблицы: это разные
+// адреса и разные тела, и путать их — значит не заметить, что бот промолчал.
+let tg = [];
 globalThis.fetch = async (url, init) => {
+  if (String(url).startsWith("https://api.telegram.org/")) {
+    tg.push({ method: String(url).split("/").pop(), body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   const body = JSON.parse(init.body);
   upstream.calls.push(body.endpoint);
   const reply = typeof upstream.reply === "function" ? upstream.reply(body) : upstream.reply;
@@ -277,7 +286,7 @@ console.log("\n== нажатия, которые не должны выбрас�
 upstream.reply = listReply([{ item_id: "010101" }]);
 await call("/equipment/list", { category: "all" }, "tok-1");
 for (const harmless of ["/notify/chats", "/notify/hello", "/notify/test",
-                        "/labels/send", "/order/parse"]) {
+                        "/notify/webhook", "/labels/send", "/order/parse"]) {
   upstream.reply = { ok: true, data: { message: "готово" }, error: null, status: 200 };
   await call(harmless, {}, "tok-1");
   upstream.reply = listReply([{ item_id: "010101" }]);
@@ -291,6 +300,132 @@ await call("/item/numbers", { item_id: "010101", serial_number: "SN-1" }, "tok-1
 upstream.reply = listReply([{ item_id: "010101", serial_number: "SN-1" }]);
 const afterWrite = await call("/equipment/list", { category: "all" }, "tok-1");
 ok("а правка предмета — выбрасывает", afterWrite.cache === "miss", afterWrite.cache);
+
+console.log("\n== вебхук Telegram ==");
+// Опрос getUpdates отдавал события один раз и не дольше суток; пустой список
+// выглядел как «бота нет в чате» при живом боте. Теперь Telegram присылает
+// события сам, и Worker их помнит.
+env.TELEGRAM_BOT_TOKEN = "123:ABC";
+const secret = [...new Uint8Array(
+  await crypto.subtle.digest("SHA-256", new TextEncoder().encode("123:ABC")))]
+  .slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+const hook = async (update, opts) => {
+  const o = opts || {};
+  const res = await worker.fetch(new Request("https://api.invalid/tg/" +
+    (o.path === undefined ? secret : o.path), {
+    method: o.method || "POST",
+    headers: o.header === null ? {}
+      : { "X-Telegram-Bot-Api-Secret-Token": o.header === undefined ? secret : o.header },
+    // GET с телом Request не принимает, а нам и не нужно: проверяется, что по
+    // адресу вебхука отвечает только POST.
+    body: (o.method || "POST") === "GET" ? undefined : JSON.stringify(update),
+  }), env, ctx);
+  await settle();
+  return res;
+};
+const chatKeys = () => [...env.CACHE.store.keys()].filter((k) => k.startsWith("chat:"));
+
+const groupMsg = (text) => ({
+  message: {
+    chat: { id: -1009876543210, title: "Тестовый чат склада", type: "supergroup" },
+    date: 1790000000,
+    text,
+  },
+});
+
+let res = await hook(groupMsg("/id"));
+ok("обновление принято", res.status === 200, res.status);
+ok("чат запомнен", chatKeys().includes("chat:-1009876543210"), chatKeys());
+ok("и бот ответил в тот же чат",
+   tg.length === 1 && String(tg[0].body.chat_id) === "-1009876543210", tg);
+ok("в ответе — номер чата, которого в Telegram не посмотреть",
+   /-1009876543210/.test(tg[0].body.text), tg[0].body.text);
+
+tg = [];
+await hook(groupMsg("/id@mifs_rent_bot"));
+ok("команда с именем бота тоже понята", tg.length === 1, tg);
+
+tg = [];
+await hook(groupMsg("а когда привезут штатив?"));
+ok("на обычные сообщения бот не отвечает", tg.length === 0, tg);
+ok("но чат всё равно помнит", chatKeys().length === 1, chatKeys());
+
+tg = [];
+await hook({
+  my_chat_member: {
+    chat: { id: -100111, title: "Ещё один чат", type: "group" },
+    date: 1790000100,
+    old_chat_member: { status: "left" },
+    new_chat_member: { status: "member" },
+  },
+});
+ok("добавление в группу — тоже повод поздороваться", tg.length === 1, tg);
+ok("и второй чат запомнен", chatKeys().length === 2, chatKeys());
+
+tg = [];
+await hook({
+  my_chat_member: {
+    chat: { id: -100111, title: "Ещё один чат", type: "group" },
+    date: 1790000200,
+    old_chat_member: { status: "member" },
+    new_chat_member: { status: "administrator" },
+  },
+});
+ok("а выдача прав — не повод писать снова", tg.length === 0, tg);
+
+// Адрес неугадываем, и заголовок сверяется тоже: иначе кто угодно мог бы
+// присылать нам «обновления» и говорить в чат складa от имени бота.
+ok("чужой адрес — 404", (await hook(groupMsg("/id"), { path: "0".repeat(32) })).status === 404);
+ok("без заголовка — 404", (await hook(groupMsg("/id"), { header: null })).status === 404);
+ok("с чужим заголовком — 404",
+   (await hook(groupMsg("/id"), { header: "0".repeat(32) })).status === 404);
+ok("GET по адресу вебхука — 404", (await hook(groupMsg("/id"), { method: "GET" })).status === 404);
+env.TELEGRAM_BOT_TOKEN = "";
+ok("без токена адреса не существует", (await hook(groupMsg("/id"))).status === 404);
+env.TELEGRAM_BOT_TOKEN = "123:ABC";
+
+// Испорченное тело не должно копить очередь повторов у Telegram.
+const broken = await worker.fetch(new Request("https://api.invalid/tg/" + secret, {
+  method: "POST",
+  headers: { "X-Telegram-Bot-Api-Secret-Token": secret },
+  body: "не json",
+}), env, ctx);
+ok("нечитаемое обновление не просит повторить", broken.status === 200, broken.status);
+
+console.log("\n== поиск чата берёт чаты у Worker ==");
+// Таблица при включённом вебхуке отдаёт пустой список: getUpdates ей запрещён.
+// Имя бота и права остаются за ней — их Worker не знает.
+upstream.reply = {
+  ok: true,
+  data: { chats: [], current: "", bot: { username: "mifs_rent_bot" },
+          command: "/id@mifs_rent_bot", webhook: true, hint: "Пока ни одного чата." },
+  error: null, status: 200,
+};
+const found = await call("/notify/chats", {}, "tok-1");
+ok("чаты подставлены из памяти Worker", found.data.data.chats.length === 2,
+   found.data.data.chats);
+ok("самый свежий сверху",
+   String(found.data.data.chats[0].chat_id) === "-100111", found.data.data.chats);
+ok("имя бота от таблицы сохранилось",
+   found.data.data.bot.username === "mifs_rent_bot", found.data.data.bot);
+ok("подсказка «пусто» убрана — чаты-то есть", !found.data.data.hint, found.data.data.hint);
+
+// Тот же чат из двух источников — одна строка, а не две.
+upstream.reply = {
+  ok: true,
+  data: { chats: [{ chat_id: "-100111", title: "Ещё один чат", type: "group",
+                    at: "2020-01-01T00:00:00.000Z" }],
+          current: "", bot: {}, command: "/id", hint: "" },
+  error: null, status: 200,
+};
+const merged = await call("/notify/chats", {}, "tok-1");
+ok("совпадающие чаты не дублируются", merged.data.data.chats.length === 2,
+   merged.data.data.chats);
+
+upstream.reply = listReply([{ item_id: "010101" }]);
+const afterHook = await call("/equipment/list", { category: "all" }, "tok-1");
+ok("вебхук прогретый кэш не выбросил", afterHook.cache === "hit", afterHook.cache);
 
 console.log("\n" + (bad ? "❌ ПРОВАЛОВ: " + bad : "✅ Worker: проверки пройдены"));
 process.exit(bad ? 1 : 0);

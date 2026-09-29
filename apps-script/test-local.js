@@ -358,6 +358,12 @@ let __telegramUpdates = [];
 // И на getMe: имя бота, которое приложение показывает вместе с командой.
 // Тест подменяет его, чтобы проверить и отказ по неверному токену.
 let __telegramMe = { ok: true, result: { username: 'mifs_rent_bot', first_name: 'Mifs Rent' } };
+// Состояние вебхука на стороне Telegram: setWebhook его ставит, deleteWebhook
+// снимает, getWebhookInfo рассказывает. Пока он стоит, настоящий Telegram
+// отвечает на getUpdates отказом 409 — это и воспроизводим, иначе проверка
+// «опрос больше не нужен» ничего не проверяла бы.
+let __telegramWebhook = { url: '', pending_update_count: 0, last_error_message: '' };
+let __telegramSetReply = { ok: true, result: true };
 global.UrlFetchApp = {
   fetch(url, opts) {
     sent.push({ url, opts });
@@ -370,10 +376,36 @@ global.UrlFetchApp = {
         getContentText: () => JSON.stringify(__telegramMe),
       };
     }
-    if (/getUpdates/.test(url)) {
+    if (/\/setWebhook$/.test(url)) {
+      if (__telegramSetReply.ok) {
+        const asked = JSON.parse(opts.payload);
+        __telegramWebhook = { url: String(asked.url || ''), pending_update_count: 0,
+          last_error_message: '', secret_token: String(asked.secret_token || '') };
+      }
       return {
         getResponseCode: () => 200,
-        getContentText: () => JSON.stringify({ ok: true, result: __telegramUpdates }),
+        getContentText: () => JSON.stringify(__telegramSetReply),
+      };
+    }
+    if (/\/deleteWebhook$/.test(url)) {
+      __telegramWebhook = { url: '', pending_update_count: 0, last_error_message: '' };
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true, result: true }) };
+    }
+    if (/\/getWebhookInfo$/.test(url)) {
+      return {
+        getResponseCode: () => 200,
+        getContentText: () => JSON.stringify({ ok: true, result: __telegramWebhook }),
+      };
+    }
+    if (/getUpdates/.test(url)) {
+      // При установленном вебхуке опрос запрещён — ровно так это и выглядит.
+      const reply = __telegramWebhook.url
+        ? { ok: false, error_code: 409,
+            description: "Conflict: can't use getUpdates method while webhook is active" }
+        : { ok: true, result: __telegramUpdates };
+      return {
+        getResponseCode: () => 200,
+        getContentText: () => JSON.stringify(reply),
       };
     }
     if (/upload\/drive\/v3\/files/.test(url)) {
@@ -2257,6 +2289,74 @@ metaSet('setting_notify_chat_id', '-1001234567890');
 
 check('складскому сотруднику здороваться нельзя',
   call('/notify/hello', {}, '').ok === false, call('/notify/hello', {}, ''));
+
+console.log('\n== постоянная связь с Telegram ==');
+// Опрос getUpdates отдаёт события один раз и не дольше суток: любой второй
+// опрос забирает их себе, и список чатов выглядит пустым при живом боте.
+// Вебхук снимает оба ограничения — и должен ставиться одним нажатием, без
+// токена в адресной строке и без копирования секретов между Cloudflare и Google.
+let hook = call('/notify/webhook', {}, chatAdmin);
+check('состояние спрашивается без включения',
+  hook.ok === true && hook.data.on === false, hook);
+
+hook = call('/notify/webhook', { mode: 'on' }, chatAdmin);
+check('связь включается', hook.ok === true && hook.data.on === true, hook);
+check('адрес указывает на наш Worker',
+  /^https:\/\/mifs-rent-api\.[^/]+\/tg\/[0-9a-f]{32}$/.test(hook.data.url), hook.data.url);
+// Секрет не хранится нигде: он считается из токена бота, который есть у обеих
+// сторон. Поэтому его нечего копировать и нечего потерять.
+const expected = crypto.createHash('sha256').update('123:ABC', 'utf8')
+  .digest('hex').slice(0, 32);
+check('путь — отпечаток токена, а не отдельный секрет',
+  hook.data.url.endsWith('/tg/' + expected), { url: hook.data.url, expected });
+check('тот же отпечаток ушёл заголовком',
+  __telegramWebhook.secret_token === expected, __telegramWebhook);
+check('о включении сказано словами',
+  /Постоянная связь включена/.test(hook.data.message), hook.data.message);
+
+// Главное свойство: пока связь стоит, поиск чата не ломается. Telegram
+// отвечает на опрос отказом 409, и это не поломка — чаты подставит Worker.
+const chatsHooked = call('/notify/chats', {}, chatAdmin);
+check('поиск чата при включённой связи не падает',
+  chatsHooked.ok === true, chatsHooked);
+check('и сообщает, что связь постоянная',
+  chatsHooked.data.webhook === true, chatsHooked.data.webhook);
+check('подсказка говорит про «/id», а не про опрос',
+  /бот ответит сам/.test(chatsHooked.data.hint), chatsHooked.data.hint);
+
+hook = call('/notify/webhook', { mode: 'off' }, chatAdmin);
+check('связь выключается', hook.ok === true && hook.data.on === false, hook);
+check('и сказано, что вернулись к опросу',
+  /опрос/.test(hook.data.message), hook.data.message);
+check('после выключения опрос снова работает',
+  call('/notify/chats', {}, chatAdmin).data.webhook === false);
+
+__telegramSetReply = { ok: false, description: 'Bad Request: bad webhook: HTTPS url must be provided' };
+hook = call('/notify/webhook', { mode: 'on' }, chatAdmin);
+check('отказ Telegram объяснён, а не проглочен',
+  hook.ok === false && /Telegram не принял адрес/.test(hook.error || ''), hook);
+__telegramSetReply = { ok: true, result: true };
+
+// Адрес Worker настраивать не приходится: пустая настройка подменяется
+// значением по умолчанию. Спрашивать его у человека было бы лишней работой —
+// он и так знает его хуже, чем система.
+metaSet('setting_api_url', '');
+hook = call('/notify/webhook', { mode: 'on' }, chatAdmin);
+check('без настройки берётся адрес по умолчанию',
+  hook.ok === true && /^https:\/\/mifs-rent-api\./.test(hook.data.url), hook.data.url);
+metaSet('setting_api_url', 'https://mifs-rent-api.example.workers.dev');
+hook = call('/notify/webhook', { mode: 'on' }, chatAdmin);
+check('заданный адрес побеждает значение по умолчанию',
+  hook.data.url.indexOf('https://mifs-rent-api.example.workers.dev/tg/') === 0, hook.data.url);
+
+scriptProps.TELEGRAM_BOT_TOKEN = '';
+hook = call('/notify/webhook', { mode: 'on' }, chatAdmin);
+check('без токена сказано, куда его положить',
+  hook.ok === false && /TELEGRAM_BOT_TOKEN/.test(hook.error || ''), hook);
+scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+
+check('складскому сотруднику связь не переключить',
+  call('/notify/webhook', { mode: 'on' }, '').ok === false);
 
 console.log('\n== акт: шаблон ==');
 const actAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;

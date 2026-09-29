@@ -25,6 +25,7 @@ const SettingsScreen = (() => {
     { key: "notify_chat_id", label: "Чат склада", text: true, ph: "-1001234567890", grp: "links" },
     { key: "site_url", label: "Сайт проката", text: true, ph: "https://", grp: "links" },
     { key: "app_link", label: "Ссылка на приложение", text: true, ph: "https://t.me/бот/app", grp: "links" },
+    { key: "api_url", label: "Адрес Worker", text: true, ph: "https://", grp: "links" },
   ];
 
   // Одна строка поля — чтобы два подраздела рисовались одним кодом.
@@ -323,6 +324,7 @@ const SettingsScreen = (() => {
         <p class="hint" id="settings-bot-who" hidden></p>
         <div id="settings-bot-result"></div>
         <button class="btn btn--secondary" id="settings-bot-find">Найти чат склада</button>
+        <button class="btn btn--secondary" id="settings-bot-link" style="margin-top:8px;">Постоянная связь</button>
         <button class="btn btn--secondary" id="settings-bot-hello" style="margin-top:8px;">Поздороваться в чате</button>
         <button class="btn btn--secondary" id="settings-bot-overdue" style="margin-top:8px;">Отправить сводку по просрочкам</button>
       </div>
@@ -689,6 +691,45 @@ const SettingsScreen = (() => {
     }
   }
 
+  // Постоянная связь с Telegram. Сначала показываем, как дела, и только потом
+  // предлагаем включить или выключить: кнопка рядом с состоянием честнее
+  // тумблера, у которого надо угадывать, что он сейчас означает. Заодно это
+  // единственное место, где видно, жива ли связка: Telegram сам говорит,
+  // сколько событий ждёт доставки и что не получилось в последний раз.
+  async function botLink(mode) {
+    const btn = document.getElementById("settings-bot-link");
+    const out = document.getElementById("settings-bot-result");
+    btn.disabled = true;
+    out.innerHTML = skeleton(1);
+    try {
+      const res = await apiPost("/notify/webhook", { mode: mode || "status" });
+      out.innerHTML = linkCard(res);
+      const act = out.querySelector("[data-link]");
+      if (act) act.addEventListener("click", () => botLink(act.dataset.link));
+      TG.hapticSuccess();
+    } catch (err) {
+      out.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      TG.hapticError();
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function linkCard(res) {
+    const lines = [];
+    if (res.message) lines.push(escapeHtml(res.message));
+    lines.push(res.on
+      ? "Связь постоянная: Telegram присылает события сам."
+      : "Связи нет: чаты ищутся опросом по кнопке, и события живут не дольше суток.");
+    if (res.on && res.pending) lines.push("Ждёт доставки событий: " + res.pending + ".");
+    if (res.last_error) lines.push("Последняя ошибка: " + escapeHtml(res.last_error) + ".");
+    return `<div class="card">
+        <div class="card-sub">${lines.join("<br>")}</div>
+        <button class="btn btn--secondary" data-link="${res.on ? "off" : "on"}"
+                style="margin-top:8px;">${res.on ? "Выключить" : "Включить"}</button>
+      </div>`;
+  }
+
   // Проверка связи и сводка просрочек — одно и то же по форме: нажали, ждём,
   // показали, что ответил Telegram. Отказ здесь ожидаем (нет токена, бота не
   // добавили в чат), поэтому объясняем причину, а не прячем её.
@@ -771,6 +812,8 @@ const SettingsScreen = (() => {
     if (tplBtn) tplBtn.addEventListener("click", createActTemplate);
     document.getElementById("settings-bot-find")
       .addEventListener("click", findChats);
+    document.getElementById("settings-bot-link")
+      .addEventListener("click", () => botLink("status"));
     document.getElementById("settings-bot-hello")
       .addEventListener("click", () => bot("/notify/hello", "settings-bot-hello"));
     document.getElementById("settings-bot-overdue")

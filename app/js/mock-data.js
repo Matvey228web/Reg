@@ -16,6 +16,7 @@ const mockSettings = {
   import_source_id: "",
   site_url: "",
   app_link: "",
+  api_url: "https://mifs-rent-api.example.workers.dev",
   public_orders: 0,
   public_orders_per_hour: 20,
   act_template_id: "",
@@ -23,6 +24,10 @@ const mockSettings = {
   act_director: "",
   act_folder_id: "",
 };
+// Состояние постоянной связи с Telegram. В демо её никто не устанавливает —
+// важно лишь, что экран умеет показать оба состояния и переключить их.
+const mockWebhook = { on: false, url: "", last_error: "" };
+
 // Из ссылки — идентификатор, как на живом бэкенде (driveIdFrom в Code.gs).
 function mockDriveId(value) {
   const v = String(value || "").trim();
@@ -36,6 +41,8 @@ const MOCK_SETTINGS_SPEC = {
               hint: "адрес сайта проката целиком, начиная с https:// — или пусто" },
   app_link: { def: "", text: true, check: (v) => v === "" || /^https:\/\/t\.me\/[^\s]+$/.test(String(v)),
               hint: "https://t.me/ваш_бот/имя_приложения или пусто" },
+  api_url: { def: "", text: true, check: (v) => v === "" || /^https:\/\/[^\s]+$/.test(String(v)),
+             hint: "адрес Worker целиком, начиная с https:// — на него Telegram присылает события бота" },
   notify_chat_id: { def: "", text: true, check: (v) => v === "" || /^-?\d{5,20}$/.test(String(v)),
                     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит" },
   session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },
@@ -1242,7 +1249,38 @@ const MockAPI = {
           // таблице ведёт себя по-разному.
           bot: { username: "mifs_rent_demo_bot", name: "Mifs Rent" },
           command: "/id@mifs_rent_demo_bot",
+          webhook: mockWebhook.on,
           hint: "",
+        };
+      }
+
+      // Постоянная связь. В демо это переключатель без Telegram, но по форме
+      // ответ тот же: включено или нет, сколько событий ждёт, последняя ошибка.
+      case "/notify/webhook": {
+        MockStore.requireAdmin(token);
+        const mode = String(body.mode || "status");
+        if (mode === "on") {
+          if (!String(mockSettings.api_url || "").trim()) {
+            const e = new Error("Не задан адрес Worker: Настройки → «Адреса и связи» → " +
+              "«Адрес Worker» — туда Telegram и будет присылать события.");
+            e.status = 400; throw e;
+          }
+          mockWebhook.on = true;
+          mockWebhook.url = String(mockSettings.api_url).replace(/\/+$/, "") + "/tg/демо";
+          mockWebhook.last_error = "";
+        } else if (mode === "off") {
+          mockWebhook.on = false;
+          mockWebhook.url = "";
+        }
+        return {
+          message: mode === "on"
+            ? "Постоянная связь включена. Напишите в чате «/id» — бот ответит сам."
+            : (mode === "off" ? "Постоянная связь выключена: вернулись к опросу по кнопке." : ""),
+          on: mockWebhook.on,
+          url: mockWebhook.url,
+          pending: 0,
+          last_error: mockWebhook.last_error,
+          last_error_at: "",
         };
       }
 

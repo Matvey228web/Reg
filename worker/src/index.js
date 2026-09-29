@@ -49,7 +49,7 @@ const DELIVER_TRIES = 10;
 // одно нажатие «Найти чат склада» выбрасывало бы весь прогретый кэш склада.
 const HARMLESS = new Set([
   "/auth/login", "/notify/test", "/notify/hello", "/notify/overdue",
-  "/notify/chats", "/order/parse", "/labels/send",
+  "/notify/chats", "/notify/webhook", "/order/parse", "/labels/send",
 ]);
 
 // Ответы, которые зависят от того, КТО спрашивает: складмен не должен увидеть
@@ -62,6 +62,13 @@ const PERSONAL = new Set(["/settings/get"]);
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }));
+
+    // Обновления от Telegram. Отдельным адресом, а не эндпоинтом в конверте:
+    // тело присылает Telegram, и оно не нашего формата. Заголовки CORS здесь
+    // ни при чём — это сервер к серверу, без браузера.
+    const path = new URL(request.url).pathname;
+    if (path.startsWith("/tg/")) return telegramWebhook(request, env, ctx, path.slice(4));
+
     if (request.method !== "POST") {
       return cors(text("Mifs Rent API. Запросы принимаются через POST.", 200));
     }
@@ -109,6 +116,17 @@ export default {
 
     const answer = upstream.envelope;
 
+    // Чаты Worker знает лучше таблицы: он их и запоминал, пока Telegram
+    // присылал обновления. У таблицы остаётся то, чего Worker не знает, —
+    // права того, кто спрашивает, и имя бота.
+    if (endpoint === "/notify/chats" && answer.ok && answer.data) {
+      const merged = mergeChats(await knownChats(env), answer.data.chats || []);
+      if (merged.length) {
+        answer.data.chats = merged;
+        answer.data.hint = "";
+      }
+    }
+
     // Успешный ответ означает, что токен настоящий: Apps Script проверил его
     // сам. Запоминаем на короткий срок, чтобы следующий запрос ушёл в кэш.
     if (token && answer.ok) {
@@ -145,6 +163,158 @@ export default {
     }
   },
 };
+
+// ---- вебхук Telegram ----
+//
+// Раньше чаты искались опросом: приложение по кнопке спрашивало у Telegram
+// getUpdates. У этого способа два врождённых изъяна — события живут не дольше
+// суток, и любой второй опрос с offset забирает их себе навсегда (браузер,
+// прошлый эксперимент, другой сервис на том же боте). Пустой список выглядел
+// как «бота нет в чате», хотя бот был на месте.
+//
+// Теперь Telegram присылает события сам, Worker их запоминает, и бот отвечает
+// на команды сразу — не дожидаясь, пока кто-нибудь откроет настройки.
+//
+// Обратимо: выключение вебхука возвращает прежний опрос, и ветка ниже просто
+// перестаёт вызываться.
+
+// Чат помнится месяц. Это подсказка для одной кнопки в настройках, а не
+// данные: если протухнет — достаточно снова написать боту в чат.
+const TG_CHAT_TTL = 60 * 60 * 24 * 30;
+
+// Адрес вебхука — /tg/<отпечаток токена>. Отдельный секрет копировать между
+// Cloudflare и Apps Script не нужно: обе стороны считают путь из токена бота,
+// который у каждой и так есть. Свёртка односторонняя — по адресу токен не
+// восстановить.
+async function webhookPath(token) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(token)));
+  return [...new Uint8Array(digest)].slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function telegramWebhook(request, env, ctx, given) {
+  const token = String(env.TELEGRAM_BOT_TOKEN || "");
+  // Токена нет — адреса не существует. Постороннему незачем знать даже того,
+  // включён ли у нас вебхук, поэтому причина не называется.
+  if (!token) return text("Not found", 404);
+
+  const want = await webhookPath(token);
+  const header = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+  if (request.method !== "POST" || given !== want || header !== want) {
+    return text("Not found", 404);
+  }
+
+  let update;
+  try {
+    update = await request.json();
+  } catch {
+    // Отвечаем 200: повторять присылку нечего, разобрать это тело мы не
+    // сможем и со второй попытки.
+    return text("ok", 200);
+  }
+
+  // Telegram повторяет доставку, пока не получит 200, и копит очередь. Поэтому
+  // отвечаем сразу, а работу делаем после ответа.
+  ctx.waitUntil(handleUpdate(env, token, update));
+  return text("ok", 200);
+}
+
+async function handleUpdate(env, token, update) {
+  const msg = update.message || update.edited_message || update.channel_post ||
+    update.my_chat_member;
+  const chat = msg && msg.chat;
+  if (!chat || !chat.id) return;
+
+  await env.CACHE.put("chat:" + chat.id, JSON.stringify({
+    chat_id: String(chat.id),
+    title: String(chat.title ||
+      [chat.first_name, chat.last_name].filter(Boolean).join(" ") ||
+      chat.username || "без названия"),
+    type: String(chat.type || ""),
+    at: msg.date ? new Date(msg.date * 1000).toISOString() : new Date().toISOString(),
+  }), { expirationTtl: TG_CHAT_TTL });
+
+  if (answerWanted(update)) await tgSend(token, chat.id, answerText(chat));
+}
+
+// Отвечаем на команды и на своё появление в группе. На обычные сообщения — нет:
+// бот в чате склада не собеседник, и вклиниваться в разговор он не должен.
+function answerWanted(update) {
+  const said = String((update.message || update.channel_post || {}).text || "").trim();
+  if (/^\/(id|start|help)(@[\w_]+)?\b/i.test(said)) return true;
+
+  const mine = update.my_chat_member;
+  if (mine) {
+    const now = String((mine.new_chat_member || {}).status || "");
+    const was = String((mine.old_chat_member || {}).status || "");
+    const inside = (s) => s === "member" || s === "administrator";
+    return inside(now) && !inside(was);
+  }
+  return false;
+}
+
+// Ответ на команду — не то же, что приветствие в настроенном чате: здесь
+// человек спрашивает «ты тут?», и главное в ответе — номер чата, который в
+// Telegram на телефоне не посмотреть никак.
+function answerText(chat) {
+  return [
+    "Я бот склада Mifs Rent.",
+    "",
+    "Пишу сюда о новых заявках с сайта, просрочках по заказам, дефектах и " +
+      "актах сдачи-приёмки.",
+    "",
+    "Этот чат: " + chat.id,
+    "Осталось выбрать его в приложении: Настройки → Бот в Telegram → " +
+      "Найти чат склада.",
+  ].join("\n");
+}
+
+async function tgSend(token, chatId, body) {
+  try {
+    await fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: String(chatId),
+        text: body,
+        disable_web_page_preview: true,
+      }),
+    });
+  } catch {
+    // Повторять нечего: 200 мы уже отдали. Человек напишет команду снова —
+    // это дешевле, чем очередь повторов у Telegram из-за вежливого ответа.
+  }
+}
+
+async function knownChats(env) {
+  const list = await env.CACHE.list({ prefix: "chat:" });
+  const out = [];
+  for (const entry of list.keys) {
+    const raw = await env.CACHE.get(entry.name);
+    if (!raw) continue;
+    try {
+      out.push(JSON.parse(raw));
+    } catch {
+      // Испорченную запись пропускаем: чат найдётся снова с первым сообщением.
+    }
+  }
+  return out;
+}
+
+// Два источника: то, что запомнил Worker, и то, что успел вернуть опрос, пока
+// вебхук не включён. Совпадения по номеру чата — одна строка, свежая дата
+// побеждает. Сверху самое свежее: чат, в котором только что написали, человек
+// и ищет.
+function mergeChats(mine, theirs) {
+  const byId = new Map();
+  for (const chat of [...theirs, ...mine]) {
+    const id = String((chat || {}).chat_id || "");
+    if (!id) continue;
+    const was = byId.get(id);
+    if (!was || String(chat.at || "") > String(was.at || "")) byId.set(id, chat);
+  }
+  return [...byId.values()].sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+}
 
 // ---- заявка с сайта ----
 
