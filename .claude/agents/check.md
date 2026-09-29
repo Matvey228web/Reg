@@ -1,5 +1,5 @@
 ---
-name: release-checker
+name: check
 description: Проверяет изменения перед выкладкой по чек-листу из CLAUDE.md и docs/DEPLOY.md — прогоняет тесты, сверяет ?v=, ищет забытые звенья цепочки. Только проверяет, ничего не правит и не выкладывает.
 model: haiku
 tools:

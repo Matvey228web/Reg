@@ -1,5 +1,5 @@
 ---
-name: repo-janitor
+name: clean
 description: Убирает мусор из репозитория, находит мёртвый код и устаревшие ссылки
 model: haiku
 tools:
