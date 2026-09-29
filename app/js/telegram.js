@@ -58,6 +58,26 @@ const TG = (() => {
     return true;
   }
 
+  // Переписка со студентом. Ссылку t.me нельзя открывать браузером: в нём
+  // покажется страница «Open in Telegram», и до чата будет ещё два нажатия.
+  // openTelegramLink открывает переписку самим Telegram, поверх приложения.
+  function openTelegramLink(url) {
+    if (webApp && typeof webApp.openTelegramLink === "function") {
+      try { webApp.openTelegramLink(url); return true; } catch (ignored) {}
+    }
+    return openLink(url);
+  }
+
+  // Звонок. Это не ссылка для браузера, а передача номера телефону: внутри
+  // Telegram её не перехватывает ни openLink, ни window.open, поэтому уходим
+  // через обычный переход — WebView отдаёт tel: системе сам.
+  function call(phone) {
+    const clean = String(phone || "").replace(/[^\d+]/g, "");
+    if (!clean) return false;
+    window.location.href = "tel:" + clean;
+    return true;
+  }
+
   function applyTheme() {
     if (!webApp || !webApp.themeParams) return;
     const root = document.documentElement.style;
@@ -321,6 +341,6 @@ const TG = (() => {
   return {
     init, getUser, getInitData, isAvailable, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
     mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm,
-    confirmDestructive, lockVerticalSwipes, openLink,
+    confirmDestructive, lockVerticalSwipes, openLink, openTelegramLink, call,
   };
 })();

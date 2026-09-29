@@ -316,6 +316,7 @@ const MockStore = (() => {
       status: "New", raw_text: "Заказ №1525686941\n(демо-режим: исходное сообщение сокращено)",
       created_at: new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString(),
       created_by: 1, created_by_name: "Матвей Одинцов", closed_at: "",
+      act_url: "https://docs.google.com/document/d/demo-act-1/edit",
     },
     {
       order_id: 2, order_no: "1525686942", request_code: "", student_id: 1,
@@ -1082,7 +1083,9 @@ const MockAPI = {
             .map((i) => i.raw_name).join(", ");
           return { ...rest, status: mockOrderStatus(o, open, txs.length),
                    issued_open: open, issued_total: txs.length, items_text: itemsText,
-                   archived_at: o.archived_at || "" };
+                   archived_at: o.archived_at || "",
+                   // Ссылка на акт нужна и в списке: по ней там кнопка «Акт».
+                   act_url: o.act_url || "" };
         })
         // Архив по умолчанию не показываем — как и настоящий бэкенд.
         .filter((o) => (body.archived ? !!o.archived_at : !o.archived_at));

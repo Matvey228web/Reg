@@ -2372,6 +2372,10 @@ function handleOrdersList(payload, token) {
       created_by_name: r.created_by_name || "",
       items_text: itemsText[String(r.order_id)] || "",
       archived_at: String(r.archived_at || ""),
+      // Ссылка на акт — чтобы открыть документ прямо из списка, не заходя в
+      // заказ: на складе его открывают перед выдачей, а не после чтения
+      // карточки.
+      act_url: String(r.act_url || ""),
       // raw_text в список не отдаём: это всё сообщение целиком, включая даты
       // рождения. Оно нужно только в карточке одного заказа.
     };

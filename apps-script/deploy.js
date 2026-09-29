@@ -32,14 +32,20 @@ function scriptId() {
   return process.env.GAS_SCRIPT_ID || DEFAULT_SCRIPT_ID;
 }
 
-// Адрес веб-приложения хранится в одном месте — в конфиге фронтенда. Оттуда и
-// берём идентификатор развёртывания, чтобы он не разошёлся с тем, куда
-// приложение на самом деле стучится.
+// Адрес веб-приложения хранится в одном месте — в настройках Worker, через
+// который ходят и сайт, и склад. Оттуда и берём идентификатор развёртывания,
+// чтобы он не разошёлся с тем, куда обращаются на самом деле. Раньше адрес
+// лежал в app/js/config.js; после переезда склада на Worker там стоит адрес
+// воркера, и искать «/macros/s/» в нём больше нечего.
 function deploymentId() {
-  const conf = fs.readFileSync(path.join(REPO, "app/js/config.js"), "utf8");
-  const m = conf.match(/macros\/s\/([^/]+)\//);
-  if (!m) throw new Error("В app/js/config.js не нашёлся адрес /macros/s/<id>/exec");
-  return m[1];
+  const places = ["worker/wrangler.toml", "app/js/config.js"];
+  for (const place of places) {
+    const full = path.join(REPO, place);
+    if (!fs.existsSync(full)) continue;
+    const m = fs.readFileSync(full, "utf8").match(/macros\/s\/([^/]+)\//);
+    if (m) return m[1];
+  }
+  throw new Error("Адрес /macros/s/<id>/exec не нашёлся ни в " + places.join(", "));
 }
 
 async function accessToken() {

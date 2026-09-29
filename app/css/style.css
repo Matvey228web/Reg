@@ -1658,3 +1658,28 @@ select {
   background: none; border: 0; padding: 0 0 10px;
   color: var(--accent); font: inherit; font-size: 15px; cursor: pointer;
 }
+
+/* --- Быстрые действия в списке заказов --- */
+/* Акт, чат, звонок — то, что делают, глядя в список, а не открыв заказ.
+   Кнопки мелкие по площади, но не мелкие для пальца: высота 36, отступы
+   внутрь, и между ними зазор — промах по соседней означал бы звонок вместо
+   открытия документа. */
+.quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.chip-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip-btn:active { background: var(--surface-strong); }

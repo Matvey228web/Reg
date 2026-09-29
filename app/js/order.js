@@ -105,6 +105,20 @@ const OrderScreen = (() => {
     }
   }
 
+  // Телефон и ник — не текст, а два действия: позвонить и написать. Раньше
+  // это были обычные ссылки, и внутри Telegram они не работали как надо:
+  // t.me открывался браузером на странице «Open in Telegram», то есть до чата
+  // оставалось ещё два нажатия.
+  function contactRow(phone, tg) {
+    const nick = String(tg || "").replace(/^@/, "");
+    const num = String(phone || "");
+    const buttons = [
+      num ? `<button class="chip-btn" type="button" data-call="${escapeHtml(num)}">${escapeHtml(num)}</button>` : "",
+      nick ? `<button class="chip-btn" type="button" data-tg="${escapeHtml(nick)}">@${escapeHtml(nick)}</button>` : "",
+    ].filter(Boolean);
+    return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
+  }
+
   function render(data) {
     const o = data.order;
     const lines = (data.items || []).slice().sort((a, b) => a.line_no - b.line_no);
@@ -153,12 +167,11 @@ const OrderScreen = (() => {
       <div class="section">
         <div class="section-title">Арендатор</div>
         <div class="card-sub">${escapeHtml(o.student_name || "—")}</div>
-        ${o.student_phone ? `<div class="card-sub"><a href="tel:${escapeHtml(o.student_phone)}">${escapeHtml(o.student_phone)}</a></div>` : ""}
-        ${o.student_tg ? `<div class="card-sub"><a href="https://t.me/${escapeHtml(String(o.student_tg).replace(/^@/, ""))}" target="_blank" rel="noopener">${escapeHtml(o.student_tg)}</a></div>` : ""}
+        ${contactRow(o.student_phone, o.student_tg)}
         ${o.is_adult ? "" : `
           <div class="section-title" style="margin-top:10px;">Представитель (арендатор несовершеннолетний)</div>
           <div class="card-sub">${escapeHtml(o.guardian_name || "—")}</div>
-          ${o.guardian_phone ? `<div class="card-sub"><a href="tel:${escapeHtml(o.guardian_phone)}">${escapeHtml(o.guardian_phone)}</a></div>` : ""}`}
+          ${contactRow(o.guardian_phone, "")}`}
       </div>
 
       <div class="section">
@@ -271,6 +284,15 @@ const OrderScreen = (() => {
     });
     const allBtn = document.getElementById("order-checkin-all");
     if (allBtn) allBtn.addEventListener("click", () => checkinAll(open));
+
+    // Позвонить и написать. Один слушатель на экран: кнопок две у арендатора и
+    // одна у представителя, и рисуются они в разных местах карточки.
+    document.getElementById("order-content").addEventListener("click", (e) => {
+      const phone = e.target.closest("[data-call]");
+      if (phone) { TG.call(phone.dataset.call); return; }
+      const chat = e.target.closest("[data-tg]");
+      if (chat) TG.openTelegramLink("https://t.me/" + chat.dataset.tg);
+    });
   }
 
   // Выдача без сканирования. Сканер остаётся главным путём — он не даёт выдать

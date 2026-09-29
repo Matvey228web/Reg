@@ -72,7 +72,41 @@ const OrdersScreen = (() => {
         </div>
         <div class="card-sub">${escapeHtml(order.student_name || "—")}${order.is_adult ? "" : " · с представителем"}</div>
         <div class="card-sub">${parts.join(" · ")}</div>
+        ${quickRowHtml(order)}
       </div>`;
+  }
+
+  // Три дела, которые делают, глядя в список, а не открыв заказ: посмотреть
+  // акт перед выдачей, написать студенту, позвонить ему. Раньше за каждым
+  // приходилось заходить в карточку — а на складе список открыт, когда
+  // человек уже стоит рядом.
+  //
+  // Кнопки не показываем пустыми: нет акта — нет кнопки, и сразу видно, что
+  // шаблон не создан. Нет ника — нечего открывать.
+  function quickRowHtml(order) {
+    const tg = String(order.student_tg || "").replace(/^@/, "");
+    const phone = String(order.student_phone || "");
+    const buttons = [
+      order.act_url
+        ? `<button class="chip-btn" type="button" data-act-url="${escapeHtml(order.act_url)}">Акт</button>` : "",
+      tg ? `<button class="chip-btn" type="button" data-tg="${escapeHtml(tg)}">Чат</button>` : "",
+      phone ? `<button class="chip-btn" type="button" data-call="${escapeHtml(phone)}">Позвонить</button>` : "",
+    ].filter(Boolean);
+    return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
+  }
+
+  // Один слушатель на список: заказов бывает под сотню, и вешать по три
+  // обработчика на каждый незачем. Нажатие на кнопку до карточки не доходит —
+  // открывать заказ при этом не надо.
+  function bindQuickRow(list) {
+    list.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act-url]");
+      if (act) { e.stopPropagation(); TG.openLink(act.dataset.actUrl); return; }
+      const chat = e.target.closest("[data-tg]");
+      if (chat) { e.stopPropagation(); TG.openTelegramLink("https://t.me/" + chat.dataset.tg); return; }
+      const phone = e.target.closest("[data-call]");
+      if (phone) { e.stopPropagation(); TG.call(phone.dataset.call); }
+    });
   }
 
   function render(orders) {
@@ -89,6 +123,7 @@ const OrdersScreen = (() => {
     // Свежие сверху: склад работает с тем, что оформлено недавно.
     visible.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
     list.innerHTML = visible.map(orderCardHtml).join("");
+    bindQuickRow(list);
     list.querySelectorAll("[data-order-id]").forEach((el) => {
       el.addEventListener("click", (e) => {
         if (e.target.closest("a, button, select, input")) return;
