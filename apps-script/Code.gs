@@ -1013,7 +1013,6 @@ function doPost(e) {
       case "/notify/test": data = handleNotifyTest(payload, token); break;
       case "/labels/send": data = handleLabelsSend(payload, token); break;
       case "/model/move": data = handleModelMove(payload, token); break;
-      case "/notify/overdue": data = handleNotifyOverdue(payload, token); break;
       case "/inventory/save": data = handleInventorySave(payload, token); break;
       case "/inventory/list": data = handleInventoryList(payload, token); break;
       case "/settings/get": data = handleSettingsGet(payload, token); break;
@@ -1669,9 +1668,9 @@ function reportDefect(itemId, staffRow, transactionId, payload) {
   // В чат склада — только то, из-за чего техника выбывает из оборота. Сообщать
   // о каждой выдаче значит завалить чат и приучить его не читать.
   var item = findRowByValue(getSheet(SHEETS.EQUIPMENT), "item_id", itemId);
-  tgNotify("Дефект: " + ((item && item.name) || itemId) + " (" + itemId + ")\n" +
-    (payload.defect_description || "без описания") + "\n" +
-    "Заявил: " + staffRow.full_name);
+  tgNotify("<b>Дефект:</b> " + tgEscape((item && item.name) || itemId) + " (" + tgEscape(itemId) + ")\n" +
+    tgEscape(payload.defect_description || "без описания") + "\n" +
+    "Заявил: " + tgEscape(staffRow.full_name));
   return defectId;
 }
 
@@ -2227,8 +2226,8 @@ function autoAct(orderId, masterName) {
     var res = buildAct(orderId, masterName || "");
     return res.url;
   } catch (err) {
-    tgSend("Акт по заказу №" + orderId + " не собрался: " +
-      (err && err.message ? err.message : err) +
+    tgSend("<b>Акт по заказу №" + tgEscape(orderId) + " не собрался:</b> " +
+      tgEscape(err && err.message ? err.message : err) +
       "\nЗаказ записан, акт можно собрать после исправления настроек.");
     return "";
   }
@@ -2719,7 +2718,7 @@ function tgSend(text, chatIdOverride) {
     var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "post",
       contentType: "application/json",
-      payload: JSON.stringify({ chat_id: chatId, text: text, disable_web_page_preview: true }),
+      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true }),
       muteHttpExceptions: true,
     });
     var body = JSON.parse(res.getContentText() || "{}");
@@ -2815,6 +2814,92 @@ function handleLabelsSend(payload, token) {
 // Тихая отправка: всё, что зовётся по ходу работы склада, идёт через неё.
 function tgNotify(text) {
   try { tgSend(text); } catch (e) { /* уведомление не важнее самой операции */ }
+}
+
+// Экранирование для parse_mode "HTML": всё, что пришло из таблицы, формы или
+// от сотрудника, идёт в сообщение только через неё. Скопировано с escapeHtml
+// из app/js/util.js.
+function tgEscape(str) {
+  return String(str === undefined || str === null ? "" : str).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
+// Блок «Покупатель» в сообщении о новой заявке. Отдельно, чтобы владелец мог
+// дописать поля в одном месте. Берёт только то, что есть в fields, пустое
+// пропускает. Взрослый — ФИО, телефон, ник; несовершеннолетний — сначала
+// представитель, затем сам арендатор.
+function tgOrderBuyerBlock(fields) {
+  var adult = String(fields.is_adult).toUpperCase() !== "FALSE";
+  var lines = [];
+  function add(label, value) {
+    value = String(value || "").trim();
+    if (value) lines.push((label ? label + ": " : "") + tgEscape(value));
+  }
+  if (adult) {
+    add("", fields.student_name);
+    add("Телефон", fields.student_phone);
+    add("Telegram", fields.student_tg);
+  } else {
+    add("Представитель", fields.guardian_name);
+    add("Телефон представителя", fields.guardian_phone);
+    add("Несовершеннолетний", fields.student_name);
+    add("Телефон", fields.student_phone);
+    add("Telegram", fields.student_tg);
+  }
+  return lines.join("\n");
+}
+
+// Предел Telegram на одно сообщение.
+var TG_MAX_LEN = 4096;
+
+// Текст сообщения о новой заявке с сайта — раскладка прежних сообщений Tilda.
+// Не влезает в предел — режем список позиций, а не итог, покупателя и ссылку.
+function tgOrderMessage(parsed, fields, siteUrl) {
+  var items = parsed.items || [];
+  var total = 0;
+  var itemLines = items.map(function (it, i) {
+    var sum = Math.round(Number(it.total) || 0);
+    var unit = Number(it.price) || 0;
+    total += sum;
+    return (i + 1) + ". " + tgEscape(it.raw_name) + ": " + sum + " (" +
+      (Number(it.qty) || 0) + " x " + (unit ? unit : "0.00") + ")";
+  });
+
+  var tail = ["<b>Сумма: " + total + " RUB</b>", ""];
+  var buyer = tgOrderBuyerBlock(fields);
+  tail.push("<b>Покупатель</b>");
+  if (buyer) tail.push(buyer);
+  tail.push("");
+
+  function when(d, t) { return d ? d + (t ? " " + t : "") : ""; }
+  var from = when(fields.issue_date, fields.issue_time);
+  var to = when(fields.return_date, fields.return_time);
+  if (from || to) tail.push("<b>Даты:</b> " + tgEscape(from || "—") + " — " + tgEscape(to || "—"));
+  if (String(fields.project || "").trim()) tail.push("Проект: " + tgEscape(String(fields.project).trim()));
+  var extra = String(fields.extra_input || "").trim();
+  if (extra) tail.push("Дополнительно: " + tgEscape(extra.length > 500 ? extra.substring(0, 500) + "…" : extra));
+  if (siteUrl) {
+    tail.push("");
+    tail.push('<a href="' + tgEscape(siteUrl) + '">Открыть заказ на сайте</a>');
+  }
+
+  var head = "<b>Заказ №" + tgEscape(parsed.order_no) + "</b>";
+  var tailText = tail.join("\n");
+  var shown = itemLines.slice();
+  function build() {
+    var body = shown.slice();
+    if (shown.length < itemLines.length) {
+      body.push("… и ещё " + (itemLines.length - shown.length) + " поз.");
+    }
+    return [head].concat(body).join("\n") + "\n" + tailText;
+  }
+  var text = build();
+  while (text.length > TG_MAX_LEN && shown.length) {
+    shown.pop();
+    text = build();
+  }
+  return text;
 }
 
 // Откуда берётся id чата. Раньше инструкция звала открыть в браузере адрес
@@ -3015,15 +3100,15 @@ function helloText(chatId) {
     "",
     "Буду писать сюда:",
     "• новые заявки с сайта",
-    "• просрочки по заказам",
     "• дефекты, отмеченные на складе",
     "• ссылки на акты сдачи-приёмки",
     "",
   ];
+  // Сообщения бота — HTML, поэтому литералы и значения экранируются.
   // Обещать кнопку, которой нет, хуже, чем промолчать: ссылка печатается
   // только когда её задали в настройках.
-  if (link) out.push("Склад: " + link);
-  out.push("Этот чат: " + chatId);
+  if (link) out.push("Склад: " + tgEscape(link));
+  out.push("Этот чат: " + tgEscape(chatId));
   return out.join("\n");
 }
 
@@ -3059,33 +3144,6 @@ function notifyRefusal(res) {
     ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
 }
 
-// Сводка просрочек. Вызывается кнопкой в админке и — если повесить временной
-// триггер на dailyOverdueDigest — раз в сутки сама.
-function overdueDigest() {
-  var today = new Date().toISOString().substring(0, 10);
-  var txRows = readRows(getSheet(SHEETS.TRANSACTIONS));
-  var counts = orderCounts(txRows);
-  var lines = [];
-  readRows(getSheet(SHEETS.ORDERS)).forEach(function (o) {
-    if (orderStatus(o, counts[String(o.order_id)]) !== "Issued") return;
-    var due = String(o.return_date || "").substring(0, 10);
-    if (!due || due >= today) return;
-    var open = (counts[String(o.order_id)] || {}).open || 0;
-    lines.push("№" + o.order_no + " · " + (o.student_name || "—") +
-      " · вернуть до " + due + " · на руках " + open);
-  });
-  if (!lines.length) return { overdue: 0, message: "Просрочек нет." };
-  var text = "Просроченные заказы — " + lines.length + ":\n" + lines.join("\n");
-  var res = tgSend(text);
-  return { overdue: lines.length, sent: res.ok, message: text };
-}
-
-// Отдельная функция для временного триггера: в редакторе Apps Script у
-// триггера можно выбрать только функцию без аргументов.
-function dailyOverdueDigest() {
-  overdueDigest();
-}
-
 // ---------------------------------------------------------------------
 // Инвентаризация: журнал сверок склада
 // ---------------------------------------------------------------------
@@ -3096,11 +3154,6 @@ function dailyOverdueDigest() {
 //
 // Пишем только итог и расхождения. Строка «ожидали найти и нашли» ничего не
 // сообщает, а на 628 позициях каждая сверка добавляла бы столько же строк.
-
-function handleNotifyOverdue(payload, token) {
-  requireAdmin(token);
-  return overdueDigest();
-}
 
 function handleInventorySave(payload, token) {
   var staffRow = checkAuth(token);
@@ -3410,24 +3463,18 @@ function handlePublicOrder(payload) {
     items: parsed.items,
   }, "", "сайт");
 
-  // В чат — короткое извещение, а не вся заявка: подробности уже в таблице, а
-  // ФИО и телефоны детей незачем множить по чатам.
+  // В чат — сообщение в том виде, в каком владелец раньше получал заявки из
+  // Tilda: состав, сумма, покупатель, даты. Владелец решил, что данные
+  // покупателя в чате нужны (раньше ФИО и телефоны детей не множили по чатам).
+  // Тело собирает tgOrderMessage, блок покупателя — tgOrderBuyerBlock.
   //
-  // Ссылка на приложение — из настройки: короткого имени мини-приложения код
-  // знать не может, его заводят в BotFather. Не задана — говорим словами, куда
-  // смотреть, а не даём ссылку в никуда.
+  // Ссылка — из настройки site_url; не задана — строки со ссылкой нет вовсе.
   var actUrl = autoAct(order.order_id, "");
 
-  var appLink = String(settings.app_link || "").trim();
-  tgSend("Заявка с сайта №" + parsed.order_no + "\n" +
-    fields.student_name + ", " + fields.student_phone + "\n" +
-    "Позиций: " + parsed.items.length +
-    (fields.issue_date ? "\nНа " + fields.issue_date +
-      (fields.issue_time ? " " + fields.issue_time : "") +
-      (fields.return_date && fields.return_date !== fields.issue_date
-        ? " — " + fields.return_date + (fields.return_time ? " " + fields.return_time : "")
-        : "") : "") +
-    (appLink ? "\n" + appLink : "\nОткройте «Заказы» в приложении."));
+  // Сборка текста внутри try: сбой уведомления не должен ронять приём заявки.
+  try {
+    tgSend(tgOrderMessage(parsed, fields, String(settings.site_url || "").trim()));
+  } catch (e) { /* заявка уже записана, уведомление не важнее её */ }
 
   return { order_id: order.order_id, order_no: parsed.order_no, repeat: false,
            act_url: actUrl };
@@ -4612,8 +4659,9 @@ function buildAct(orderId, masterName) {
   // Диску, и повторная сборка не плодит документы на один заказ.
   updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
 
-  // Сообщение того же вида, что приходило раньше.
-  tgSend("АКТ от " + stamp + " " + fio + " >>> " + url);
+  // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
+  tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
+    '<a href="' + tgEscape(url) + '">Открыть акт</a>');
 
   return {
     url: url, document_id: copy.getId(), lines: lines.length,

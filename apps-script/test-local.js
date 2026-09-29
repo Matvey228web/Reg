@@ -2052,6 +2052,99 @@ check('без ФИО отклонена',
 check('слишком длинная отклонена',
   call('/public/order', { raw_text: siteText('260101-6666') + '\n' + 'я'.repeat(4000) }).status === 400);
 
+console.log('\n== сообщение бота о заявке (HTML) ==');
+// Раскладка прежних сообщений Tilda, только в HTML. Данные выдуманные.
+const siteTg = () => {
+  const msgs = sent.filter((r) => /sendMessage/.test(r.url));
+  return msgs.length ? JSON.parse(msgs[msgs.length - 1].opts.payload) : null;
+};
+function botOrderText(no, itemLines, buyerLines) {
+  return ['Заказ №' + no].concat(itemLines).concat(['', 'Информация о покупателе:'])
+    .concat(buyerLines).concat([
+      'Type_and_name_of_the_project: курсовая',
+      'Date_of_issue: 01.10.2026', 'Time_of_issue: 10:00',
+      'Date_completion: 05.10.2026', 'Time_completion: 18:00',
+    ]).join('\n');
+}
+const adultBuyer = ['Are_you_an_adult: Да', 'Full_name_minor: Тестов Тест Тестович',
+  'Phone_minors: +70000000000', 'Telegram_Minors: @testov'];
+metaSet('setting_site_url', 'https://example.test/site?a=1&b=2');
+sent.length = 0;
+so = call('/public/order', { raw_text: botOrderText('270101-0001', [
+  '1. ' + siteCat.model_name + ': 77000 (2 x 38500)',
+  '2. Бесплатная вещь: 0 (1 x 0)',
+], adultBuyer) });
+check('заявка для сообщения принята', so.ok === true, so);
+let tgm = siteTg();
+check('parse_mode HTML в сообщении о заявке', tgm && tgm.parse_mode === 'HTML', tgm);
+check('заголовок с номером жирным', /^<b>Заказ №270101-0001<\/b>\n/.test(tgm.text), tgm.text);
+check('строка позиции: сумма и (кол-во x цена)',
+  tgm.text.indexOf('1. ' + siteCat.model_name + ': 77000 (2 x 38500)') !== -1, tgm.text);
+check('нулевая цена печатается как у Tilda',
+  tgm.text.indexOf('2. Бесплатная вещь: 0 (1 x 0.00)') !== -1, tgm.text);
+check('сумма — по строкам', /<b>Сумма: 77000 RUB<\/b>/.test(tgm.text), tgm.text);
+check('блок покупателя для взрослого: ФИО, телефон, ник',
+  /<b>Покупатель<\/b>\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
+check('даты со временем', /<b>Даты:<\/b> 2026-10-01 10:00 — 2026-10-05 18:00/.test(tgm.text), tgm.text);
+check('проект отдельной строкой', /Проект: курсовая/.test(tgm.text), tgm.text);
+check('ссылка на сайт из site_url, экранированная',
+  tgm.text.indexOf('<a href="https://example.test/site?a=1&amp;b=2">Открыть заказ на сайте</a>') !== -1, tgm.text);
+
+// Несовершеннолетний: представитель, затем сам арендатор.
+so = call('/public/order', { raw_text: botOrderText('270101-0002', [
+  '1. ' + siteCat.model_name + ': 100 (1 x 100)',
+], ['Are_you_an_adult: Нет', 'Full_name_guardian: Опекунов Опекун Опекунович',
+  'Phone_guardian: +70000000001', 'Full_name_minor: Юнов Юн Юнович',
+  'Phone_minors: +70000000002', 'Telegram_Minors: @yunov']) });
+tgm = siteTg();
+check('блок покупателя для несовершеннолетнего',
+  /<b>Покупатель<\/b>\nПредставитель: Опекунов Опекун Опекунович\nТелефон представителя: \+70000000001\nНесовершеннолетний: Юнов Юн Юнович\nТелефон: \+70000000002\nTelegram: @yunov/.test(tgm.text), tgm.text);
+
+// Всё, что пришло с формы, экранируется.
+so = call('/public/order', { raw_text: botOrderText('270101-0003', [
+  '1. Кран <i>&Ко: 5 (1 x 5)',
+], ['Are_you_an_adult: Да', 'Full_name_minor: Иван <b>&', 'Phone_minors: +70000000000']) });
+tgm = siteTg();
+check('«<b>&» в имени экранирован', tgm.text.indexOf('Иван &lt;b&gt;&amp;') !== -1 &&
+  tgm.text.indexOf('Иван <b>&') === -1, tgm.text);
+check('и в названии позиции', tgm.text.indexOf('Кран &lt;i&gt;&amp;Ко') !== -1, tgm.text);
+
+// Без site_url строки со ссылкой нет.
+metaSet('setting_site_url', '');
+so = call('/public/order', { raw_text: botOrderText('270101-0004', [
+  '1. ' + siteCat.model_name + ': 100 (1 x 100)',
+], adultBuyer) });
+tgm = siteTg();
+check('без site_url ссылки нет', !/<a href|Открыть заказ/.test(tgm.text), tgm.text);
+
+// Длинная заявка: режется список позиций, а итог, покупатель и ссылка остаются.
+metaSet('setting_site_url', 'https://example.test/');
+so = call('/public/order', { raw_text: botOrderText('270101-0005',
+  Array.from({ length: 30 }, (_, i) => (i + 1) + '. ' + '&'.repeat(60) + ': 100 (1 x 100)'),
+  adultBuyer) });
+check('длинная заявка принята', so.ok === true, so);
+tgm = siteTg();
+check('сообщение укладывается в предел Telegram', tgm.text.length <= 4096, tgm.text.length);
+check('список урезан пометкой «… и ещё N поз.»', /… и ещё \d+ поз\./.test(tgm.text), tgm.text.slice(0, 200));
+check('сумма по всем позициям сохранена', /<b>Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
+check('покупатель и ссылка уцелели',
+  /Тестов Тест Тестович/.test(tgm.text) && /<a href="https:\/\/example\.test\/">/.test(tgm.text), tgm.text.slice(-400));
+metaSet('setting_site_url', '');
+
+// Дефект: жирный заголовок, значения экранированы.
+const bdItem = call('/item/create', { name: 'Штатив <тест>', category: 'LGT' }, siteAdmin).data.item_id;
+call('/transaction/checkout', { item_id: bdItem, client_id: clientId }, siteAdmin);
+call('/transaction/checkin',
+  { item_id: bdItem, has_defect: true, defect_description: 'Сломано <b>&', defect_severity: 'Minor' }, siteAdmin);
+tgm = siteTg();
+check('дефект в HTML: заголовок жирным, описание экранировано',
+  tgm.parse_mode === 'HTML' && /^<b>Дефект:<\/b> Штатив &lt;тест&gt;/.test(tgm.text) &&
+  tgm.text.indexOf('Сломано &lt;b&gt;&amp;') !== -1, tgm);
+
+check('ручки просрочек в Telegram больше нет',
+  /неизвестн|не найден|Unknown/i.test(String(call('/notify/overdue', {}, siteAdmin).error)),
+  call('/notify/overdue', {}, siteAdmin));
+
 console.log('\n== предел на заявки с сайта ==');
 call('/settings/set', { settings: { public_orders_per_hour: 2 } }, siteAdmin);
 __cacheStore.clear();
@@ -2262,8 +2355,9 @@ check('ушло в указанный чат, а не в чат из настр�
 check('бот представился',
   /^Здравствуйте! Я бот склада Mifs Rent\./.test(tgLast().text), tgLast().text);
 check('перечислил, о чём будет писать',
-  /заявки с сайта/.test(tgLast().text) && /просрочки/.test(tgLast().text) &&
+  /заявки с сайта/.test(tgLast().text) && !/просрочки/.test(tgLast().text) &&
   /дефекты/.test(tgLast().text) && /акт/.test(tgLast().text), tgLast().text);
+check('приветствие уходит как HTML', tgLast().parse_mode === 'HTML', tgLast());
 check('назвал чат, чтобы было видно — тот самый',
   /Этот чат: -100555/.test(tgLast().text), tgLast().text);
 check('про склад молчит, пока ссылки нет',
@@ -2483,8 +2577,8 @@ check('ссылка на акт лежит в заказе',
 const tgTexts = () => sent
   .filter((r) => /sendMessage/.test(r.url))
   .map((r) => JSON.parse(r.opts.payload).text);
-check('в чат ушло сообщение того же вида, что раньше',
-  tgTexts().some((m) => /^АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} .* >>> https/.test(m)),
+check('в чат ушло сообщение об акте со ссылкой <a href>',
+  tgTexts().some((m) => /^<b>АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/b> .*\n<a href="https:\/\/docs\.google\.com[^"]*">Открыть акт<\/a>$/.test(m)),
   tgTexts().slice(-3));
 
 // Шаблон сломали — заказ всё равно должен записаться: это договорённость со
@@ -2501,7 +2595,7 @@ const stillOrder = call('/order/create', {
 check('со сломанным шаблоном заказ всё равно записан', stillOrder.ok === true, stillOrder);
 check('ссылки на акт при этом нет', !stillOrder.data.act_url, stillOrder.data.act_url);
 check('и о неудаче сказано в чат',
-  tgTexts().some((m) => /не собрался/.test(m)), tgTexts().slice(-2));
+  tgTexts().some((m) => /^<b>Акт по заказу №\d+ не собрался:<\/b> /.test(m)), tgTexts().slice(-2));
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
