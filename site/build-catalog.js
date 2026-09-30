@@ -16,10 +16,16 @@ const path = require("path");
 const REPO = path.resolve(__dirname, "..");
 const OUT = path.join(__dirname, "catalog.json");
 
+// Адрес Apps Script живёт в настройках Worker (UPSTREAM_URL): в app/js/config.js
+// теперь адрес самого воркера. Идём в Apps Script напрямую, поэтому ask() ниже
+// с ручным редиректом остаётся в силе. Это копия appsScriptUrl() из
+// apps-script/deploy.js: подключать тот файл нельзя — он тянет за собой OAuth
+// и сразу выполняет команду, а пять строк дешевле общей зависимости.
 function backendUrl() {
-  const conf = fs.readFileSync(path.join(REPO, "app/js/config.js"), "utf8");
-  const m = conf.match(/(https:\/\/script\.google\.com[^"']+)/);
-  if (!m) throw new Error("В app/js/config.js не нашёлся адрес бэкенда");
+  const place = "worker/wrangler.toml";
+  const conf = fs.readFileSync(path.join(REPO, place), "utf8");
+  const m = conf.match(/UPSTREAM_URL\s*=\s*"(https:\/\/script\.google\.com\/macros\/s\/[^"]+\/exec)"/);
+  if (!m) throw new Error("В " + place + " не нашёлся UPSTREAM_URL с адресом Apps Script");
   return m[1];
 }
 

@@ -12,8 +12,9 @@
 //
 // Доступ: файл с refresh-токеном, путь в GAS_TOKENS (по умолчанию ~/.gas-token.json).
 // Как его получить — в DEPLOY.md. Токен в репозиторий не кладём никогда.
-// Проект — GAS_SCRIPT_ID или значение по умолчанию ниже. Развёртывание берётся
-// из app/js/config.js, чтобы не разойтись с тем, куда стучится приложение.
+// Проект — GAS_SCRIPT_ID или значение по умолчанию ниже. Развёртывание и адрес
+// /exec берутся из worker/wrangler.toml (UPSTREAM_URL), чтобы не разойтись с
+// тем, куда стучится Worker.
 
 const fs = require("fs");
 const path = require("path");
@@ -46,6 +47,21 @@ function deploymentId() {
     if (m) return m[1];
   }
   throw new Error("Адрес /macros/s/<id>/exec не нашёлся ни в " + places.join(", "));
+}
+
+// Полный адрес /exec — для verify(): живой бэкенд спрашиваем напрямую, мимо
+// Worker, чтобы видеть именно то, что выложено. Ищем там же и в том же
+// порядке, что и deploymentId().
+function appsScriptUrl() {
+  const places = ["worker/wrangler.toml", "app/js/config.js"];
+  for (const place of places) {
+    const full = path.join(REPO, place);
+    if (!fs.existsSync(full)) continue;
+    const m = fs.readFileSync(full, "utf8")
+      .match(/https:\/\/script\.google\.com\/macros\/s\/[^/"'\s]+\/exec/);
+    if (m) return m[0];
+  }
+  throw new Error("Адрес https://script.google.com/macros/s/<id>/exec не нашёлся ни в " + places.join(", "));
 }
 
 async function accessToken() {
@@ -211,8 +227,10 @@ async function push() {
 // Живой бэкенд отвечает через редирект на script.googleusercontent.com, и
 // обычный fetch за ним не ходит с нужными заголовками — поэтому руками.
 async function verify() {
-  const conf = fs.readFileSync(path.join(REPO, "app/js/config.js"), "utf8");
-  const url = conf.match(/(https:\/\/script\.google\.com[^"']+)/)[1];
+  const url = appsScriptUrl();
+  console.log("бэкенд:", url.slice(0, 60) + "…");
+  // /labels/send выведен из работы и должен отвечать 410 — это тоже живая
+  // проверка: видно, что выложен свежий Code.gs, а не старая версия.
   const probes = ["/item/numbers", "/model/move", "/labels/send", "/выдуманный"];
   for (const endpoint of probes) {
     const first = await fetch(url, {
@@ -221,12 +239,16 @@ async function verify() {
       body: JSON.stringify({ endpoint, token: "проба", payload: {} }),
     });
     const location = first.headers.get("location");
-    const res = await fetch(location, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const res = location
+      ? await fetch(location, { headers: { "User-Agent": "Mozilla/5.0" } })
+      : first;
     const text = await res.text();
-    let verdict = text.slice(0, 80);
+    let verdict = "HTTP " + res.status + ": " + text.replace(/\s+/g, " ").slice(0, 80);
     try {
       const data = JSON.parse(text);
-      verdict = data.status + " " + data.error;
+      // Печатаем только то, что пришло: «undefined undefined» ничего не говорит.
+      verdict = [data.ok === true ? "ok" : null, data.status, data.error]
+        .filter((v) => v !== undefined && v !== null && v !== "").join(" ") || text.slice(0, 80);
     } catch { /* пришёл не JSON — покажем как есть */ }
     console.log(`  ${endpoint.padEnd(16)} → ${verdict}`);
   }
