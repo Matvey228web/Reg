@@ -212,7 +212,7 @@ const LabelsScreen = (() => {
       canvas,
       item.name + " · " + item.item_id,
       TG.isAvailable()
-        ? "Скачать напрямую из Telegram нельзя — кнопка откроет системный лист «Поделиться», а если его нет, картинку пришлёт бот."
+        ? "Скачать напрямую из Telegram нельзя — кнопка откроет системный лист «Поделиться», а если его нет — покажет картинку во весь экран (удерживайте, чтобы сохранить)."
         : "",
       () => saveImageFor(canvas, fileName(item, size), item.name,
                          document.getElementById("qr-overlay-save")));
