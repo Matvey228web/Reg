@@ -255,6 +255,74 @@ ok("студенту ответили успехом (заявка принят�
 ok("из очереди убрана", qKeys().length === 0, qKeys());
 ok("но видна в ящике неудач, а не потеряна", deadKeys().length === 1, deadKeys());
 
+console.log("== 409 — не доставка, а конфликт номера ==");
+// Таблица отвечает 409, только когда номер уже занят ДРУГИМ текстом. Считать
+// это доставкой — значит молча выбросить заявку.
+upstream.reply = { ok: false, data: null, error: "Заявка с таким номером уже есть", status: 409 };
+upstream.calls = [];
+r = await call("/public/order", { raw_text: goodOrder("260101-0005") });
+ok("студенту ответили успехом", r.data.ok === true, r.data);
+ok("409 не остался в очереди", qKeys().length === 0, qKeys());
+ok("а лёг в ящик неудач", deadKeys().includes("dead:260101-0005"), deadKeys());
+ok("и с причиной от таблицы",
+   /уже есть/.test(JSON.parse(env.CACHE.store.get("dead:260101-0005").value).error),
+   env.CACHE.store.get("dead:260101-0005"));
+
+console.log("== тот же номер с другим текстом заменяет заявку в очереди ==");
+// Вкладку не перезагрузили, номер остался прежним, а корзина другая.
+let sentText = [];
+upstream.reply = (body) => {
+  sentText.push(body.payload && body.payload.raw_text);
+  return { ok: false, data: null, error: "нет связи", status: 502 };
+};
+const textA = goodOrder("260101-0006");
+const textB = textA.replace("GreenBean HDV Elite-756", "Aputure LS 300d");
+r = await call("/public/order", { raw_text: textA });
+ok("первая версия принята", r.data.ok === true && r.data.data.repeat === false, r.data);
+const storedText = () => JSON.parse(env.CACHE.store.get("q:260101-0006").value).payload.raw_text;
+ok("и лежит в очереди", storedText() === textA);
+const triesQ = () => JSON.parse(env.CACHE.store.get("q:260101-0006").value).tries;
+await worker.scheduled({}, env, ctx);
+await settle();
+ok("старая версия успела накопить попытки", triesQ() === 2, triesQ());
+
+sentText = [];
+r = await call("/public/order", { raw_text: textB });
+ok("другой текст — не повтор", r.data.ok === true && r.data.data.repeat === false, r.data);
+ok("в очереди одна запись", qKeys().length === 1, qKeys());
+ok("и в ней новый текст", storedText() === textB, storedText());
+// Счёт начат заново: ноль при записи и одна неудачная попытка сразу после.
+ok("попытки обнулены", triesQ() === 1, triesQ());
+ok("новую версию сразу пробовали доставить", sentText.length === 1 && sentText[0] === textB, sentText);
+
+sentText = [];
+r = await call("/public/order", { raw_text: textB });
+ok("тот же текст ещё раз — повтор", r.data.data.repeat === true, r.data);
+ok("и таблицу не трогает", sentText.length === 0, sentText);
+ok("очередь не изменилась", storedText() === textB, storedText());
+
+upstream.reply = (body) => {
+  sentText.push(body.payload && body.payload.raw_text);
+  return { ok: true, data: { order_id: 4 }, error: null, status: 200 };
+};
+sentText = [];
+await worker.scheduled({}, env, ctx);
+await settle();
+ok("cron дослал именно новую версию", sentText.length === 1 && sentText[0] === textB, sentText);
+ok("очередь опустела", qKeys().length === 0, qKeys());
+
+// Испорченная запись в очереди — не повод отвечать «повтор» и терять заявку.
+await env.CACHE.put("q:260101-0007", "не json");
+upstream.reply = { ok: false, data: null, error: "нет связи", status: 502 };
+r = await call("/public/order", { raw_text: goodOrder("260101-0007") });
+ok("испорченная запись перезаписана", r.data.data.repeat === false &&
+   JSON.parse(env.CACHE.store.get("q:260101-0007").value).payload.raw_text === goodOrder("260101-0007"),
+   env.CACHE.store.get("q:260101-0007"));
+upstream.reply = { ok: true, data: { order_id: 5 }, error: null, status: 200 };
+await worker.scheduled({}, env, ctx);
+await settle();
+ok("и доставлена", qKeys().length === 0, qKeys());
+
 console.log("== таблица ответила не JSON ==");
 // Настоящий случай: Apps Script раз в несколько запросов отдаёт страницу
 // ошибки Google вместо ответа.

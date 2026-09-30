@@ -348,11 +348,21 @@ async function takeOrder(env, ctx, payload) {
   const no = orderNumber(payload.raw_text);
   const key = "q:" + no;
 
-  // Ответ идёт мгновенно, и кнопку жмут второй раз. Повтор не должен ни
-  // заводить вторую заявку, ни выглядеть отказом.
+  // Ответ идёт мгновенно, и кнопку жмут второй раз. Повтор того же текста не
+  // должен ни заводить вторую заявку, ни выглядеть отказом. Тот же номер с
+  // другим текстом (студент поправил корзину, не перезагружая вкладку) —
+  // новая версия заявки: перезаписываем ключ поверх, а не удаляем, чтобы
+  // между удалением и записью заявка не пропала. Испорченная запись в
+  // очереди считается «другим текстом» и тоже перезаписывается.
   const queued = await env.CACHE.get(key);
   if (queued) {
-    return json({ ok: true, data: { order_no: no, queued: true, repeat: true }, error: null, status: 200 });
+    let stored = null;
+    try { stored = JSON.parse(queued); } catch { stored = null; }
+    const same = stored && stored.payload &&
+      String(stored.payload.raw_text || "") === String(payload.raw_text || "");
+    if (same) {
+      return json({ ok: true, data: { order_no: no, queued: true, repeat: true }, error: null, status: 200 });
+    }
   }
 
   // Сначала в хранилище, потом ответ: пообещать «забронировано» и потерять
@@ -378,14 +388,16 @@ async function deliver(env, key) {
   const res = await callUpstream(env, { endpoint: "/public/order", payload: row.payload });
   const answer = res.ok ? res.envelope : null;
 
-  if (answer && (answer.ok || answer.status === 409)) {
+  // Повтор того же текста таблица сама отвечает ok+repeat — это тоже «доставлено».
+  if (answer && answer.ok) {
     await env.CACHE.delete(key);
     return;
   }
-  // 400 и 403 — «так не бывает» и «приём выключен». Ждать тут нечего, но и
-  // молча терять заявку нельзя: перекладываем в отдельный ящик, чтобы её
-  // было видно глазами.
-  if (answer && (answer.status === 400 || answer.status === 403)) {
+  // 400 и 403 — «так не бывает» и «приём выключен». 409 — номер в таблице уже
+  // занят другим текстом: это не доставка, а конфликт, и сам он не
+  // рассосётся. Ждать тут нечего, но и молча терять заявку нельзя:
+  // перекладываем в отдельный ящик, чтобы её было видно глазами.
+  if (answer && (answer.status === 400 || answer.status === 403 || answer.status === 409)) {
     await env.CACHE.put("dead:" + key.slice(2), JSON.stringify({
       ...row, error: answer.error, at: Date.now(),
     }));
