@@ -22,6 +22,12 @@ const TTL = {
   session: 300,
 };
 
+// Сколько ждём таблицу. Apps Script отвечает 4–18 секунд; если за полминуты
+// ответа нет, его уже не будет, а держать соединение дальше — значит держать
+// человека перед крутилкой. Для проверок срок подменяется переменной
+// UPSTREAM_TIMEOUT_MS.
+const UPSTREAM_TIMEOUT_MS = 30000;
+
 // Чтения. Всё остальное считается записью и сбрасывает кэш целиком — так
 // невозможно забыть дописать инвалидацию, когда появится новый эндпоинт.
 // Ошибка в эту сторону стоит лишнего запроса, в обратную — выданной вещи,
@@ -69,6 +75,12 @@ export default {
     const path = new URL(request.url).pathname;
     if (path.startsWith("/tg/")) return telegramWebhook(request, env, ctx, path.slice(4));
 
+    // Состояние очереди для внешней проверки доступности. Ни таблицу, ни
+    // Telegram не трогает — только KV. Опрашивать не чаще раза в 15 минут:
+    // каждый вызов — две операции list, а на бесплатном тарифе их около
+    // тысячи в сутки на всё, включая cron.
+    if (path === "/health" && request.method === "GET") return cors(await health(env));
+
     if (request.method !== "POST") {
       return cors(text("Mifs Rent API. Запросы принимаются через POST.", 200));
     }
@@ -95,6 +107,8 @@ export default {
     // Личный ответ кладётся под своим ключом — по отпечатку токена. Общий
     // ответ (каталог, заказы) — под общим: он у всех одинаковый.
     const who = PERSONAL.has(endpoint) ? token : "";
+    // Подтверждён ли токен — undefined, пока KV не спрашивали.
+    let known;
 
     if (cacheable && PUBLIC_READS.has(endpoint)) {
       const key = await cacheKey(env, endpoint, body.payload, who);
@@ -103,7 +117,7 @@ export default {
     } else if (cacheable && token) {
       // Отдаём кэш только тому, чей токен Apps Script уже подтверждал: иначе
       // подделанный токен получил бы весь каталог, не заходя в систему.
-      const known = await env.CACHE.get("sess:" + token);
+      known = await env.CACHE.get("sess:" + token);
       if (known) {
         const key = await cacheKey(env, endpoint, body.payload, who);
         const hit = await env.CACHE.get(key);
@@ -129,8 +143,12 @@ export default {
 
     // Успешный ответ означает, что токен настоящий: Apps Script проверил его
     // сам. Запоминаем на короткий срок, чтобы следующий запрос ушёл в кэш.
+    // Уже запомненный не переписываем: записей в KV на бесплатном тарифе
+    // около тысячи в сутки, а чтений — в сто раз больше. Срок от этого не
+    // продлевается — через пять минут токен просто подтвердится заново.
     if (token && answer.ok) {
-      ctx.waitUntil(env.CACHE.put("sess:" + token, "1", { expirationTtl: TTL.session }));
+      if (known === undefined) known = await env.CACHE.get("sess:" + token);
+      if (!known) ctx.waitUntil(env.CACHE.put("sess:" + token, "1", { expirationTtl: TTL.session }));
     }
     // Вход выдаёт новый токен — он тоже настоящий, и первый же запрос после
     // входа должен попасть в кэш, а не ехать за ним в таблицу.
@@ -159,7 +177,13 @@ export default {
   async scheduled(event, env, ctx) {
     const list = await env.CACHE.list({ prefix: "q:" });
     for (const entry of list.keys) {
-      await deliver(env, entry.name);
+      // Одна испорченная запись не должна запирать всю очередь: иначе каждые
+      // пять минут cron спотыкался бы об неё и не доходил до остальных.
+      try {
+        await deliver(env, entry.name);
+      } catch (err) {
+        await bury(env, entry.name, err);
+      }
     }
   },
 };
@@ -225,16 +249,38 @@ async function handleUpdate(env, token, update) {
   const chat = msg && msg.chat;
   if (!chat || !chat.id) return;
 
-  await env.CACHE.put("chat:" + chat.id, JSON.stringify({
+  const row = {
     chat_id: String(chat.id),
     title: String(chat.title ||
       [chat.first_name, chat.last_name].filter(Boolean).join(" ") ||
       chat.username || "без названия"),
     type: String(chat.type || ""),
     at: msg.date ? new Date(msg.date * 1000).toISOString() : new Date().toISOString(),
-  }), { expirationTtl: TG_CHAT_TTL });
+  };
+  if (await chatChanged(env, row)) {
+    await env.CACHE.put("chat:" + chat.id, JSON.stringify(row), { expirationTtl: TG_CHAT_TTL });
+  }
 
-  if (answerWanted(update)) await tgSend(token, chat.id, answerText(chat));
+  // В форуме ответ без номера темы уходит в «Общее», и человек, спросивший
+  // /id в своей теме, его не увидит.
+  const thread = msg.is_topic_message === true ? msg.message_thread_id : null;
+  if (answerWanted(update)) await tgSend(token, chat.id, answerText(msg), thread);
+}
+
+// Каждое сообщение в чате — это не повод писать в KV: записей в сутки около
+// тысячи на всё. Переписываем, только если чат новый, переименован, сменил
+// тип или запись старше недели — последнее нужно, чтобы месячный срок
+// хранения продлевался, пока в чате пишут.
+const TG_CHAT_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function chatChanged(env, row) {
+  const raw = await env.CACHE.get("chat:" + row.chat_id);
+  if (!raw) return true;
+  let was;
+  try { was = JSON.parse(raw); } catch { return true; }
+  if (!was || was.title !== row.title || was.type !== row.type) return true;
+  const age = Date.parse(row.at) - Date.parse(was.at);
+  return !(age < TG_CHAT_REFRESH_MS);
 }
 
 // Отвечаем на команды и на своё появление в группе. На обычные сообщения — нет:
@@ -256,19 +302,22 @@ function answerWanted(update) {
 // Ответ на команду — не то же, что приветствие в настроенном чате: здесь
 // человек спрашивает «ты тут?», и главное в ответе — номер чата, который в
 // Telegram на телефоне не посмотреть никак.
-function answerText(chat) {
-  return [
+function answerText(msg) {
+  const lines = [
     "Я бот склада Mifs Rent.",
     "",
-    "Пишу сюда о новых заявках с сайта, дефектах и актах сдачи-приёмки.",
+    "Пишу сюда о новых заявках с сайта и актах сдачи-приёмки.",
     "",
-    "Этот чат: " + chat.id,
+    "Этот чат: " + msg.chat.id,
+  ];
+  if (msg.is_topic_message === true) lines.push("Эта тема: " + msg.message_thread_id);
+  return lines.concat([
     "Осталось выбрать его в приложении: Настройки → Бот в Telegram → " +
       "Найти чат склада.",
-  ].join("\n");
+  ]).join("\n");
 }
 
-async function tgSend(token, chatId, body) {
+async function tgSend(token, chatId, body, thread) {
   try {
     await fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "POST",
@@ -277,6 +326,7 @@ async function tgSend(token, chatId, body) {
         chat_id: String(chatId),
         text: body,
         disable_web_page_preview: true,
+        ...(thread ? { message_thread_id: thread } : {}),
       }),
     });
   } catch {
@@ -416,12 +466,75 @@ async function deliver(env, key) {
   await env.CACHE.put(key, JSON.stringify(row));
 }
 
+// Запись, которую deliver не смог даже разобрать, — в ящик неудач как есть,
+// с причиной. Выбросить её нельзя: это чья-то заявка.
+async function bury(env, key, err) {
+  let raw = null;
+  try { raw = await env.CACHE.get(key); } catch { raw = null; }
+  try {
+    await env.CACHE.put("dead:" + key.slice(2), JSON.stringify({
+      raw, error: "запись в очереди испорчена: " + String((err && err.message) || err),
+      at: Date.now(),
+    }));
+    await env.CACHE.delete(key);
+  } catch {
+    // KV недоступно — запись остаётся в очереди до следующего захода.
+  }
+}
+
+// ---- состояние очереди ----
+
+async function health(env) {
+  try {
+    const [queue, dead] = await Promise.all([
+      env.CACHE.list({ prefix: "q:" }),
+      env.CACHE.list({ prefix: "dead:" }),
+    ]);
+    // Дату берём из самих записей: ящик неудач обычно пуст или почти пуст,
+    // а чтения KV в отличие от list дешёвые.
+    let oldest = null;
+    for (const entry of dead.keys) {
+      let at = null;
+      try { at = Number(JSON.parse(await env.CACHE.get(entry.name)).at) || null; } catch { at = null; }
+      if (at && (oldest === null || at < oldest)) oldest = at;
+    }
+    return json({
+      ok: true,
+      queue: queue.keys.length,
+      dead: dead.keys.length,
+      oldest_dead_at: oldest === null ? null : new Date(oldest).toISOString(),
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ ok: false, error: "KV недоступно: " + err.message }), {
+      status: 503, headers: { "Content-Type": "application/json;charset=utf-8" },
+    });
+  }
+}
+
 // ---- обращение к таблице ----
 
 async function callUpstream(env, body) {
+  const limit = Number(env.UPSTREAM_TIMEOUT_MS) || UPSTREAM_TIMEOUT_MS;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), limit);
+  try {
+    return await askUpstream(env, body, abort.signal);
+  } catch (err) {
+    if (abort.signal.aborted) {
+      return { ok: false, envelope: envelope(false,
+        "Таблица не ответила за " + Math.round(limit / 1000) + " с, попробуйте ещё раз", 502) };
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function askUpstream(env, body, signal) {
   let res;
   try {
     res = await fetch(env.UPSTREAM_URL, {
+      signal,
       method: "POST",
       // Тот же «простой» тип, что шлёт приложение: Apps Script не отвечает на
       // preflight, и любой другой тип превратил бы запрос в OPTIONS.
@@ -430,12 +543,14 @@ async function callUpstream(env, body) {
       redirect: "follow",
     });
   } catch (err) {
+    if (signal.aborted) throw err;
     return { ok: false, envelope: envelope(false, "Нет связи с таблицей: " + err.message, 502) };
   }
   let parsed;
   try {
     parsed = await res.json();
-  } catch {
+  } catch (err) {
+    if (signal.aborted) throw err;
     return { ok: false, envelope: envelope(false, "Таблица ответила не JSON", 502) };
   }
   return { ok: true, envelope: parsed };

@@ -495,5 +495,125 @@ upstream.reply = listReply([{ item_id: "010101" }]);
 const afterHook = await call("/equipment/list", { category: "all" }, "tok-1");
 ok("вебхук прогретый кэш не выбросил", afterHook.cache === "hit", afterHook.cache);
 
+console.log("\n== /id в теме форума ==");
+// В форуме ответ без номера темы уходит в «Общее» — спросивший его не увидит.
+const topicMsg = (text) => ({
+  message: {
+    chat: { id: -1009876543210, title: "Тестовый чат склада", type: "supergroup", is_forum: true },
+    date: 1790000300,
+    message_thread_id: 42,
+    is_topic_message: true,
+    text,
+  },
+});
+tg = [];
+await hook(topicMsg("/id"));
+ok("ответ ушёл в ту же тему", tg.length === 1 && tg[0].body.message_thread_id === 42, tg);
+ok("и в тексте номер темы", /Эта тема: 42/.test(tg[0].body.text), tg[0].body.text);
+tg = [];
+await hook(groupMsg("/id"));
+ok("вне темы номер темы не передаётся",
+   tg.length === 1 && !("message_thread_id" in tg[0].body), tg);
+ok("и строки про тему нет", !/Эта тема/.test(tg[0].body.text), tg[0].body.text);
+ok("о дефектах бот не пишет", !/дефект/i.test(tg[0].body.text), tg[0].body.text);
+ok("а пишет о заявках с сайта и актах",
+   /заявках с сайта/.test(tg[0].body.text) && /акт/.test(tg[0].body.text), tg[0].body.text);
+
+console.log("\n== лишних записей в KV нет ==");
+// На бесплатном тарифе записей около тысячи в сутки на всё.
+const kvPuts = [];
+const realPut = env.CACHE.put;
+env.CACHE.put = async (key, value, opts) => { kvPuts.push(key); return realPut(key, value, opts); };
+const putsOf = (prefix) => kvPuts.filter((k) => k.startsWith(prefix));
+
+kvPuts.length = 0;
+await hook(groupMsg("просто сообщение"));
+await hook(groupMsg("ещё одно"));
+ok("тот же чат повторно не переписывается", putsOf("chat:").length === 0, kvPuts);
+await hook({ message: { chat: { id: -1009876543210, title: "Склад (новое имя)", type: "supergroup" },
+                        date: 1790000400, text: "x" } });
+ok("а переименованный — переписывается", putsOf("chat:").length === 1, kvPuts);
+kvPuts.length = 0;
+await hook({ message: { chat: { id: -1009876543210, title: "Склад (новое имя)", type: "supergroup" },
+                        date: 1790000400 + 8 * 24 * 3600, text: "x" } });
+ok("и запись старше недели — тоже, чтобы срок продлился", putsOf("chat:").length === 1, kvPuts);
+
+kvPuts.length = 0;
+await env.CACHE.delete("sess:tok-3");
+upstream.reply = { ok: true, data: {}, error: null, status: 200 };
+await call("/notify/hello", {}, "tok-3");
+ok("новый токен запоминается", putsOf("sess:").length === 1, kvPuts);
+await call("/notify/hello", {}, "tok-3");
+await call("/item/create", { category: "CAM" }, "tok-3");
+ok("уже известный не переписывается (запись)", putsOf("sess:").length === 1, kvPuts);
+upstream.reply = listReply([{ item_id: "777777" }]);
+await call("/equipment/list", { category: "sess-test" }, "tok-3");
+ok("и на промахе кэша тоже", putsOf("sess:").length === 1, kvPuts);
+upstream.reply = { ok: true, data: { token: "tok-4" }, error: null, status: 200 };
+await call("/auth/login", { login: "x", pin: "0" }, null);
+ok("вход по-прежнему запоминает новый токен", (await env.CACHE.get("sess:tok-4")) === "1");
+env.CACHE.put = realPut;
+
+console.log("\n== cron переживает испорченную запись ==");
+for (const k of deadKeys()) env.CACHE.store.delete(k);
+await env.CACHE.put("q:260101-0008", "{не json");
+upstream.reply = { ok: false, data: null, error: "нет связи", status: 502 };
+r = await call("/public/order", { raw_text: goodOrder("260101-0009") });
+// Испорченная запись идёт в списке раньше годной.
+upstream.reply = { ok: true, data: { order_id: 9 }, error: null, status: 200 };
+upstream.calls = [];
+let cronFailed = null;
+try { await worker.scheduled({}, env, ctx); await settle(); } catch (err) { cronFailed = err; }
+ok("cron не упал", cronFailed === null, String(cronFailed));
+ok("годная заявка после испорченной доставлена",
+   !env.CACHE.store.has("q:260101-0009") && upstream.calls.includes("/public/order"), qKeys());
+ok("испорченная ушла из очереди", !env.CACHE.store.has("q:260101-0008"), qKeys());
+const buried = env.CACHE.store.get("dead:260101-0008");
+ok("и лежит в ящике неудач с причиной",
+   buried && /испорчена/.test(JSON.parse(buried.value).error) &&
+   JSON.parse(buried.value).raw === "{не json", buried);
+
+console.log("\n== таблица молчит дольше срока ==");
+const savedSlow = globalThis.fetch;
+globalThis.fetch = (url, init) => new Promise((resolve, reject) => {
+  init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+});
+env.UPSTREAM_TIMEOUT_MS = "50";
+const t0 = Date.now();
+r = await call("/equipment/list", { category: "all" }, "никто");
+ok("ответ пришёл по сроку, а не завис", Date.now() - t0 < 2000, Date.now() - t0);
+ok("в обычном конверте 502",
+   r.data.ok === false && r.data.status === 502 && r.data.data === null &&
+   /не ответила/.test(r.data.error), r.data);
+ok("и помечен как ошибка", r.cache === "error", r.cache);
+r = await call("/public/order", { raw_text: goodOrder("260101-0010") });
+ok("заявка при молчании таблицы остаётся в очереди",
+   r.data.ok === true && env.CACHE.store.has("q:260101-0010"), qKeys());
+delete env.UPSTREAM_TIMEOUT_MS;
+globalThis.fetch = savedSlow;
+
+console.log("\n== /health ==");
+for (const k of [...qKeys(), ...deadKeys()]) env.CACHE.store.delete(k);
+await env.CACHE.put("q:1", JSON.stringify({ payload: {}, tries: 0, at: 1 }));
+await env.CACHE.put("q:2", JSON.stringify({ payload: {}, tries: 0, at: 2 }));
+await env.CACHE.put("dead:3", JSON.stringify({ error: "x", at: Date.UTC(2026, 8, 2) }));
+await env.CACHE.put("dead:4", JSON.stringify({ error: "x", at: Date.UTC(2026, 8, 1) }));
+const lists = [];
+const realList = env.CACHE.list;
+env.CACHE.list = async (o) => { lists.push(o.prefix); return realList(o); };
+upstream.calls = [];
+tg = [];
+const hres = await worker.fetch(new Request("https://api.invalid/health"), env, ctx);
+const h = await hres.json();
+env.CACHE.list = realList;
+ok("счёт очереди и ящика неудач", h.ok === true && h.queue === 2 && h.dead === 2, h);
+ok("самая старая неудача", h.oldest_dead_at === "2026-09-01T00:00:00.000Z", h);
+ok("две операции list, без таблицы и Telegram",
+   lists.length === 2 && upstream.calls.length === 0 && tg.length === 0, { lists, calls: upstream.calls });
+ok("с заголовками CORS", hres.headers.get("Access-Control-Allow-Origin") === "*");
+for (const k of ["q:1", "q:2", "dead:3", "dead:4"]) env.CACHE.store.delete(k);
+const hEmpty = await (await worker.fetch(new Request("https://api.invalid/health"), env, ctx)).json();
+ok("пустой ящик — даты нет", hEmpty.queue === 0 && hEmpty.dead === 0 && hEmpty.oldest_dead_at === null, hEmpty);
+
 console.log("\n" + (bad ? "❌ ПРОВАЛОВ: " + bad : "✅ Worker: проверки пройдены"));
 process.exit(bad ? 1 : 0);
