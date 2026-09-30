@@ -200,6 +200,7 @@ function makeDocBody() {
     items: [],           // абзацы и таблицы по порядку
     clear() { body.items.length = 0; return body; },
     appendParagraph(text) {
+      if (text && text.kind === 'p') text = text.text;
       const p = { kind: 'p', text: String(text),
         setHeading() { return p; }, setAlignment() { return p; },
         setItalic() { return p; }, setBold() { return p; },
@@ -213,6 +214,7 @@ function makeDocBody() {
     appendListItem(text) { return body.appendParagraph(text); },
     appendPageBreak() { return body.appendParagraph('\f'); },
     appendTable(rows) {
+      if (rows && rows.kind === 't') rows = rows.grid;
       const grid = (rows || []).map((r) => r.slice());
       const table = {
         kind: 't', grid,
@@ -244,6 +246,25 @@ function makeDocBody() {
       return table;
     },
     getTables: () => body.items.filter((i) => i.kind === 't'),
+    // Обход детей — для пересборки акта в том же документе (resetActBody):
+    // тело шаблона перекладывается поэлементно, копиями.
+    getNumChildren: () => body.items.length,
+    getChild: (i) => {
+      const el = body.items[i];
+      return {
+        getType: () => (el.kind === 't' ? 'TABLE' : 'PARAGRAPH'),
+        copy: () => (el.kind === 't' ? { kind: 't', grid: el.grid.map((r) => r.slice()) }
+          : { kind: 'p', text: el.text }),
+        removeFromParent() { body.items.splice(body.items.indexOf(el), 1); },
+      };
+    },
+    getChildIndex: (el) => body.items.indexOf(el),
+    insertParagraph(idx, text) {
+      const p = body.appendParagraph(text);
+      body.items.pop();
+      body.items.splice(idx, 0, p);
+      return p;
+    },
     replaceText(pattern, value) {
       const re = new RegExp(pattern, 'g');
       body.items.forEach((i) => {
@@ -323,13 +344,14 @@ function docFromHtml(html) {
 
 const docs = new Map();
 global.DocumentApp = {
+  ElementType: { PARAGRAPH: 'PARAGRAPH', TABLE: 'TABLE', LIST_ITEM: 'LIST_ITEM' },
   ParagraphHeading: { HEADING1: 'h1', HEADING2: 'h2' },
   HorizontalAlignment: { CENTER: 'center' },
   GlyphType: { NUMBER: 'number' },
   create(name) {
     const id = 'doc' + (docs.size + 1);
     const doc = { id, name, body: makeDocBody(),
-      getBody: () => doc.body, getId: () => id, saveAndClose() {} };
+      getBody: () => doc.body, getId: () => id, getName: () => doc.name, saveAndClose() {} };
     docs.set(id, doc);
     return doc;
   },
@@ -530,7 +552,7 @@ global.DriveApp = {
           else body.appendTable(i.grid.map((r) => r.slice()));
         });
         const copy = { id: copyId, name, body,
-          getBody: () => body, getId: () => copyId, saveAndClose() {} };
+          getBody: () => body, getId: () => copyId, getName: () => name, saveAndClose() {} };
         docs.set(copyId, copy);
         return copy;
       },
@@ -2036,12 +2058,21 @@ function siteText(no, extra) {
   ]).join('\n');
 }
 
-// Выключено по умолчанию: включать ручку, в которую пишут без входа, должен
-// человек, а не выкладка кода.
+// Включено по умолчанию (решение владельца): заявка с сайта — основной путь.
+// Но выключатель работает: сохранённый 0 закрывает ручку, а не теряется в
+// «пусто — значит умолчание».
+check('по умолчанию приём заявок включён',
+  getSettings().public_orders === 1 && handlePublicCatalog({}).orders_open === 1,
+  getSettings().public_orders);
+check('выключается настройкой',
+  call('/settings/set', { settings: { public_orders: 0 } }, siteAdmin).ok === true);
+check('сохранённый ноль читается как ноль, а не как умолчание',
+  getSettings().public_orders === 0 && handlePublicCatalog({}).orders_open === 0,
+  getSettings().public_orders);
 let so = call('/public/order', { raw_text: siteText('260101-1111') });
-check('пока не включено — отказ', so.ok === false && so.status === 403, so);
+check('выключено — отказ', so.ok === false && so.status === 403, so);
 
-check('включается настройкой',
+check('включается обратно',
   call('/settings/set', { settings: { public_orders: 1 } }, siteAdmin).ok === true);
 
 so = call('/public/order', { raw_text: siteText('260101-1111') });
@@ -2634,6 +2665,93 @@ check('неудача акта записана в журнал Logs',
   actLog[0].message !== '' && String(JSON.parse(actLog[0].context).order_id) === String(stillOrder.data.order_id),
   actLog);
 
+console.log('\n== акт: выдано сверх заявки ==');
+// Складмен отсканировал по заказу то, чего в заявке нет. Выдача проходит
+// (claimOrderLine → «off-order»), а акт пересобирается в том же документе:
+// ссылка в теме «АКТЫ» остаётся рабочей, второго сообщения нет.
+metaSet('setting_act_template_id', tpl.data.template_id);
+const exA = call('/item/create', { name: 'Прожектор Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+const exB = call('/item/create', { name: 'Прожектор Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+const exC = call('/item/create', { name: 'Отражатель Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+const exD = call('/item/create', { name: 'Отражатель Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+call('/item/numbers', { item_id: exA, serial_number: 'SN-EX-1' }, actAdmin);
+call('/item/numbers', { item_id: exB, serial_number: 'SN-EX-2' }, actAdmin);
+const exModel = readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(exA))[0];
+check('у лишней позиции есть модель',
+  exModel && exModel.model_code !== '' && exModel.model_code !== undefined, exModel);
+call('/models/price', { category: 'LGT', model_code: exModel.model_code, price: 1500 }, actAdmin);
+
+const exOrder = call('/order/create', {
+  order_no: '260930-8888', student_name: 'Сверхов Иван Петрович', student_phone: '+79990008888',
+  issue_date: '30-09-2026', return_date: '02-10-2026',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+check('заказ с актом записан', exOrder.ok === true && /docs.google.com/.test(String(exOrder.data.act_url)), exOrder);
+const exUrl = exOrder.data.act_url;
+const exDoc = __docs.get((exUrl.match(/\/document\/d\/([^/]+)/) || [])[1]);
+const exTable = () => exDoc.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
+const legendCount = () => exDoc.body.items
+  .filter((i) => i.kind === 'p' && i.text === '* — выдано сверх заявки').length;
+check('только заявленное — звёздочек нет',
+  exTable().grid.slice(1).every((r) => !/\*$/.test(r[1])), exTable().grid);
+check('только заявленное — расшифровки звёздочки нет', legendCount() === 0);
+
+const docsBefore = __docs.size;
+const actMsgsBefore = tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length;
+const stampBefore = exDoc.name.slice(0, 19);
+const exR1 = call('/transaction/checkout', { item_id: exA, order_id: exOrder.data.order_id }, actAdmin);
+const exR2 = call('/transaction/checkout', { item_id: exB, order_id: exOrder.data.order_id }, actAdmin);
+check('лишнее выдаётся вне заказа',
+  exR1.ok && exR2.ok && exR1.data.order_line === 'off-order' && exR2.data.order_line === 'off-order',
+  [exR1, exR2]);
+check('ответ выдачи прежний, без служебных полей',
+  exR1.data.order_id === undefined && exR1.data.transaction_id > 0, exR1.data);
+let exRows = exTable().grid.slice(1);
+check('сначала заявленное, потом сверх заявки',
+  exRows.length === 2 && exRows[0][1] === 'Видеоштатив' && exRows[1][0] === '2', exRows);
+check('лишнее — одной строкой на модель, со звёздочкой',
+  exRows[1][1] === 'Прожектор Сверхзаказ *' && exRows[1][2] === '2', exRows[1]);
+check('заводские номера лишнего перечислены',
+  exRows[1][3] === 'SN-EX-1, SN-EX-2', exRows[1][3]);
+check('цена лишнего — по модели, за штуку на количество',
+  exRows[1][4] === moneyDigits(3000), exRows[1][4]);
+check('под таблицей одна строка «* — выдано сверх заявки»', legendCount() === 1);
+check('расшифровка стоит сразу под таблицей',
+  exDoc.body.items[exDoc.body.items.indexOf(exTable()) + 1].text === '* — выдано сверх заявки');
+check('подстановок после пересборки не осталось', !exDoc.body.getText().includes('{{'));
+check('сумма пересчитана с лишним', exDoc.body.getText().includes(moneyDigits(3000)));
+check('пересобран тот же документ — новых нет', __docs.size === docsBefore, __docs.size - docsBefore);
+check('ссылка в заказе та же',
+  call('/order/card', { order_id: exOrder.data.order_id }, actAdmin).data.order.act_url === exUrl);
+check('второго сообщения об акте в чат нет',
+  tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length === actMsgsBefore);
+check('дата акта прежняя', exDoc.body.getText().includes(stampBefore), stampBefore);
+
+// Вернули — всё равно выдавали: акт о переданном, как и у заявленных строк.
+call('/transaction/checkin', { item_id: exA }, actAdmin);
+call('/transaction/checkout', { item_id: exC, order_id: exOrder.data.order_id }, actAdmin);
+exRows = exTable().grid.slice(1);
+check('возвращённое лишнее из акта не пропало',
+  exRows.some((r) => r[1] === 'Прожектор Сверхзаказ *' && r[3] === 'SN-EX-1, SN-EX-2'), exRows);
+check('другая модель — своя строка, без цены прочерк',
+  exRows.some((r) => r[1] === 'Отражатель Сверхзаказ *' && r[2] === '1' && r[4] === '—'), exRows);
+check('расшифровка всё так же одна', legendCount() === 1);
+
+// Пересборка сломалась — выдача всё равно прошла, причина в журнале.
+metaSet('setting_act_template_id', 'AAAAAAAAAAAAAAAAAAAAAA');
+const rebuildLogBefore = logRows().filter((l) => l.kind === 'act' && l.endpoint === 'rebuild').length;
+const exR4 = call('/transaction/checkout', { item_id: exD, order_id: exOrder.data.order_id }, actAdmin);
+check('со сломанным шаблоном выдача сверх заявки прошла',
+  exR4.ok === true && exR4.data.order_line === 'off-order', exR4);
+const rebuildLog = logRows().filter((l) => l.kind === 'act' && l.endpoint === 'rebuild');
+check('неудача пересборки записана в Logs',
+  rebuildLog.length === rebuildLogBefore + 1 && rebuildLog[rebuildLog.length - 1].reason === 'rebuild-failed' &&
+  String(JSON.parse(rebuildLog[rebuildLog.length - 1].context).order_id) === String(exOrder.data.order_id),
+  rebuildLog);
+check('выданное со сломанным шаблоном на руках',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(exD))[0].status === 'Rented');
+metaSet('setting_act_template_id', tpl.data.template_id);
+
 console.log('\n== темы форума: заявки и акты ==');
 // Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
 // настройка — General, как было до тем.
@@ -2795,6 +2913,8 @@ spreadsheet.deleteSheet(logsSheet);
 let noLogThrew = false;
 try { logEvent('error', '/x', 'test', 'без листа', {}); } catch (e) { noLogThrew = true; }
 check('logEvent без листа Logs не бросает', noLogThrew === false);
+check('без листа Logs сводка склада даёт logs_24h = 0',
+  warehouseSummary().logs_24h === 0, warehouseSummary().logs_24h);
 boom = call('/inventory/list', {}, logToken);
 check('без листа Logs внутренняя ошибка — всё тот же 500',
   boom.ok === false && boom.status === 500 && /внезапно сломалось/.test(String(boom.error)), boom);
@@ -2857,6 +2977,21 @@ check('удалена одна строка старше 90 дней', trimmed =
 check('свежая строка осталась, старая ушла',
   testLogs.length === 1 && testLogs[0].message === 'свежая', testLogs);
 check('сегодняшние строки на месте', logRows().some(l => l.kind === 'backup'));
+
+console.log('\n== сводка склада: записи журнала за сутки ==');
+// logs_24h — строки Logs со временем не старше суток. Позавчерашняя и строка
+// с нечитаемой датой не считаются.
+const logs24Before = warehouseSummary().logs_24h;
+check('сегодняшние записи посчитаны', logs24Before > 0 &&
+  logs24Before === logRows().filter(l => Date.now() - new Date(l.timestamp).getTime() <= 86400000).length,
+  logs24Before);
+appendRow(logSheet, { timestamp: new Date(Date.now() - 25 * 3600000).toISOString(), kind: 'test', message: '25 ч' });
+appendRow(logSheet, { timestamp: new Date(Date.now() - 23 * 3600000).toISOString(), kind: 'test', message: '23 ч' });
+appendRow(logSheet, { timestamp: 'не дата', kind: 'test', message: 'мусор' });
+check('logs_24h считает только последние сутки',
+  warehouseSummary().logs_24h === logs24Before + 1, warehouseSummary().logs_24h);
+check('logs_24h отдаётся вместе с настройками',
+  call('/settings/get', {}, logToken).data.summary.logs_24h === logs24Before + 1);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

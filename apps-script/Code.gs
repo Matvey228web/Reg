@@ -1669,6 +1669,30 @@ function handleItemCreate(payload, token) {
 
 function handleTransactionCheckout(payload, token) {
   var staffRow = checkAuth(token);
+  var res = checkoutUnderLock(payload, staffRow);
+  // Сверх заявки — акт заказа уже не совпадает с тем, что на руках.
+  // Пересобираем после снятия замка (документ — это секунды), и неудача
+  // выдачу не отменяет: предмет уже записан как выданный.
+  if (res.order_line === "off-order" && res.order_id) {
+    rebuildActQuietly(res.order_id, staffRow.full_name);
+  }
+  delete res.order_id;
+  return res;
+}
+
+// Пересборка акта, которая никогда не бросает: причина неудачи — в Logs, как у
+// autoAct. Акта у заказа ещё нет (шаблона не было) — нечего и пересобирать.
+function rebuildActQuietly(orderId, masterName) {
+  try {
+    return rebuildAct(orderId, masterName);
+  } catch (err) {
+    logEvent("act", "rebuild", "rebuild-failed", err && err.message ? err.message : String(err),
+      { order_id: orderId });
+    return null;
+  }
+}
+
+function checkoutUnderLock(payload, staffRow) {
   var itemId = String(payload.item_id || "").trim();
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
@@ -1738,7 +1762,7 @@ function handleTransactionCheckout(payload, token) {
     } else {
       updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
     }
-    return { transaction_id: txId, order_line: orderLine, qty: takeQty };
+    return { transaction_id: txId, order_line: orderLine, qty: takeQty, order_id: orderId };
   } finally {
     lock.releaseLock();
   }
@@ -3482,7 +3506,7 @@ function handlePublicCatalog(payload) {
 // Заявка прямо с сайта. Это единственная ручка, в которую пишут без входа,
 // поэтому она устроена скучно и узко:
 //
-// — выключена, пока администратор не включит (настройка public_orders);
+// — включена по умолчанию, выключается настройкой public_orders = 0;
 // — берёт ровно тот текст, который сайт и так показывает студенту, и разбирает
 //   его тем же разбором, что и вставленное складменом сообщение: новых путей
 //   для данных не появляется;
@@ -3581,6 +3605,9 @@ function warehouseSummary() {
     open_defects: 0,
     orders: 0, orders_new: 0, orders_issued: 0, orders_overdue: 0,
     staff: 0, staff_active: 0, admins: 0,
+    // logs_24h: сколько строк в журнале Logs за последние сутки (по timestamp).
+    // Листа нет — 0. Строка с нечитаемой датой не считается.
+    logs_24h: 0,
   };
 
   readRows(getSheet(SHEETS.EQUIPMENT)).forEach(function (r) {
@@ -3619,6 +3646,15 @@ function warehouseSummary() {
     if (isTruthyCell(r.active)) out.staff_active += 1;
     if (r.role === "Admin") out.admins += 1;
   });
+
+  var logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.LOGS);
+  if (logSheet) {
+    var since = Date.now() - 24 * 60 * 60 * 1000;
+    readRows(logSheet).forEach(function (l) {
+      var t = new Date(l.timestamp).getTime();
+      if (!isNaN(t) && t >= since) out.logs_24h += 1;
+    });
+  }
 
   return out;
 }
@@ -4163,11 +4199,13 @@ var SETTINGS_SPEC = {
     hint: "как указывать директора в договоре, например «Директора Керзиной О.А.»",
   },
 
-  // Приём заявок прямо с сайта. Выключено по умолчанию намеренно: это
-  // единственная ручка, в которую можно писать без входа, и включать её должен
-  // человек, а не выкладка кода.
+  // Приём заявок прямо с сайта. Включён по умолчанию — решение владельца:
+  // заявка с сайта и есть основной путь, а копипаст — запасной. Это
+  // единственная ручка, в которую пишут без входа, поэтому выключатель
+  // остаётся: сохранённый 0 закрывает её (getSettings подставляет умолчание
+  // только для пустого значения, не для нуля). От завала — предел в час ниже.
   public_orders: {
-    def: 0,
+    def: 1,
     text: false,
     check: function (v) { return v === 0 || v === 1; },
     hint: "1 — сайт отправляет заявку сам, 0 — только копипастом",
@@ -4686,12 +4724,14 @@ function actLines(orderId) {
   equipment.forEach(function (e) { byId[String(e.item_id)] = e; });
 
   var models = readRows(getSheet(SHEETS.MODELS));
-  var priceOf = {};
+  var priceOf = {}, modelName = {};
   models.forEach(function (m) {
-    priceOf[String(m.category) + "-" + pad2(Number(m.model_code))] = Number(m.price || 0);
+    var key = String(m.category) + "-" + pad2(Number(m.model_code));
+    priceOf[key] = Number(m.price || 0);
+    modelName[key] = String(m.model_name || "").trim();
   });
 
-  return items.map(function (r) {
+  var requested = items.map(function (r) {
     // Заводские номера — только реально выданного. Выдачи не было — столбец
     // пустой: вписать туда номер «который выдадим» значит соврать в документе.
     var serials = txRows
@@ -4717,6 +4757,64 @@ function actLines(orderId) {
       serials: serials.join(", "),
       sum: sum,
       priced: sum > 0,
+    };
+  });
+
+  return requested.concat(actExtraLines(txRows, byId, priceOf, modelName));
+}
+
+// Выдано сверх заявки: то, что отсканировали по заказу, но в составе для него
+// строки не нашлось (claimOrderLine вернул «off-order»). В акт идёт тем же
+// списком, сразу после заявленного, со звёздочкой в конце наименования —
+// материальная ответственность и за это тоже. Одна модель — одна строка:
+// количество складываем, заводские номера перечисляем.
+//
+// Статус выдачи не смотрим, как и у заявленных строк: вернули — не значит «не
+// выдавали», акт о том, что передано.
+function actExtraLines(txRows, byId, priceOf, modelName) {
+  var groups = [], byKey = {};
+  var seen = {}, byQtyOf = {};
+  txRows.forEach(function (t) {
+    if (String(t.order_line) !== "off-order") return;
+    var e = byId[String(t.item_id)] || {};
+    var hasModel = e.model_code !== undefined && e.model_code !== "" && e.category;
+    var key = hasModel
+      ? String(e.category) + "-" + pad2(Number(e.model_code))
+      : "item-" + String(t.item_id);
+    var g = byKey[key];
+    if (!g) {
+      g = byKey[key] = {
+        name: (hasModel && modelName[key]) || String(e.name || "").trim() || String(t.item_id),
+        unit: hasModel ? (priceOf[key] || 0) : 0,
+        qty: 0, serials: [],
+      };
+      groups.push(g);
+    }
+    var cat = String(e.category || "");
+    if (!(cat in byQtyOf)) byQtyOf[cat] = categoryByQty(cat);
+    if (byQtyOf[cat]) {
+      // Количественная позиция: сколько выдано этой выдачей.
+      g.qty += Math.max(1, Number(t.qty || 1));
+      return;
+    }
+    // Поштучная: одна единица — одна штука, даже если её выдавали дважды.
+    var itemKey = String(t.item_id);
+    if (seen[itemKey]) return;
+    seen[itemKey] = true;
+    g.qty += 1;
+    var sn = String(e.serial_number || e.inventory_number || "").trim();
+    if (sn) g.serials.push(sn);
+  });
+
+  return groups.map(function (g) {
+    var sum = g.unit * g.qty;
+    return {
+      name: g.name + " *",
+      qty: g.qty,
+      serials: g.serials.join(", "),
+      sum: sum,
+      priced: sum > 0,
+      extra: true,
     };
   });
 }
@@ -4746,7 +4844,7 @@ function buildAct(orderId, masterName) {
 
   var stamp = actStamp();
   var fio = String(order.student_name || "").trim() || "без имени";
-  var total = lines.reduce(function (sum, l) { return sum + l.sum; }, 0);
+  var total = actTotal(lines);
   var unpriced = lines.filter(function (l) { return !l.priced; }).length;
 
   var copy;
@@ -4761,7 +4859,94 @@ function buildAct(orderId, masterName) {
       ". Проверьте идентификатор шаблона в настройках");
   }
 
-  var doc = DocumentApp.openById(copy.getId());
+  fillAct(DocumentApp.openById(copy.getId()), order, orderId, lines, settings, stamp, masterName);
+  var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
+
+  // Ссылку держим в строке заказа: карточка показывает её без обращения к
+  // Диску, и повторная сборка не плодит документы на один заказ.
+  updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
+
+  // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
+  tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
+    '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
+
+  return {
+    url: url, document_id: copy.getId(), lines: lines.length,
+    total: total, unpriced: unpriced,
+  };
+}
+
+function actTotal(lines) {
+  return lines.reduce(function (sum, l) { return sum + l.sum; }, 0);
+}
+
+// Пересборка акта в том же документе. Нужна, когда состав выдачи поменялся
+// после первой сборки: по заказу отсканировали то, чего в заявке не было, и
+// это должно попасть в акт (со звёздочкой, см. actExtraLines).
+//
+// Документ тот же, а не новая копия: ссылка на акт уже висит в теме «АКТЫ», и
+// новая копия сделала бы её устаревшей, а в чат пришлось бы слать вторую. Тело
+// документа очищается и заново набирается из шаблона — подстановок в готовом
+// акте уже нет, и найти, куда дописывать, иначе нечем. Дата акта остаётся
+// прежней: берётся из имени файла «<дата> <ФИО>».
+//
+// Открыть прежний документ не вышло (удалили, нет доступа) — собираем новый
+// обычным buildAct: он и ссылку в строке заказа заменит, и новую в чат пошлёт.
+function rebuildAct(orderId, masterName) {
+  var settings = getSettings();
+  var templateId = String(settings.act_template_id || "");
+  if (!templateId) return { skipped: "no-template" };
+
+  orderId = String(orderId || "");
+  var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
+  if (!order) throw apiError(404, "Заказ не найден");
+  var oldUrl = String(order.act_url || "");
+  if (!oldUrl) return { skipped: "no-act" };
+
+  var docId = (oldUrl.match(/\/document\/d\/([^\/?#]+)/) || [])[1] || "";
+  var doc = null;
+  try { if (docId) doc = DocumentApp.openById(docId); } catch (e) { doc = null; }
+  if (!doc) {
+    var fresh = buildAct(orderId, masterName);
+    fresh.same_document = false;
+    return fresh;
+  }
+
+  var lines = actLines(orderId);
+  if (!lines.length) throw apiError(409, "В заказе нет ни одной позиции");
+  var stamp = (String(doc.getName ? doc.getName() : "")
+    .match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/) || [])[0] || actStamp();
+
+  resetActBody(doc.getBody(), DocumentApp.openById(templateId).getBody());
+  fillAct(doc, order, orderId, lines, settings, stamp, masterName);
+  return {
+    url: oldUrl, document_id: docId, lines: lines.length, same_document: true,
+    total: actTotal(lines), unpriced: lines.filter(function (l) { return !l.priced; }).length,
+  };
+}
+
+// Тело готового акта заменяется телом шаблона: абзацы, таблицы и пункты
+// списков копируются по порядку. Колонтитулы не трогаем — они у копии и так
+// от того же шаблона. После clear() в теле остаётся один пустой абзац (пустым
+// тело Google не бывает) — убираем его, когда шаблон уже переложен.
+function resetActBody(body, templateBody) {
+  body.clear();
+  var T = DocumentApp.ElementType;
+  for (var i = 0; i < templateBody.getNumChildren(); i++) {
+    var el = templateBody.getChild(i);
+    var type = el.getType();
+    if (type === T.PARAGRAPH) body.appendParagraph(el.copy());
+    else if (type === T.TABLE) body.appendTable(el.copy());
+    else if (type === T.LIST_ITEM) body.appendListItem(el.copy());
+  }
+  if (body.getNumChildren() > 1) body.getChild(0).removeFromParent();
+}
+
+// Заполнение документа, уже скопированного из шаблона: таблица позиций и
+// подстановки. Общее у первой сборки (buildAct) и пересборки (rebuildAct).
+function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
+  var total = actTotal(lines);
+  var fio = String(order.student_name || "").trim() || "без имени";
   var body = doc.getBody();
 
   fillActItems(body, lines);
@@ -4785,20 +4970,6 @@ function buildAct(orderId, masterName) {
   }
 
   doc.saveAndClose();
-  var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
-
-  // Ссылку держим в строке заказа: карточка показывает её без обращения к
-  // Диску, и повторная сборка не плодит документы на один заказ.
-  updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
-
-  // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
-  tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
-    '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
-
-  return {
-    url: url, document_id: copy.getId(), lines: lines.length,
-    total: total, unpriced: unpriced,
-  };
 }
 
 // Заполнение таблицы позиций. Таблицу находим по подстановке в ней самой:
@@ -4834,7 +5005,15 @@ function fillActItems(body, lines) {
   });
 
   target.removeRow(sample);
+
+  // Звёздочка без расшифровки — загадка, а расшифровка без звёздочек — шум.
+  // Места под примечание в шаблоне нет, поэтому строка встаёт сразу под
+  // таблицей и только тогда, когда выдано что-то сверх заявки.
+  var hasExtra = lines.some(function (l) { return l.extra; });
+  if (hasExtra) body.insertParagraph(body.getChildIndex(target) + 1, ACT_EXTRA_LEGEND);
 }
+
+var ACT_EXTRA_LEGEND = "* — выдано сверх заявки";
 
 // «2026-09-28 22:44:10» — тем же видом, что в имени прежних файлов.
 function actStamp() {
