@@ -2783,6 +2783,58 @@ check('выданное со сломанным шаблоном на руках
   readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(exD))[0].status === 'Rented');
 metaSet('setting_act_template_id', tpl.data.template_id);
 
+console.log('\n== заявка с сайта: строки сопоставлены с каталогом ==');
+// Сайт пишет в заявку model_name из /public/catalog. Без сопоставления строка
+// ложилась без модели, и каждый скан по заявке уходил «вне заказа».
+call('/settings/set', { settings: { public_orders: 1, public_orders_per_hour: 50 } }, actAdmin);
+__cacheStore.clear();
+const scA = call('/item/create', { name: 'Софтбокс Сайтовый', category: 'LGT' }, actAdmin).data.item_id;
+const scB = call('/item/create', { name: 'Софтбокс Сайтовый', category: 'LGT' }, actAdmin).data.item_id;
+const scX = call('/item/create', { name: 'Флаг Внезаказный', category: 'LGT' }, actAdmin).data.item_id;
+const scModel = call('/public/catalog', {}).data.models
+  .filter((m) => m.model_name === 'Софтбокс Сайтовый')[0];
+check('модель есть в каталоге сайта', !!scModel, scModel);
+// Строку собираем так же, как site/cart.js (orderText): имя из каталога.
+const scText = botOrderText('270301-0001', [
+  '1. ' + scModel.model_name + ': 0 (2 x 0)',
+  '2. Неизвестная штуковина: 0 (1 x 0)',
+], adultBuyer);
+const scOrder = call('/public/order', { raw_text: scText });
+check('заявка с сайта принята', scOrder.ok === true, scOrder);
+let scCard = call('/order/card', { order_id: scOrder.data.order_id }, actAdmin).data;
+check('строка из каталога получила модель и категорию',
+  scCard.items[0].model_code === scModel.model_code && scCard.items[0].category === 'LGT',
+  scCard.items[0]);
+check('неизвестная строка осталась без модели',
+  scCard.items[1].model_code === '' && scCard.items[1].raw_name === 'Неизвестная штуковина',
+  scCard.items[1]);
+check('повтор той же заявки по-прежнему узнаётся',
+  call('/public/order', { raw_text: scText }).data.repeat === true);
+check('регистр и лишние пробелы не мешают сопоставлению',
+  matchOrderLine('  софтбокс   САЙТОВЫЙ ', readRows(getSheet(SHEETS.MODELS))).model_code === scModel.model_code);
+
+const scR1 = call('/transaction/checkout', { item_id: scA, order_id: scOrder.data.order_id }, actAdmin);
+check('скан по заявке с сайта — не «вне заказа»',
+  scR1.ok === true && scR1.data.order_line === '1', scR1);
+scCard = call('/order/card', { order_id: scOrder.data.order_id }, actAdmin).data;
+check('«Выдано» по строке растёт', scCard.items[0].issued_qty === 1, scCard.items[0]);
+call('/transaction/checkout', { item_id: scB, order_id: scOrder.data.order_id }, actAdmin);
+check('вторая единица — та же строка, 2 из 2',
+  call('/order/card', { order_id: scOrder.data.order_id }, actAdmin).data.items[0].issued_qty === 2);
+
+const scDoc = __docs.get((String(scCard.order.act_url).match(/\/document\/d\/([^/]+)/) || [])[1]);
+const scTable = () => scDoc.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
+check('в акте у сопоставленной строки звёздочки нет',
+  !!scDoc && scTable().grid.slice(1).every((r) => !/\*$/.test(r[1])), scDoc && scTable().grid);
+
+const scR3 = call('/transaction/checkout', { item_id: scX, order_id: scOrder.data.order_id }, actAdmin);
+check('чужая вещь при несопоставленной строке — «вне заказа»',
+  scR3.ok === true && scR3.data.order_line === 'off-order', scR3);
+check('и только она в акте со звёздочкой',
+  scTable().grid.slice(1).filter((r) => /\*$/.test(r[1])).map((r) => r[1]).join('|') === 'Флаг Внезаказный *',
+  scTable().grid);
+call('/settings/set', { settings: { public_orders: 0 } }, actAdmin);
+
 console.log('\n== темы форума: заявки и акты ==');
 // Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
 // настройка — General, как было до тем.

@@ -3585,6 +3585,20 @@ function handlePublicOrder(payload) {
 
   publicOrderQuotaTake(Number(settings.public_orders_per_hour));
 
+  // Сопоставление с каталогом — как в handleOrderParse. Без него строки
+  // ложатся без модели, и любой скан по заявке с сайта уходит «вне заказа»:
+  // звёздочка в акте на каждой вещи и «Выдано N из M», который не растёт.
+  // Не нашлось — строка остаётся как есть, её выдают количеством.
+  var modelRows = readRows(getSheet(SHEETS.MODELS));
+  var items = parsed.items.map(function (line) {
+    var match = matchOrderLine(line.raw_name, modelRows);
+    return {
+      line_no: line.line_no, raw_name: line.raw_name, qty: line.qty,
+      price: line.price, total: line.total,
+      model_code: match.model_code, category: match.category,
+    };
+  });
+
   var order = writeOrder({
     order_no: parsed.order_no,
     request_code: parsed.order_no,
@@ -3600,7 +3614,7 @@ function handlePublicOrder(payload) {
     extra_input: fields.extra_input,
     source_url: String(payload.source_url || ""),
     raw_text: text,
-    items: parsed.items,
+    items: items,
   }, "", "сайт");
 
   // В чат — сообщение в том виде, в каком владелец раньше получал заявки из
