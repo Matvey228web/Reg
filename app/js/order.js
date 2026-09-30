@@ -28,11 +28,11 @@ const OrderScreen = (() => {
   // Принимать «030101» вместо «OSTERRIG SIRIUS 100CM» человек не может. Если в
   // кэше каталога пусто (например, зашли сразу в «Заказы»), один раз тянем его
   // здесь — он всё равно нужен всем остальным экранам и останется в кэше.
+  // Общий Cache.ensure: если «Ремонт» уже тянет каталог, ждём тот же запрос.
   async function ensureItemsMap() {
     if (Cache.items("equipment")) return;
     try {
-      const items = await apiPost("/equipment/list", { category: "all", status: "all" });
-      Cache.set("equipment", items);
+      await Cache.ensure("equipment", "/equipment/list", { category: "all", status: "all" });
       loadItemsMap();
     } catch {
       // Не страшно: без названий покажем номера, карточка заказа важнее.
@@ -314,13 +314,43 @@ const OrderScreen = (() => {
       TG.showAlert(res.left
         ? `Выдано: ${ids}. Осталось по строке: ${res.left} — свободных больше нет.`
         : `Выдано: ${ids}`);
-      await load();
+      // Какие предметы ушли и сколько, бэкенд назвал в ответе — правим их
+      // строки в кэше каталога, а не сбрасываем его: иначе следующий экран
+      // ждал бы весь склад заново.
+      res.issued.forEach((i) => Cache.patch("equipment", "item_id", i.item_id,
+        (row) => ItemState.afterCheckout(row, i.qty)));
+      loadItemsMap();
+      Cache.clear("orders");   // в списке заказов поменялся статус
+      // Карточку показываем сразу с выданным, а сверяемся с таблицей уже
+      // молча: на какую строку легла выдача, решает бэкенд (строк одной модели
+      // бывает несколько), поэтому своя догадка здесь — только до ответа.
+      if (card) {
+        render(issuedLocally(card, Number(btn.dataset.line), res.issued));
+      }
+      load();
     } catch (err) {
       TG.hapticError();
       TG.showAlert(err.message);
       btn.disabled = false;
       btn.textContent = "Выдать без скана";
     }
+  }
+
+  // Выдача без скана, какой её увидит карточка после перечитывания: строка
+  // состава закрыта на выданное, в «На руках» — выданные предметы.
+  function issuedLocally(data, lineNo, issued) {
+    const qty = issued.reduce((sum, i) => sum + Number(i.qty || 1), 0);
+    card = {
+      ...data,
+      order: { ...data.order, status: data.order.status === "New" ? "Issued" : data.order.status },
+      items: (data.items || []).map((line) => Number(line.line_no) === lineNo
+        ? { ...line, issued_qty: Number(line.issued_qty || 0) + qty } : line),
+      transactions: (data.transactions || []).concat(issued.map((i) => ({
+        item_id: i.item_id, qty: Number(i.qty || 1), qty_in: 0, status: "Open",
+        order_line: String(lineNo), checked_out_at: new Date().toISOString(),
+      }))),
+    };
+    return card;
   }
 
   // Архив, а не удаление: запись о договорённости не стирают. Возврат из
@@ -371,14 +401,16 @@ const OrderScreen = (() => {
     for (let i = 0; i < groups.length; i++) {
       status.textContent = `Принимаю ${i + 1} из ${groups.length}…`;
       try {
-        await apiPost("/transaction/checkin", { item_id: groups[i].item_id, qty: groups[i].qty });
+        const res = await apiPost("/transaction/checkin", { item_id: groups[i].item_id, qty: groups[i].qty });
+        // Принятое известно — правим строку каталога, а не сбрасываем весь.
+        Cache.patch("equipment", "item_id", groups[i].item_id,
+          (row) => ItemState.afterCheckin(row, groups[i].qty, null, res && res.qty_out));
         done += 1;
       } catch (err) {
         failed.push(itemName(groups[i].item_id) + ": " + err.message);
       }
     }
     Cache.clear("orders");
-    Cache.clear("equipment");
     if (failed.length) {
       TG.hapticError();
       receiveError = "Не принято: " + failed.join("; ");

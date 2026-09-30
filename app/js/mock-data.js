@@ -821,6 +821,7 @@ const MockAPI = {
             item_id: i.item_id, name: i.name, category: i.category, status: i.status,
             serial_number: i.serial_number, inventory_number: i.inventory_number,
             model_code: i.model_code, qty: total, qty_out: out, qty_free: total - out,
+            condition_notes: i.condition_notes || "",
           };
         });
       }

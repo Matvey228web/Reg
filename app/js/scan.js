@@ -4,6 +4,7 @@
 const ScanScreen = (() => {
   let currentItem = null;
   let orders = [];
+  let ordersError = "";       // заказы не загрузились — сказать, а не молчать
   let mode = null; // "checkout" | "checkin" | "defect"
   let preferredMode = null;   // с чем пришли с карточки предмета
   let lockedOrder = null;     // выдача по одному заказу: {orderId, orderNo, returnDate, studentName}
@@ -65,26 +66,53 @@ const ScanScreen = (() => {
     result.innerHTML = skeleton(2);
     try {
       const item = await apiPost("/item/lookup", { item_id: itemId });
-      currentItem = item;
-      // Отсканированный номер становится примером в поле ввода — серым, как
-      // подсказка. Наклейки затираются, и увидеть, что именно прочиталось, —
-      // единственный способ заметить, что сканер взял соседний код.
-      document.getElementById("scan-manual-input").placeholder = item.item_id;
       // Статус мог измениться — поправим его в кэше каталога, чтобы список не
       // показывал устаревшее «Доступно» до следующего обновления.
-      Cache.patch("equipment", "item_id", item.item_id, { status: item.status });
-      // Если пришли с карточки с намерением («Выдать»/«Принять»), открываем
-      // сразу его — иначе человек жмёт ту же кнопку второй раз.
-      if (preferredMode === "checkout" && canCheckout(item)) mode = "checkout";
-      else if (preferredMode === "checkin" && canCheckin(item)) mode = "checkin";
-      else mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
-      preferredMode = null;
-      if (mode === "checkout") await loadOrders();
-      renderItem();
+      Cache.patch("equipment", "item_id", item.item_id, {
+        status: item.status, qty_out: item.qty_out, qty_free: item.qty_free,
+      });
+      await showItem(item);
     } catch (err) {
       currentItem = null;
       result.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
     }
+  }
+
+  // Предмет уже известен — после поиска, с карточки предмета или после своей
+  // же выдачи. Второй раз спрашивать о нём таблицу незачем: это ещё 6–9 секунд
+  // у стойки, а новое состояние мы знаем и так (ItemState в cache.js).
+  async function showItem(item) {
+    currentItem = item;
+    // Отсканированный номер становится примером в поле ввода — серым, как
+    // подсказка. Наклейки затираются, и увидеть, что именно прочиталось, —
+    // единственный способ заметить, что сканер взял соседний код.
+    document.getElementById("scan-manual-input").placeholder = item.item_id;
+    // Если пришли с карточки с намерением («Выдать»/«Принять»), открываем
+    // сразу его — иначе человек жмёт ту же кнопку второй раз.
+    if (preferredMode === "checkout" && canCheckout(item)) mode = "checkout";
+    else if (preferredMode === "checkin" && canCheckin(item)) mode = "checkin";
+    else mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
+    preferredMode = null;
+    if (mode === "checkout") await loadOrders();
+    renderItem();
+  }
+
+  // Своя запись прошла — правим предмет на экране и строку в кэше каталога
+  // одним и тем же набором изменений. extra — то, что есть только в ответе
+  // /item/lookup (открытые дефекты), в строку каталога оно не идёт.
+  function applyLocal(changes, extra) {
+    Cache.patch("equipment", "item_id", currentItem.item_id, changes);
+    currentItem = { ...currentItem, ...changes, ...(extra || {}) };
+  }
+
+  // Дефект, который только что записали, — в список открытых на экране.
+  function withDefect(defectId, severity, description) {
+    return {
+      open_defects: (currentItem.open_defects || []).concat([{
+        defect_id: defectId, item_id: currentItem.item_id, severity,
+        description, status: "Open",
+      }]),
+    };
   }
 
   // Заказы берём из общего кэша: на выдаче человек стоит у стойки, и лишние
@@ -93,14 +121,13 @@ const ScanScreen = (() => {
   async function loadOrders() {
     // Заказ уже выбран на его карточке — выбирать не из чего и грузить нечего.
     if (lockedOrder) { orders = []; return; }
-    let all = Cache.items("orders");
-    if (!all) {
-      try {
-        all = await apiPost("/orders/list", { status: "all" });
-        Cache.set("orders", all);
-      } catch {
-        all = [];
-      }
+    let all;
+    ordersError = "";
+    try {
+      all = await Cache.ensure("orders", "/orders/list", { status: "all" });
+    } catch (err) {
+      all = [];
+      ordersError = err.message;
     }
     // Выдавать можно по заказу, который оформлен или уже частично выдан.
     orders = all.filter((o) => o.status === "New" || o.status === "Issued");
@@ -258,7 +285,9 @@ const ScanScreen = (() => {
               ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
               <option value="none">Без заказа (для склада)</option>
             </select>
-            ${orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
+            ${ordersError ? `<p class="hint">Заказы не загрузились: ${escapeHtml(ordersError)}
+            Выдать можно без заказа или открыть предмет заново.</p>`
+            : orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
             или выдайте без заказа.</p>`}
           </div>`}
           ${currentItem.by_qty ? `
@@ -394,10 +423,11 @@ const ScanScreen = (() => {
       orderId = picked === "none" ? null : Number(picked);
       setSubmitting(true);
       const qtyField = document.getElementById("scan-qty");
+      const qty = qtyField ? Number(qtyField.value) || 1 : 1;
       const result = await apiPost("/transaction/checkout", {
         item_id: currentItem.item_id,
         order_id: orderId,
-        qty: qtyField ? Number(qtyField.value) || 1 : 1,
+        qty,
         expected_return_at: field("scan-return-date").value || null,
         notes: field("scan-notes").value.trim(),
       });
@@ -408,12 +438,14 @@ const ScanScreen = (() => {
       // её в списке выданного за заход, а не останавливаем человека.
       const offOrder = !!(result && result.order_line === "off-order" && orderId);
       if (orderId) Cache.clear("orders");   // изменился статус и состав заказа
+      // Что стало с предметом, известно без нового поиска: выдали столько-то.
+      applyLocal(ItemState.afterCheckout(currentItem, qty, result && result.transaction_id));
       // Выдача по заказу — это подряд десяток позиций. Показывать после каждой
       // ту же карточку и ждать, пока человек сам нажмёт «сканировать», значит
       // добавить к каждой позиции лишний тап: сразу открываем сканер снова.
       if (lockedOrder) {
         // У штучных позиций важно, сколько ушло: «Кабель XLR — 4 шт».
-        const qtyNote = currentItem.by_qty && qtyField ? " — " + (Number(qtyField.value) || 1) + " шт" : "";
+        const qtyNote = currentItem.by_qty && qtyField ? " — " + qty + " шт" : "";
         session.push(currentItem.name + qtyNote + (offOrder ? " — сверх заявки" : ""));
         currentItem = null;
         mode = null;
@@ -422,7 +454,7 @@ const ScanScreen = (() => {
         startScan(true);
         return;
       }
-      await lookup(currentItem.item_id);
+      await showItem(currentItem);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(formError(err));
@@ -437,19 +469,26 @@ const ScanScreen = (() => {
       hasDefect = field("scan-has-defect").checked;
       setSubmitting(true);
       const qtyInField = document.getElementById("scan-qty-in");
-      await apiPost("/transaction/checkin", {
+      const qty = qtyInField ? Number(qtyInField.value) || 1 : 1;
+      const description = hasDefect ? field("scan-defect-desc").value.trim() : null;
+      const severity = hasDefect ? field("scan-defect-severity").value : null;
+      const res = await apiPost("/transaction/checkin", {
         item_id: currentItem.item_id,
-        qty: qtyInField ? Number(qtyInField.value) || 1 : 1,
+        qty,
         has_defect: hasDefect,
-        defect_description: hasDefect ? field("scan-defect-desc").value.trim() : null,
-        defect_severity: hasDefect ? field("scan-defect-severity").value : null,
+        defect_description: description,
+        defect_severity: severity,
         notes: field("scan-checkin-notes").value.trim(),
       });
       TG.hapticSuccess();
       TG.showAlert("Оборудование принято");
       if (hasDefect) Cache.clear("defects");   // в ремонте появилась запись
       Cache.clear("orders");                   // заказ мог закрыться возвратом
-      await lookup(currentItem.item_id);
+      applyLocal(ItemState.afterCheckin(currentItem, qty, severity, res && res.qty_out), {
+        current_transaction: null,
+        ...(hasDefect ? withDefect(res && res.defect_id, severity, description) : {}),
+      });
+      await showItem(currentItem);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(formError(err));
@@ -463,17 +502,21 @@ const ScanScreen = (() => {
       const description = field("scan-standalone-desc").value.trim();
       if (!description) { TG.showAlert("Опишите дефект"); return; }
       setSubmitting(true);
-      await apiPost("/defect/report", {
+      const severity = field("scan-standalone-severity").value;
+      const res = await apiPost("/defect/report", {
         item_id: currentItem.item_id,
         description,
-        severity: field("scan-standalone-severity").value,
+        severity,
       });
       TG.hapticSuccess();
       TG.showAlert("Дефект сохранён");
       Cache.clear("defects");
-      // Перечитываем предмет, а не закрываем экран: человеку надо увидеть,
+      // Показываем предмет заново, а не закрываем экран: человеку надо увидеть,
       // изменился ли статус — незначительный дефект выдачу не блокирует.
-      await lookup(currentItem.item_id);
+      // Новый статус бэкенд вернул в ответе, перечитывать предмет не нужно.
+      applyLocal(ItemState.afterDefect(currentItem, severity, res && res.status),
+        withDefect(res && res.defect_id, severity, description));
+      await showItem(currentItem);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(formError(err));
@@ -499,9 +542,20 @@ const ScanScreen = (() => {
       return;
     }
     // Пришли с карточки предмета: он уже выбран, сканировать нечего.
+    // Карточка передаёт и сам предмет, раз уже знает его: второй поиск того
+    // же номера — ещё 6–9 секунд ради того, что на экране уже было.
     if (params && params.itemId) {
       if (params.mode) preferredMode = params.mode;
-      lookup(String(params.itemId));
+      const known = params.item;
+      // «Назад» на этот экран придёт с теми же params — тогда предмет мог
+      // измениться, и честнее поискать его заново.
+      delete params.item;
+      if (known && String(known.item_id) === String(params.itemId)) {
+        document.getElementById("scan-result").innerHTML = skeleton(2);
+        showItem(known);
+      } else {
+        lookup(String(params.itemId));
+      }
       return;
     }
     // Камера открывается сразу: на складе это главное действие. Повторный тап

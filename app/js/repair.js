@@ -7,16 +7,14 @@ const RepairScreen = (() => {
 
   // Названия предметов берём из кэша каталога. Раньше этот экран запрашивал
   // весь каталог заново — второй запрос по 5–8 секунд на каждое открытие,
-  // ради данных, которые уже лежали рядом.
+  // ради данных, которые уже лежали рядом. Нет в кэше — тянем один раз через
+  // общий Cache.ensure (пригодится и каталогу).
   async function loadItemsMap() {
-    let items = Cache.items("equipment");
-    if (!items || !items.length) {
-      try {
-        items = await apiPost("/equipment/list", { category: "all", status: "all" });
-        Cache.set("equipment", items);   // пригодится и каталогу
-      } catch {
-        items = [];
-      }
+    let items;
+    try {
+      items = await Cache.ensure("equipment", "/equipment/list", { category: "all", status: "all" });
+    } catch {
+      items = [];
     }
     itemsById = Object.fromEntries(items.map((i) => [i.item_id, i]));
   }
@@ -123,10 +121,24 @@ const RepairScreen = (() => {
     try {
       await apiPost("/defect/resolve", { defect_id: Number(defectId), status: "Resolved", resolution_notes: notes });
       TG.hapticSuccess();
-      // Свои изменения показываем сразу, не перезапрашивая весь список: статус
-      // предмета в каталоге тоже мог поменяться, поэтому кэш каталога сбрасываем.
+      // Свои изменения показываем сразу, не перезапрашивая весь список.
       Cache.patch(CACHE, "defect_id", defectId, { status: "Resolved", resolution_notes: notes });
-      Cache.clear("equipment");
+      // Статус предмета тоже мог поменяться: из ремонта он выходит, когда
+      // снимающих с выдачи дефектов не осталось. Считаем это по тому же
+      // списку дефектов и правим одну строку каталога, а не весь каталог.
+      const defects = Cache.items(CACHE) || [];
+      const resolved = defects.find((d) => String(d.defect_id) === String(defectId));
+      if (resolved) {
+        const otherBlocking = defects.some((d) =>
+          String(d.item_id) === String(resolved.item_id) &&
+          String(d.defect_id) !== String(defectId) &&
+          d.status !== "Resolved" && ItemState.blocksRental(d.severity));
+        Cache.patch("equipment", "item_id", resolved.item_id,
+          (row) => ItemState.afterResolve(row, otherBlocking));
+      } else {
+        // Дефекта нет в кэше — чей это предмет, не знаем; сбрасываем каталог целиком.
+        Cache.clear("equipment");
+      }
       loadList();
     } catch (err) {
       TG.hapticError();

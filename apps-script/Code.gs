@@ -2058,6 +2058,9 @@ function handleEquipmentList(payload, token) {
       serial_number: r.serial_number, inventory_number: r.inventory_number,
       model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
       qty: total, qty_out: out, qty_free: total - out,
+      // Карточка вещи рисуется из этого списка без отдельного lookup —
+      // без заметок о состоянии она потеряла бы строку «Состояние».
+      condition_notes: String(r.condition_notes || ""),
     };
   });
 }

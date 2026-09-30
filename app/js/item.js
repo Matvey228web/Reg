@@ -3,6 +3,8 @@
 const ItemScreen = (() => {
   let currentItemId = null;
   let ordersById = {};
+  let history = null;     // история выдач и дефектов показанного предмета
+  let historySeq = 0;     // ответ на устаревший запрос истории не рисуем
 
   // Подписи к выдачам берём из кэша заказов. Раньше карточка на каждое открытие
   // запрашивала весь список клиентов — ещё 5–8 секунд ради одной строки текста.
@@ -23,19 +25,59 @@ const ItemScreen = (() => {
     return "Без заказа";
   }
 
+  // Строка каталога годится для карточки: статус, количество и номера в ней
+  // те же, что отдаёт /item/lookup. Нет только заметки о состоянии — список
+  // её не возвращает.
+  function cachedItem(itemId) {
+    const row = (Cache.items("equipment") || []).find((i) => String(i.item_id) === String(itemId));
+    return row ? { ...row, by_qty: categoryByQty(row.category) } : null;
+  }
+
   async function load() {
     const content = document.getElementById("item-content");
     document.getElementById("item-title").textContent = currentItemId;
+    history = null;
+    const seq = ++historySeq;
+
+    // Предмет есть в кэше каталога — рисуем карточку сразу, а за сетью идём
+    // только за историей. Раньше открытие карточки стоило двух запросов по
+    // 6–9 секунд, и один из них повторял то, что уже лежало в каталоге.
+    const known = cachedItem(currentItemId);
+    if (known) {
+      loadOrdersMap();
+      render(known);
+      loadHistory(seq);
+      return;
+    }
+
     content.innerHTML = `<p class="empty">Загрузка…</p>`;
     try {
-      const [item, history] = await Promise.all([
+      const [item, data] = await Promise.all([
         apiPost("/item/lookup", { item_id: currentItemId }),
         apiPost("/item/history", { item_id: currentItemId }),
       ]);
+      if (seq !== historySeq) return;
       loadOrdersMap();
-      render(item, history);
+      history = data;
+      render(item);
     } catch (err) {
+      if (seq !== historySeq) return;
       content.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  async function loadHistory(seq) {
+    try {
+      const data = await apiPost("/item/history", { item_id: currentItemId });
+      if (seq !== historySeq) return;
+      history = data;
+      renderHistory();
+    } catch (err) {
+      if (seq !== historySeq) return;
+      ["item-tx-list", "item-defect-list"].forEach((id) => {
+        const box = document.getElementById(id);
+        if (box) box.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      });
     }
   }
 
@@ -123,7 +165,9 @@ const ItemScreen = (() => {
           serial_number: res.serial_number, inventory_number: res.inventory_number,
         });
         TG.showAlert(numbersResultText(res));
-        load();
+        // Новые номера пришли в ответе — перерисовываем карточку из них, не
+        // перечитывая предмет и историю.
+        render({ ...item, serial_number: res.serial_number, inventory_number: res.inventory_number });
       } catch (err) {
         TG.hapticError();
         showBoxError("item-numbers-error", err.message);
@@ -143,9 +187,18 @@ const ItemScreen = (() => {
     return lines.length ? "Исправлено.\n\n" + lines.join("\n") : "Номера не изменились";
   }
 
-  function render(item, history) {
-    document.getElementById("item-title").textContent = item.name;
-    const content = document.getElementById("item-content");
+  // История рисуется отдельно от карточки: когда карточка взята из кэша, она
+  // приходит позже, и перерисовывать ради неё всю карточку значило бы стереть
+  // начатое описание дефекта.
+  function renderHistory() {
+    const txBox = document.getElementById("item-tx-list");
+    const defectBox = document.getElementById("item-defect-list");
+    if (!txBox || !defectBox) return;
+    if (!history) {
+      txBox.innerHTML = skeleton(1);
+      defectBox.innerHTML = skeleton(1);
+      return;
+    }
 
     const txRows = (history.transactions || [])
       .slice()
@@ -165,6 +218,23 @@ const ItemScreen = (() => {
           <div class="card-sub">${escapeHtml(d.description || "")}</div>
           <div class="card-sub">Заявлен: ${formatDate(d.reported_at)}</div>
         </div>`).join("") || `<p class="empty">Дефектов не было</p>`;
+
+    txBox.innerHTML = txRows;
+    defectBox.innerHTML = defectRows;
+  }
+
+  // Открытые дефекты для «Скана»: из ответа /item/lookup, а если карточка
+  // взята из кэша — из загруженной истории. Пока истории нет, «Скан» найдёт
+  // предмет сам.
+  function knownForScan(item) {
+    if (item.open_defects) return item;
+    if (!history) return null;
+    return { ...item, open_defects: (history.defects || []).filter((d) => d.status !== "Resolved") };
+  }
+
+  function render(item) {
+    document.getElementById("item-title").textContent = item.name;
+    const content = document.getElementById("item-content");
 
     content.innerHTML = `
       <div class="card">
@@ -195,12 +265,12 @@ const ItemScreen = (() => {
 
       <div class="section">
         <div class="section-title">История выдач</div>
-        ${txRows}
+        <div id="item-tx-list"></div>
       </div>
 
       <div class="section">
         <div class="section-title">История дефектов</div>
-        ${defectRows}
+        <div id="item-defect-list"></div>
       </div>
 
       <div class="section">
@@ -247,7 +317,13 @@ const ItemScreen = (() => {
       Router.navigate("labels", { itemId: item.item_id });
     });
 
-    const goScan = (mode) => Router.navigate("scan", { itemId: item.item_id, mode });
+    // Предмет передаём целиком: «Скан» покажет его сразу, без второго поиска.
+    const goScan = (mode) => {
+      const known = knownForScan(item);
+      Router.navigate("scan", known
+        ? { itemId: item.item_id, mode, item: known }
+        : { itemId: item.item_id, mode });
+    };
     const checkoutBtn = document.getElementById("item-checkout");
     if (checkoutBtn) checkoutBtn.addEventListener("click", () => goScan("checkout"));
     const checkinBtn = document.getElementById("item-checkin");
@@ -263,16 +339,32 @@ const ItemScreen = (() => {
       const btn = document.getElementById("item-defect-submit");
       btn.disabled = true;
       try {
-        await apiPost("/defect/report", {
+        const severity = document.getElementById("item-defect-severity").value;
+        const res = await apiPost("/defect/report", {
           item_id: item.item_id,
           description,
-          severity: document.getElementById("item-defect-severity").value,
+          severity,
         });
         TG.hapticSuccess();
         TG.showAlert("Дефект сохранён");
         Cache.clear("defects");
-        Cache.clear("equipment");
-        load();
+        // Статус предмета бэкенд вернул в ответе — правим одну строку каталога
+        // и карточку, а не сбрасываем весь каталог и не перечитываем предмет.
+        const changes = ItemState.afterDefect(item, severity, res && res.status);
+        Cache.patch("equipment", "item_id", item.item_id, changes);
+        const defect = {
+          defect_id: res && res.defect_id, item_id: item.item_id, severity, description,
+          status: "Open", reported_at: new Date().toISOString(),
+        };
+        const next = { ...item, ...changes };
+        if (item.open_defects) next.open_defects = item.open_defects.concat([defect]);
+        if (history) {
+          history = { ...history, defects: (history.defects || []).concat([defect]) };
+        } else {
+          // История ещё в пути и может прийти без этого дефекта — просим заново.
+          loadHistory(++historySeq);
+        }
+        render(next);
       } catch (err) {
         TG.hapticError();
         TG.showAlert(err.message);
@@ -282,6 +374,7 @@ const ItemScreen = (() => {
     });
 
     bindNumbers(item);
+    renderHistory();
   }
 
   function onShow(params) {

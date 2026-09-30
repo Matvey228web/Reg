@@ -28,6 +28,7 @@ const LabelsScreen = (() => {
   let items = [];          // что печатаем
   let sizeKey = DEFAULT_SIZE;
   let singleItemId = null; // пришли из карточки предмета
+  let catalogError = "";   // каталог не подтянулся — что ответил сервер
 
   function caption() {
     try {
@@ -50,10 +51,21 @@ const LabelsScreen = (() => {
     return SIZES[stored] ? stored : DEFAULT_SIZE;
   }
 
+  // Каталога в кэше нет — тянем его сами (Cache.ensure, как ensureItemsMap в
+  // order.js), а не отправляем человека в «Каталог» и обратно.
   function onShow(params) {
     singleItemId = params && params.itemId ? params.itemId : null;
     sizeKey = savedSize();
+    catalogError = "";
     render();
+    if (!Cache.items("equipment")) {
+      Cache.ensure("equipment", "/equipment/list", { category: "all", status: "all" })
+        .then(() => {
+          if (!Cache.items("equipment")) catalogError = "Каталог загрузился, но не сохранился на телефоне.";
+          render();
+        })
+        .catch((err) => { catalogError = err.message; render(); });
+    }
   }
 
   function source() {
@@ -67,8 +79,15 @@ const LabelsScreen = (() => {
     const all = source();
 
     if (!all.length) {
-      box.innerHTML = `<p class="empty">Каталог ещё не загружен. Откройте «Каталог»,
-        чтобы список подтянулся, и возвращайтесь.</p>`;
+      if (catalogError) {
+        box.innerHTML = `<div class="error-box">${escapeHtml(catalogError)}</div>`;
+      } else if (!Cache.items("equipment")) {
+        box.innerHTML = skeleton(3);   // onShow уже тянет каталог
+      } else {
+        box.innerHTML = `<p class="empty">${singleItemId
+          ? `Позиции ${escapeHtml(singleItemId)} нет в каталоге. Обновите «Каталог» и возвращайтесь.`
+          : "В каталоге нет ни одной позиции."}</p>`;
+      }
       return;
     }
 
