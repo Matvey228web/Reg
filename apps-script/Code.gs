@@ -28,6 +28,10 @@ var SHEETS = {
   IMPORT_MAP: "ImportMap",
   IMPORT_RULES: "ImportRules",
   META: "Meta",
+  // Журнал служебных событий: ошибки сервера, отказы Telegram, несобравшиеся
+  // акты. Владелец решил, что такое в чат склада не идёт — там только заявки и
+  // акты, — а служебное лежит здесь и смотрится в самой таблице.
+  LOGS: "Logs",
 };
 
 // Значения по умолчанию для листа Categories. Сам справочник живёт в таблице
@@ -156,6 +160,9 @@ var SCHEMA = {
   Inventory: ["inventory_id", "kind", "item_id", "item_name", "expected_qty", "found_qty",
               "scope", "started_at", "finished_at", "staff_id", "staff_name"],
   Meta: ["key", "value"],
+  // Журнал служебных событий (см. logEvent). context — JSON с подробностями,
+  // обрезанный: ячейка не резиновая, а стек на пару экранов читать некому.
+  Logs: ["timestamp", "kind", "endpoint", "reason", "message", "context"],
 };
 
 // Колонки-идентификаторы храним как текст. Без этого Google Sheets приводит
@@ -180,6 +187,9 @@ var TEXT_COLUMNS = {
   // Журнал сверок: без этого номер 010101 записывался числом 10101 — ведущий
   // ноль съедала таблица, и поиск по номеру в журнале ничего не находил.
   Inventory: ["item_id"],
+  // Журнал — целиком текст: время строкой не сползает в дату с чужим поясом, а
+  // код ошибки Telegram «400» не становится числом.
+  Logs: ["timestamp", "kind", "endpoint", "reason", "message", "context"],
 };
 
 // Умолчания. Действующие значения живут в листе Meta и правятся в админке
@@ -1028,6 +1038,10 @@ function doPost(e) {
     if (err && err.isApiError) {
       return respond(envelope(false, null, err.message, err.status));
     }
+    // Непредвиденная ошибка — в журнал. Только имя ручки, текст и стек: ни
+    // токена, ни тела запроса (там телефоны и ФИО).
+    logEvent("error", endpoint, "exception", err && err.message ? err.message : String(err),
+      err && err.stack ? { stack: String(err.stack) } : "");
     return respond(envelope(false, null, "Внутренняя ошибка сервера: " + (err && err.message ? err.message : err), 500));
   }
 }
@@ -1665,12 +1679,6 @@ function reportDefect(itemId, staffRow, transactionId, payload) {
     resolved_at: "",
     resolution_notes: "",
   });
-  // В чат склада — только то, из-за чего техника выбывает из оборота. Сообщать
-  // о каждой выдаче значит завалить чат и приучить его не читать.
-  var item = findRowByValue(getSheet(SHEETS.EQUIPMENT), "item_id", itemId);
-  tgNotify("<b>Дефект:</b> " + tgEscape((item && item.name) || itemId) + " (" + tgEscape(itemId) + ")\n" +
-    tgEscape(payload.defect_description || "без описания") + "\n" +
-    "Заявил: " + tgEscape(staffRow.full_name));
   return defectId;
 }
 
@@ -2218,7 +2226,8 @@ function handleOrderCreate(payload, token) {
 //
 // Отдельно от записи заказа и после снятия замка: копия документа делается
 // секунды, и держать на это время замок — значит подвесить всех остальных.
-// Неудача акта заказ не отменяет: заказ уже записан, а про акт скажем в чат.
+// Неудача акта заказ не отменяет: заказ уже записан, а причина уходит в журнал
+// Logs — в чат склада служебное не пишем.
 function autoAct(orderId, masterName) {
   var settings = getSettings();
   if (!String(settings.act_template_id || "")) return "";
@@ -2226,9 +2235,8 @@ function autoAct(orderId, masterName) {
     var res = buildAct(orderId, masterName || "");
     return res.url;
   } catch (err) {
-    tgSend("<b>Акт по заказу №" + tgEscape(orderId) + " не собрался:</b> " +
-      tgEscape(err && err.message ? err.message : err) +
-      "\nЗаказ записан, акт можно собрать после исправления настроек.");
+    logEvent("act", "autoAct", "build-failed", err && err.message ? err.message : String(err),
+      { order_id: orderId });
     return "";
   }
 }
@@ -2722,7 +2730,31 @@ function notifyThreadId(kind) {
 // мы не знаем. Если Telegram отказал при заданной теме — её удалили или
 // закрыли, — пробуем ещё раз без неё, в General: заявка не должна пропасть из-за
 // темы. Тогда в ответе fallback: true.
+//
+// Неудача и откат в General пишутся в журнал Logs (tgSendLog), не в чат.
 function tgSend(text, chatIdOverride, kind) {
+  return tgSendLog(tgSendRaw(text, chatIdOverride, kind), chatIdOverride, kind);
+}
+
+// Кнопки приветствия и проверки связи (явный чат или род не задан) про «нет
+// токена» и «не выбран чат» и так отвечают человеку через notifyRefusal —
+// журналу там сказать нечего. Остальное — отказ Telegram, сеть, откат из темы в
+// General — пишется всегда: иначе заявка, не дошедшая до чата, пропала бы молча.
+function tgSendLog(res, chatIdOverride, kind) {
+  var fromButton = !!chatIdOverride || !kind;
+  var setupGap = res.reason === "no-token" || res.reason === "no-chat";
+  if (!res.ok && !(setupGap && fromButton)) {
+    logEvent("telegram", "sendMessage", res.reason, res.error || "",
+      { kind: kind || "", fallback: !!res.fallback });
+  } else if (res.fallback) {
+    logEvent("telegram", "sendMessage", "fallback",
+      "Тема форума не приняла сообщение, ушло в General. Проверьте id темы в настройках.",
+      { kind: kind || "", thread: notifyThreadId(kind) });
+  }
+  return res;
+}
+
+function tgSendRaw(text, chatIdOverride, kind) {
   var token = botToken();
   var chatId = String(chatIdOverride || notifyChatId());
   if (!token) return { ok: false, reason: "no-token" };
@@ -2754,92 +2786,14 @@ function tgSend(text, chatIdOverride, kind) {
   }
 }
 
-// Отправка файла. Отдельно от tgSend, потому что sendDocument — это multipart,
-// а не JSON: тело собирает сам UrlFetchApp из объекта с блобом.
-function tgSendDocument(blob, caption, chatIdOverride) {
-  var token = botToken();
-  var chatId = String(chatIdOverride || notifyChatId());
-  if (!token) return { ok: false, reason: "no-token" };
-  if (!chatId) return { ok: false, reason: "no-chat" };
-  try {
-    var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendDocument", {
-      method: "post",
-      payload: { chat_id: chatId, caption: String(caption || ""), document: blob },
-      muteHttpExceptions: true,
-    });
-    var body = JSON.parse(res.getContentText() || "{}");
-    return body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
-  } catch (e) {
-    return { ok: false, reason: "network", error: String(e) };
-  }
-}
-
-// Этикетки из мини-приложения. Сохранить файл прямо на устройство из вебвью
-// Telegram нельзя — атрибут download там не работает, — поэтому пачку забирает
-// бот и кладёт в чат склада одним архивом. Картинки рисует телефон, сюда
-// приходят готовые PNG в base64.
-var LABELS_MAX_FILES = 30;
-var LABELS_MAX_BYTES = 8 * 1024 * 1024;   // запас: sendDocument держит 50 МБ
-
+// Этикетки в чат больше не отправляем: владелец решил, что картинки в Telegram
+// не идут ни в каком виде. Ручка остаётся ради закэшированных версий
+// приложения — вместо молчаливого «неизвестный эндпоинт» они покажут, куда
+// теперь нажимать.
 function handleLabelsSend(payload, token) {
   checkAuth(token);
-  var files = payload && payload.files;
-  if (!files || !files.length) throw apiError(400, "Нечего отправлять: список файлов пуст.");
-  if (files.length > LABELS_MAX_FILES) {
-    throw apiError(400, "Сразу больше " + LABELS_MAX_FILES + " этикеток не отправляем. " +
-      "Сузьте фильтры и повторите.");
-  }
-
-  var blobs = [];
-  var total = 0;
-  for (var i = 0; i < files.length; i++) {
-    var name = String(files[i].name || ("label-" + (i + 1) + ".png"));
-    var data = String(files[i].png_base64 || "");
-    if (!data) throw apiError(400, "Файл «" + name + "» пришёл пустым.");
-    var bytes;
-    try {
-      bytes = Utilities.base64Decode(data);
-    } catch (e) {
-      throw apiError(400, "Файл «" + name + "» повреждён при передаче.");
-    }
-    total += bytes.length;
-    if (total > LABELS_MAX_BYTES) {
-      throw apiError(400, "Слишком много данных за раз. Сузьте фильтры и повторите.");
-    }
-    blobs.push(Utilities.newBlob(bytes, "image/png", name));
-  }
-
-  // Одна этикетка уходит картинкой, несколько — архивом: тридцать отдельных
-  // сообщений подряд в чате склада никому не нужны.
-  var one = blobs.length === 1;
-  var payloadBlob = one
-    ? blobs[0]
-    : Utilities.zip(blobs, "mifs-labels-" + new Date().toISOString().substring(0, 10) + ".zip");
-  var caption = one
-    ? "Этикетка: " + blobs[0].getName()
-    : "Этикетки, " + blobs.length + " шт.";
-
-  var res = tgSendDocument(payloadBlob, caption);
-  if (res.ok) {
-    return { ok: true, count: blobs.length,
-             message: one ? "Этикетка отправлена в чат склада."
-                          : blobs.length + " этикеток отправлены в чат склада одним архивом." };
-  }
-  if (res.reason === "no-token") {
-    throw apiError(400, "Токен бота не задан. Apps Script → Project Settings → " +
-      "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
-  }
-  if (res.reason === "no-chat") {
-    throw apiError(400, "Не указан чат: впишите числовой id чата склада в настройках " +
-      "и сохраните.");
-  }
-  throw apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
-    ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
-}
-
-// Тихая отправка: всё, что зовётся по ходу работы склада, идёт через неё.
-function tgNotify(text) {
-  try { tgSend(text); } catch (e) { /* уведомление не важнее самой операции */ }
+  throw apiError(410, "Отправка этикеток в чат отключена. В Telegram сохраняйте по одной " +
+    "(кнопка «Сохранить»), пачкой — кнопкой «Печать» или откройте приложение в браузере.");
 }
 
 // Экранирование для parse_mode "HTML": всё, что пришло из таблицы, формы или
@@ -3126,7 +3080,6 @@ function helloText(chatId) {
     "",
     "Буду писать сюда:",
     "• новые заявки с сайта",
-    "• дефекты, отмеченные на складе",
     "• ссылки на акты сдачи-приёмки",
     "",
   ];
@@ -3859,6 +3812,44 @@ function appendRow(sheet, rowObject) {
   var target = sheet.getLastRow() + 1;
   prepareRows(sheet, target, 1);
   sheet.getRange(target, 1, 1, headers.length).setValues([row]);
+}
+
+// Запись в журнал Logs. Служебное — ошибки, отказы Telegram, несобравшийся акт —
+// в чат склада не идёт никогда: там только заявки и акты.
+//
+// Замок не берём: журнал зовётся и изнутри операций, которые замок уже держат
+// (tgSend из buildAct, autoAct), и ждать самого себя не нужно. Цена — две
+// одновременные записи могут попасть в одну строку журнала; для журнала это
+// приемлемо, для заказа — нет, поэтому заказы пишутся под замком.
+//
+// Всё тело в try: журнал не должен ронять операцию. Листа нет (после выкладки
+// не запускали setupSheets) — молча пропускаем.
+var LOG_CONTEXT_MAX = 2000;
+
+function logEvent(kind, endpoint, reason, message, context) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.LOGS);
+    if (!sheet) return;
+    var ctx = "";
+    if (context !== undefined && context !== null && context !== "") {
+      ctx = typeof context === "string" ? context : JSON.stringify(context);
+      if (ctx.length > LOG_CONTEXT_MAX) ctx = ctx.substring(0, LOG_CONTEXT_MAX) + "…";
+    }
+    appendRow(sheet, {
+      timestamp: new Date().toISOString(),
+      kind: String(kind || ""),
+      endpoint: String(endpoint || ""),
+      reason: String(reason || ""),
+      message: logRedact(String(message === undefined || message === null ? "" : message)),
+      context: logRedact(ctx),
+    });
+  } catch (e) { /* журнал не важнее самой операции */ }
+}
+
+// Токен бота в журнал не пишем: адрес Telegram несёт его внутри
+// (api.telegram.org/bot<токен>/…), и сетевая ошибка UrlFetchApp цитирует адрес.
+function logRedact(str) {
+  return str.replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot<token>");
 }
 
 // Подготовка строк под запись: доращивает сетку до нужного размера и ставит

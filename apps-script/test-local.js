@@ -506,6 +506,8 @@ function check(label, cond, extra) {
   if (cond) { console.log('  ok   ' + label); }
   else { failures++; console.log('  FAIL ' + label + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
 }
+// Строки журнала Logs (служебные события, которые в чат не идут).
+const logRows = () => readRows(getSheet(SHEETS.LOGS));
 function call(endpoint, payload, token) {
   const res = doPost({ postData: { contents: JSON.stringify({ endpoint, token, payload: payload || {} }) } });
   return JSON.parse(res.getContent());
@@ -523,7 +525,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 14 вкладок', spreadsheet.getSheets().length === 14, spreadsheet.getSheets().map(s => s.name));
+check('создано 15 вкладок (с журналом Logs)', spreadsheet.getSheets().length === 15 && !!spreadsheet.getSheetByName('Logs'), spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -533,7 +535,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 14', spreadsheet.getSheets().length === 14);
+check('вкладок по-прежнему 15', spreadsheet.getSheets().length === 15);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -1788,9 +1790,10 @@ console.log('\n== карточку предмета без входа не пр�
 r = call('/item/lookup', { item_id: '010101' });
 check('без токена карточка не отдаётся', r.ok === false && r.status === 401, r);
 
-console.log('\n== этикетки уходят ботом ==');
-// Сохранить файл прямо на устройство из вебвью Telegram нельзя, поэтому пачку
-// забирает бот. Проверяем разбор входа и то, что уходит в Telegram.
+console.log('\n== этикетки в чат не уходят ==');
+// Владелец решил: картинки этикеток в Telegram не идут ни в каком виде. Ручка
+// оставлена ради закэшированных версий приложения — они получают 410 с
+// объяснением, куда теперь нажимать, а в Telegram не уходит ничего.
 // Входим заново: к этому месту прежние токены уже отозваны сменой PIN, выходом
 // и чисткой листа Staff в проверках выше.
 const labelLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
@@ -1798,45 +1801,21 @@ check('вход перед отправкой этикеток', labelLogin.ok =
 const labelToken = labelLogin.ok ? labelLogin.data.token : null;
 const png = Buffer.from('PNG-заглушка').toString('base64');
 
-scriptProps = {};
-r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
-check('без токена бота — понятный отказ, а не молчание',
-  r.ok === false && /TELEGRAM_BOT_TOKEN/.test(String(r.error)), r);
-
 scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
-metaSet('setting_notify_chat_id', '');
-r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
-check('без чата — тоже понятный отказ', r.ok === false && /id чата/.test(String(r.error)), r);
-
 metaSet('setting_notify_chat_id', '-1001234567890');
 sent.length = 0;
 r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
-check('одна этикетка уходит', r.ok === true && r.data.count === 1, r);
-check('ушла именно в sendDocument', /\/sendDocument$/.test(sent[0].url), sent[0] && sent[0].url);
-check('чат взят из настроек', sent[0].opts.payload.chat_id === '-1001234567890', sent[0].opts.payload.chat_id);
-check('картинка дошла целой',
-  Buffer.from(sent[0].opts.payload.document.getBytes().map(b => (b < 0 ? b + 256 : b)))
-    .toString() === 'PNG-заглушка',
-  sent[0].opts.payload.document.getName());
-
-sent.length = 0;
+check('одна этикетка — 410 с объяснением',
+  r.ok === false && r.status === 410 && /Отправка этикеток в чат отключена/.test(String(r.error)) &&
+  /«Печать»/.test(String(r.error)), r);
 r = call('/labels/send', { files: [
   { name: 'a.png', png_base64: png }, { name: 'b.png', png_base64: png },
 ] }, labelToken);
-check('несколько этикеток уходят одним архивом',
-  r.ok === true && r.data.count === 2 && /\.zip$/.test(sent[0].opts.payload.document.getName()),
-  sent[0] && sent[0].opts.payload.document.getName());
-
-r = call('/labels/send', { files: [] }, labelToken);
-check('пустой список отклонён', r.ok === false && r.status === 400, r);
-r = call('/labels/send', { files: [{ name: 'a.png', png_base64: '' }] }, labelToken);
-check('пустой файл отклонён', r.ok === false && /пустым/.test(String(r.error)), r);
-r = call('/labels/send', {
-  files: Array.from({ length: 31 }, (_, i) => ({ name: i + '.png', png_base64: png })),
-}, labelToken);
-check('больше тридцати за раз не берём', r.ok === false && /30/.test(String(r.error)), r);
+check('пачка — тоже 410', r.ok === false && r.status === 410, r);
+check('в Telegram не ушло ни одного запроса', sent.length === 0, sent.map((x) => x.url));
+check('sendDocument не звали', !sent.some((x) => /sendDocument/.test(x.url)));
 r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, 'чужой-токен');
-check('без входа этикетки не отправить', r.ok === false && r.status === 401, r);  // недействительная сессия — 401, не 403
+check('без входа — 401, а не 410', r.ok === false && r.status === 401, r);
 
 console.log('\n== исправление номеров у вещи ==');
 // Опечатку в заводском номере находят, когда вещь уже в таблице. Главное, что
@@ -2138,15 +2117,15 @@ check('покупатель и ссылка уцелели',
   /Тестов Тест Тестович/.test(tgm.text) && /<a href="https:\/\/example\.test\/">/.test(tgm.text), tgm.text.slice(-400));
 metaSet('setting_site_url', '');
 
-// Дефект: жирный заголовок, значения экранированы.
+// Дефект в чат не идёт: владелец решил, что чат — только заявки и акты.
 const bdItem = call('/item/create', { name: 'Штатив <тест>', category: 'LGT' }, siteAdmin).data.item_id;
 call('/transaction/checkout', { item_id: bdItem, client_id: clientId }, siteAdmin);
-call('/transaction/checkin',
+sent.length = 0;
+const bdIn = call('/transaction/checkin',
   { item_id: bdItem, has_defect: true, defect_description: 'Сломано <b>&', defect_severity: 'Minor' }, siteAdmin);
-tgm = siteTg();
-check('дефект в HTML: заголовок жирным, описание экранировано',
-  tgm.parse_mode === 'HTML' && /^<b>Дефект:<\/b> Штатив &lt;тест&gt;/.test(tgm.text) &&
-  tgm.text.indexOf('Сломано &lt;b&gt;&amp;') !== -1, tgm);
+check('приём с дефектом прошёл', bdIn.ok === true, bdIn);
+check('о дефекте в Telegram не написано ничего',
+  sent.filter((x) => /api\.telegram\.org/.test(x.url)).length === 0, sent.map((x) => x.url));
 
 check('ручки просрочек в Telegram больше нет',
   /неизвестн|не найден|Unknown/i.test(String(call('/notify/overdue', {}, siteAdmin).error)),
@@ -2363,7 +2342,8 @@ check('бот представился',
   /^Здравствуйте! Я бот склада Mifs Rent\./.test(tgLast().text), tgLast().text);
 check('перечислил, о чём будет писать',
   /заявки с сайта/.test(tgLast().text) && !/просрочки/.test(tgLast().text) &&
-  /дефекты/.test(tgLast().text) && /акт/.test(tgLast().text), tgLast().text);
+  !/дефект/.test(tgLast().text) && !/не собрал/.test(tgLast().text) &&
+  /акт/.test(tgLast().text), tgLast().text);
 check('приветствие уходит как HTML', tgLast().parse_mode === 'HTML', tgLast());
 check('назвал чат, чтобы было видно — тот самый',
   /Этот чат: -100555/.test(tgLast().text), tgLast().text);
@@ -2593,6 +2573,7 @@ check('в чат ушло сообщение об акте со ссылкой <
 const broke = call('/settings/set',
   { settings: { act_template_id: 'AAAAAAAAAAAAAAAAAAAAAA' } }, actAdmin);
 check('настройку шаблона удалось подменить', broke.ok === true, broke);
+const actSentBefore = sent.length;
 const stillOrder = call('/order/create', {
   order_no: '260930-7778',
   student_name: 'Петрова Анна Сергеевна',
@@ -2601,8 +2582,13 @@ const stillOrder = call('/order/create', {
 }, actAdmin);
 check('со сломанным шаблоном заказ всё равно записан', stillOrder.ok === true, stillOrder);
 check('ссылки на акт при этом нет', !stillOrder.data.act_url, stillOrder.data.act_url);
-check('и о неудаче сказано в чат',
-  tgTexts().some((m) => /^<b>Акт по заказу №\d+ не собрался:<\/b> /.test(m)), tgTexts().slice(-2));
+check('о неудаче в чат не сказано ничего',
+  sent.length === actSentBefore, sent.slice(actSentBefore).map((x) => x.url));
+const actLog = logRows().filter((l) => l.kind === 'act');
+check('неудача акта записана в журнал Logs',
+  actLog.length === 1 && actLog[0].endpoint === 'autoAct' && actLog[0].reason === 'build-failed' &&
+  actLog[0].message !== '' && String(JSON.parse(actLog[0].context).order_id) === String(stillOrder.data.order_id),
+  actLog);
 
 console.log('\n== темы форума: заявки и акты ==');
 // Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
@@ -2676,6 +2662,105 @@ check('отказ и без темы — ошибка повтора, повто
   tgMsgs().length === 2, [bothFail, tgMsgs()]);
 __telegramSendReply = null;
 call('/settings/set', { settings: { public_orders: 0, notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin);
+
+console.log('\n== журнал Logs: служебное — в таблицу, не в чат ==');
+// Владелец решил: в чат склада — только заявки и акты. Ошибки сервера, отказы
+// Telegram и откат из темы в General пишутся в лист Logs.
+scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+metaSet('setting_notify_chat_id', '-1001234567890');
+const logLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const logToken = logLogin.ok ? logLogin.data.token : null;
+check('вход перед проверкой журнала', !!logToken, logLogin);
+
+// Внутренняя ошибка: ответ по-прежнему 500, а в журнале — строка без токена и
+// без тела запроса.
+check('ошибка с отказом ручки (ApiError) в журнал не идёт',
+  (() => { const n = logRows().length; call('/inventory/list', {}, 'чужой-токен'); return logRows().length === n; })());
+const realInventoryList = handleInventoryList;
+globalThis.handleInventoryList = () => { throw new Error('внезапно сломалось'); };
+let logBefore = logRows().length;
+let boom = call('/inventory/list', { phone: '+79990001122' }, logToken);
+check('внутренняя ошибка — по-прежнему 500 с текстом',
+  boom.ok === false && boom.status === 500 && /внезапно сломалось/.test(String(boom.error)), boom);
+let errLog = logRows().slice(logBefore);
+check('внутренняя ошибка записана в журнал',
+  errLog.length === 1 && errLog[0].kind === 'error' && errLog[0].endpoint === '/inventory/list' &&
+  errLog[0].message === 'внезапно сломалось' && /stack/.test(errLog[0].context), errLog);
+check('в журнале нет ни токена сессии, ни данных запроса',
+  JSON.stringify(errLog).indexOf(logToken) === -1 && JSON.stringify(errLog).indexOf('+79990001122') === -1,
+  errLog);
+
+// Отказ Telegram по заявке — строка в журнале, в чат ничего сверх попытки.
+__telegramSendReply = () => ({ ok: false, error_code: 403, description: 'Forbidden: bot was kicked' });
+logBefore = logRows().length;
+let failed = tgSend('<b>Заказ №1</b>', '', 'orders');
+let tgLog = logRows().slice(logBefore);
+check('неудачная заявка в чат — строка в журнале',
+  failed.ok === false && tgLog.length === 1 && tgLog[0].kind === 'telegram' &&
+  tgLog[0].reason === 'telegram' && /kicked/.test(tgLog[0].message) &&
+  JSON.parse(tgLog[0].context).kind === 'orders', tgLog);
+
+// Откат из темы в General — тоже в журнал: заявка дошла, но тему пора чинить.
+metaSet('setting_notify_thread_orders', '999');
+__telegramSendReply = (m) => ('message_thread_id' in m)
+  ? { ok: false, error_code: 400, description: 'Bad Request: message thread not found' }
+  : { ok: true, result: {} };
+logBefore = logRows().length;
+const fb = tgSend('<b>Заказ №2</b>', '', 'orders');
+tgLog = logRows().slice(logBefore);
+check('откат в General записан в журнал',
+  fb.ok === true && fb.fallback === true && tgLog.length === 1 && tgLog[0].reason === 'fallback' &&
+  JSON.parse(tgLog[0].context).thread === '999', tgLog);
+metaSet('setting_notify_thread_orders', '');
+__telegramSendReply = null;
+
+// Нет чата: заявка — в журнал; кнопка приветствия — нет, она и так отвечает
+// человеку через notifyRefusal.
+metaSet('setting_notify_chat_id', '');
+logBefore = logRows().length;
+tgSend('<b>Заказ №3</b>', '', 'orders');
+check('заявка без чата — строка no-chat в журнале',
+  logRows().slice(logBefore).map((l) => l.reason).join() === 'no-chat', logRows().slice(logBefore));
+logBefore = logRows().length;
+const noChatHello = call('/notify/hello', {}, logToken);
+check('приветствие без чата отвечает человеку', noChatHello.ok === false && noChatHello.status === 400,
+  noChatHello);
+check('и в журнал не пишет', logRows().length === logBefore, logRows().slice(logBefore));
+metaSet('setting_notify_chat_id', '-1001234567890');
+
+// Сетевая ошибка цитирует адрес с токеном бота — в журнал он не попадает.
+__telegramSendReply = () => { throw new Error('Request failed for https://api.telegram.org/bot123:ABC/sendMessage'); };
+logBefore = logRows().length;
+tgSend('<b>Заказ №4</b>', '', 'orders');
+tgLog = logRows().slice(logBefore);
+check('сетевая ошибка в журнале, токен вырезан',
+  tgLog.length === 1 && tgLog[0].reason === 'network' &&
+  JSON.stringify(tgLog).indexOf('123:ABC') === -1 && /bot<token>/.test(tgLog[0].message), tgLog);
+__telegramSendReply = null;
+
+// Длинный контекст обрезается.
+logBefore = logRows().length;
+logEvent('error', '/x', 'test', 'длинно', { big: 'я'.repeat(5000) });
+check('контекст журнала обрезан до ~2000 знаков',
+  logRows().slice(logBefore)[0].context.length <= 2001, logRows().slice(logBefore)[0].context.length);
+
+// Листа Logs нет (после выкладки не запускали setupSheets) — журнал молчит,
+// запрос отвечает как обычно.
+const logsSheet = spreadsheet.getSheetByName('Logs');
+spreadsheet.deleteSheet(logsSheet);
+let noLogThrew = false;
+try { logEvent('error', '/x', 'test', 'без листа', {}); } catch (e) { noLogThrew = true; }
+check('logEvent без листа Logs не бросает', noLogThrew === false);
+boom = call('/inventory/list', {}, logToken);
+check('без листа Logs внутренняя ошибка — всё тот же 500',
+  boom.ok === false && boom.status === 500 && /внезапно сломалось/.test(String(boom.error)), boom);
+__telegramSendReply = () => ({ ok: false, description: 'Forbidden' });
+check('без листа Logs неудачный tgSend просто возвращает отказ',
+  tgSend('проба', '', 'orders').ok === false);
+__telegramSendReply = null;
+spreadsheet.sheets.push(logsSheet);
+globalThis.handleInventoryList = realInventoryList;
+check('ручка после проверки снова работает', call('/inventory/list', {}, logToken).ok === true);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
