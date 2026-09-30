@@ -8,6 +8,9 @@
 const SettingsScreen = (() => {
   let data = null;   // { settings, categories, limits, maintenance }
   const CACHE = "settings";
+  // Очередь Worker: GET /health, ответ { ok, queue, dead, oldest_dead_at }.
+  // undefined — ещё не спрашивали, null — не ответил (плитка покажет «—»).
+  let health;
 
   // Подписи короткие: это названия строк, а не предложения. Объяснение к каждой
   // приходит с бэкенда в limits и печатается пояснением под строкой — раньше
@@ -65,6 +68,9 @@ const SettingsScreen = (() => {
     // в потолок таблицы, и всё это время человек смотрел на заглушки. Сроки
     // входа и ФИО мастера меняются раз в месяц, поэтому показать вчерашние и
     // тут же обновить — честнее, чем держать пустой экран.
+    // Состояние очереди Worker — один раз на заход в экран, не по таймеру:
+    // на бесплатном тарифе чтения списка очереди в KV считаются.
+    loadHealth();
     const known = Cache.one(CACHE);
     if (known) {
       data = known;
@@ -372,10 +378,11 @@ const SettingsScreen = (() => {
     const s = data.summary;
     if (!s && !owner) return "";   // старый бэкенд — панели просто нет
 
-    const tile = (value, label, warn) =>
+    const tile = (value, label, warn, hint) =>
       `<div class="tile${warn ? " tile--warn" : ""}">
          <div class="tile-value">${escapeHtml(String(value))}</div>
          <div class="tile-label">${escapeHtml(label)}</div>
+         ${hint ? `<div class="tile-label">${escapeHtml(hint)}</div>` : ""}
        </div>`;
 
     return `
@@ -397,9 +404,49 @@ const SettingsScreen = (() => {
           ${tile(s.orders_new, "заказов ждут выдачи")}
           ${tile(s.in_repair, "в ремонте", s.in_repair > 0)}
           ${tile(s.staff_active, "сотрудников в строю")}
+          ${tile(s.logs_24h === undefined ? "—" : s.logs_24h, "ошибок за сутки", s.logs_24h > 0,
+                 "смотрите лист Logs в таблице")}
+          ${deadTileHtml()}
         </div>` : ""}
         <button class="btn btn--secondary" id="settings-go-staff">Сотрудники и права</button>
       </div>`;
+  }
+
+  // Сколько заявок с сайта застряло в очереди Worker. Молча: не ответил —
+  // плитка показывает «—», без окна с ошибкой. В демо в сеть не ходим.
+  async function loadHealth() {
+    health = undefined;
+    if (CONFIG.MOCK_MODE) { health = { ok: true, queue: 0, dead: 0 }; drawHealth(); return; }
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 15000);
+    try {
+      const res = await fetch(CONFIG.WEBHOOK_BASE_URL.replace(/\/+$/, "") + "/health",
+        { signal: abort.signal });
+      const json = await res.json();
+      health = json && typeof json.dead === "number" ? json : null;
+    } catch (e) {
+      health = null;
+    } finally {
+      clearTimeout(timer);
+    }
+    drawHealth();
+  }
+
+  // Ответ приходит позже экрана — меняем одну плитку, а не перерисовываем всё:
+  // перерисовка стёрла бы набранное в полях.
+  function drawHealth() {
+    const el = document.getElementById("settings-tile-dead");
+    if (el) el.outerHTML = deadTileHtml();
+  }
+
+  function deadTileHtml() {
+    const dead = health ? health.dead : null;
+    const warn = dead > 0;
+    return `<div class="tile${warn ? " tile--warn" : ""}" id="settings-tile-dead">
+         <div class="tile-value">${escapeHtml(dead === null ? "—" : String(dead))}</div>
+         <div class="tile-label">застрявших заявок</div>
+         ${warn ? `<div class="tile-label">заявки с сайта не дошли до таблицы — см. DEPLOY.md, «Заявки не доходят»</div>` : ""}
+       </div>`;
   }
 
   function renderCategories() {

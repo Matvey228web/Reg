@@ -150,6 +150,26 @@ npx wrangler@latest pages deploy <папка> --project-name=mifs-rent \
 Папка сайта — `site/` плюс свой `_headers`. Привязки к Git у проектов нет
 намеренно.
 
+**Из копии склада перед `wrangler pages deploy` удаляется `js/mock-data.js`.**
+В нём живые персональные данные (ФИО, телефоны, заказы), а всё, что лежит в
+папке выкладки, открывается по прямой ссылке любому — неважно, что
+`index.html` подключает файл только при `MOCK_MODE`. Демо-режим — для запуска
+на своей машине, в опубликованном приложении он не нужен.
+
+```sh
+rm -rf /tmp/mifs-app && mkdir /tmp/mifs-app
+cp -r app/index.html app/_headers app/css app/js /tmp/mifs-app/
+rm /tmp/mifs-app/js/mock-data.js
+npx wrangler@latest pages deploy /tmp/mifs-app --project-name=mifs-rent \
+  --branch=main --commit-dirty=true
+```
+
+После выкладки проверить: `<адрес приложения>/js/mock-data.js` должен отдавать
+404. Оговорка: без `404.html` в папке Pages считает проект одностраничным и на
+несуществующий путь может ответить кодом 200 со страницей `index.html` — это
+тоже значит «файла нет». Плохо, только если в ответе JavaScript с `MockStore`:
+файл попал в выкладку, собрать папку заново по шагам выше.
+
 Перед выкладкой сайта пересобирается снимок каталога:
 
 ```sh

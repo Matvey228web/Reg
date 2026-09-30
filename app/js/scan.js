@@ -374,19 +374,19 @@ const ScanScreen = (() => {
         expected_return_at: field("scan-return-date").value || null,
         notes: field("scan-notes").value.trim(),
       });
+      // Без окон: вибрации и отметки в списке сеанса достаточно. Окно «Выдано»
+      // после каждой позиции — лишний тап на десятке позиций подряд.
       TG.hapticSuccess();
-      // Выдача вне состава заказа разрешена (в заказе есть свободное поле, куда
-      // технику дописывают руками), но человек должен об этом узнать сразу.
-      TG.showAlert(result && result.order_line === "off-order" && orderId
-        ? "Выдано. В составе заказа этой позиции нет — отмечено как «вне заказа»."
-        : "Оборудование выдано");
+      // Выдача вне состава заказа разрешена (акт пересобирается сам) — отмечаем
+      // её в списке выданного за заход, а не останавливаем человека.
+      const offOrder = !!(result && result.order_line === "off-order" && orderId);
       if (orderId) Cache.clear("orders");   // изменился статус и состав заказа
       // Выдача по заказу — это подряд десяток позиций. Показывать после каждой
       // ту же карточку и ждать, пока человек сам нажмёт «сканировать», значит
       // добавить к каждой позиции лишний тап: сразу открываем сканер снова.
       if (lockedOrder) {
         const qtyText = qtyField && Number(qtyField.value) > 1 ? " ×" + Number(qtyField.value) : "";
-        session.push(currentItem.name + qtyText);
+        session.push(currentItem.name + qtyText + (offOrder ? " — сверх заявки" : ""));
         currentItem = null;
         mode = null;
         document.getElementById("scan-result").innerHTML = "";

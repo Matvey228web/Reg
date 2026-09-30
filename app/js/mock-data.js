@@ -17,7 +17,7 @@ const mockSettings = {
   site_url: "",
   app_link: "",
   api_url: "https://mifs-rent-api.example.workers.dev",
-  public_orders: 0,
+  public_orders: 1,
   public_orders_per_hour: 20,
   act_template_id: "",
   act_master: "",
@@ -1372,6 +1372,8 @@ const MockAPI = {
             staff: MockStore.staff.length,
             staff_active: MockStore.staff.filter((x) => x.active).length,
             admins: MockStore.staff.filter((x) => x.role === "Admin").length,
+            // В демо журнала Logs нет — ошибок за сутки ноль, как на чистой таблице.
+            logs_24h: 0,
           },
           maintenance: { journal_archived_at: "", journal_trimmed_at: "" },
         };
