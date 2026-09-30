@@ -364,9 +364,16 @@ let __telegramMe = { ok: true, result: { username: 'mifs_rent_bot', first_name: 
 // «опрос больше не нужен» ничего не проверяла бы.
 let __telegramWebhook = { url: '', pending_update_count: 0, last_error_message: '' };
 let __telegramSetReply = { ok: true, result: true };
+// Ответ на sendMessage: тест подставляет функцию от тела запроса, чтобы
+// Telegram «отказал» — например, в удалённую тему форума. null — обычный ответ.
+let __telegramSendReply = null;
 global.UrlFetchApp = {
   fetch(url, opts) {
     sent.push({ url, opts });
+    if (__telegramSendReply && /\/sendMessage$/.test(url)) {
+      const reply = __telegramSendReply(JSON.parse(opts.payload));
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+    }
     // Загрузка документа в Диск: разбираем multipart так же, как это сделал бы
     // Google, и складываем получившийся документ в набор — дальше по нему
     // собирается акт.
@@ -2596,6 +2603,79 @@ check('со сломанным шаблоном заказ всё равно з�
 check('ссылки на акт при этом нет', !stillOrder.data.act_url, stillOrder.data.act_url);
 check('и о неудаче сказано в чат',
   tgTexts().some((m) => /^<b>Акт по заказу №\d+ не собрался:<\/b> /.test(m)), tgTexts().slice(-2));
+
+console.log('\n== темы форума: заявки и акты ==');
+// Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
+// настройка — General, как было до тем.
+const tgMsgs = () => sent.filter((r) => /sendMessage/.test(r.url)).map((r) => JSON.parse(r.opts.payload));
+const orderMsgs = () => tgMsgs().filter((m) => /^<b>Заказ №/.test(m.text));
+check('номер темы: пусто принимается',
+  call('/settings/set', { settings: { notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin).ok === true);
+check('номер темы: число принимается',
+  call('/settings/set', { settings: { notify_thread_orders: '123' } }, actAdmin).ok === true);
+check('номер темы: буквы отклонены',
+  call('/settings/set', { settings: { notify_thread_orders: 'abc' } }, actAdmin).status === 400);
+check('номер темы: минус отклонён',
+  call('/settings/set', { settings: { notify_thread_acts: '-5' } }, actAdmin).status === 400);
+check('отклонённое не сохранилось',
+  call('/settings/get', {}, actAdmin).data.settings.notify_thread_orders === '123');
+call('/settings/set', { settings: { public_orders: 1, public_orders_per_hour: 50,
+  notify_thread_acts: '456' } }, actAdmin);
+// Шаблон выше нарочно сломали; возвращаем настоящий, иначе акт не соберётся.
+metaSet('setting_act_template_id', tpl.data.template_id);
+metaSet('setting_notify_chat_id', '-1001234567890');
+
+sent.length = 0;
+let thr = call('/public/order', { raw_text: siteText('260201-0001') });
+check('заявка принята', thr.ok === true, thr);
+check('заявка ушла в тему «ЗАЯВКИ»',
+  orderMsgs().length === 1 && orderMsgs()[0].message_thread_id === 123, tgMsgs());
+
+sent.length = 0;
+const thrOrder = call('/order/create', {
+  order_no: '260201-0002', student_name: 'Темов Тема Темович', student_phone: '+79990002002',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+check('заказ с актом записан', thrOrder.ok === true, thrOrder);
+const actMsgs = tgMsgs().filter((m) => /^<b>АКТ от /.test(m.text));
+check('акт ушёл в тему «АКТЫ»',
+  actMsgs.length === 1 && actMsgs[0].message_thread_id === 456, tgMsgs());
+
+sent.length = 0;
+call('/notify/hello', {}, actAdmin);
+call('/notify/hello', { chat_id: '-100555' }, actAdmin);
+call('/notify/test', {}, actAdmin);
+check('приветствие и проверка связи — без темы, в General',
+  tgMsgs().length >= 2 && tgMsgs().every((m) => !('message_thread_id' in m)), tgMsgs());
+
+call('/settings/set', { settings: { notify_thread_orders: '' } }, actAdmin);
+sent.length = 0;
+call('/public/order', { raw_text: siteText('260201-0003') });
+check('пустая тема — заявка в General, поля нет',
+  orderMsgs().length === 1 && !('message_thread_id' in orderMsgs()[0]), tgMsgs());
+
+// Тему удалили или закрыли: Telegram отказывает, а заявка всё равно должна
+// дойти — одним повтором без темы.
+call('/settings/set', { settings: { notify_thread_orders: '999' } }, actAdmin);
+__telegramSendReply = (m) => ('message_thread_id' in m)
+  ? { ok: false, error_code: 400, description: 'Bad Request: message thread not found' }
+  : { ok: true, result: {} };
+sent.length = 0;
+thr = call('/public/order', { raw_text: siteText('260201-0004') });
+check('заявка принята и при отказе темы', thr.ok === true, thr);
+check('ровно один повтор, и он без темы',
+  orderMsgs().length === 2 && orderMsgs()[0].message_thread_id === 999 &&
+  !('message_thread_id' in orderMsgs()[1]), tgMsgs());
+check('повтор помечен fallback',
+  JSON.stringify(tgSend('проба', '', 'orders')) === JSON.stringify({ ok: true, fallback: true }));
+__telegramSendReply = () => ({ ok: false, description: 'Forbidden' });
+sent.length = 0;
+const bothFail = tgSend('проба', '', 'orders');
+check('отказ и без темы — ошибка повтора, повтор один',
+  bothFail.ok === false && bothFail.fallback === true && bothFail.error === 'Forbidden' &&
+  tgMsgs().length === 2, [bothFail, tgMsgs()]);
+__telegramSendReply = null;
+call('/settings/set', { settings: { public_orders: 0, notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

@@ -2707,22 +2707,48 @@ function notifyChatId() {
   return String(getSettings().notify_chat_id || "").trim();
 }
 
+// Тема форума для рода сообщений: "orders" — заявки, "acts" — акты. Всё
+// остальное — General (пустая строка).
+function notifyThreadId(kind) {
+  var key = kind === "orders" ? "notify_thread_orders" : kind === "acts" ? "notify_thread_acts" : "";
+  return key ? String(getSettings()[key] || "").trim() : "";
+}
+
 // Возвращает, что произошло, — это нужно кнопке проверки связи. Обычные вызовы
 // результат игнорируют.
-function tgSend(text, chatIdOverride) {
+//
+// kind выбирает тему форума (см. notifyThreadId). Тема берётся только для чата
+// из настроек: у явно названного чата (приветствие, проверка связи) своих тем
+// мы не знаем. Если Telegram отказал при заданной теме — её удалили или
+// закрыли, — пробуем ещё раз без неё, в General: заявка не должна пропасть из-за
+// темы. Тогда в ответе fallback: true.
+function tgSend(text, chatIdOverride, kind) {
   var token = botToken();
   var chatId = String(chatIdOverride || notifyChatId());
   if (!token) return { ok: false, reason: "no-token" };
   if (!chatId) return { ok: false, reason: "no-chat" };
-  try {
+  var thread = chatIdOverride ? "" : notifyThreadId(kind);
+  function send(withThread) {
+    var msg = { chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
+    if (withThread) msg.message_thread_id = Number(thread);
     var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "post",
       contentType: "application/json",
-      payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true }),
+      payload: JSON.stringify(msg),
       muteHttpExceptions: true,
     });
-    var body = JSON.parse(res.getContentText() || "{}");
-    return body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
+    return JSON.parse(res.getContentText() || "{}");
+  }
+  try {
+    var body = send(!!thread);
+    var fallback = false;
+    if (!body.ok && thread) {
+      body = send(false);
+      fallback = true;
+    }
+    var out = body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
+    if (fallback) out.fallback = true;
+    return out;
   } catch (e) {
     return { ok: false, reason: "network", error: String(e) };
   }
@@ -3473,7 +3499,7 @@ function handlePublicOrder(payload) {
 
   // Сборка текста внутри try: сбой уведомления не должен ронять приём заявки.
   try {
-    tgSend(tgOrderMessage(parsed, fields, String(settings.site_url || "").trim()));
+    tgSend(tgOrderMessage(parsed, fields, String(settings.site_url || "").trim()), "", "orders");
   } catch (e) { /* заявка уже записана, уведомление не важнее её */ }
 
   return { order_id: order.order_id, order_no: parsed.order_no, repeat: false,
@@ -3968,6 +3994,20 @@ var SETTINGS_SPEC = {
     text: true,
     check: function (v) { return v === "" || /^-?\d{5,20}$/.test(v); },
     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит",
+  },
+  // Темы форума в группе склада: заявки и акты — каждый в свою ленту. Пусто —
+  // сообщение уходит в General, как до появления тем.
+  notify_thread_orders: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^\d{1,10}$/.test(v); },
+    hint: "номер темы «ЗАЯВКИ» (из /id внутри темы) или пусто — тогда в General",
+  },
+  notify_thread_acts: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^\d{1,10}$/.test(v); },
+    hint: "номер темы «АКТЫ» (из /id внутри темы) или пусто — тогда в General",
   },
   // Сайт проката. Пока адреса нет, кнопки на главной тоже нет: пустая кнопка,
   // ведущая в никуда, хуже её отсутствия. Только https: Telegram открывает
@@ -4661,7 +4701,7 @@ function buildAct(orderId, masterName) {
 
   // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
   tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
-    '<a href="' + tgEscape(url) + '">Открыть акт</a>');
+    '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
 
   return {
     url: url, document_id: copy.getId(), lines: lines.length,
