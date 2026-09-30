@@ -79,7 +79,8 @@ const QR = (() => {
   //      системное меню «Сохранить в Фото» вебвью Telegram не показывает.
   //      Остаётся системный лист «Поделиться» через navigator.share: оттуда
   //      «Сохранить в Фото» есть.
-  //   3. Если и листа нет — картинку приносит бот в чат склада.
+  //   3. Если и листа нет — картинку показываем во весь экран (showImage),
+  //      человек сохраняет её долгим нажатием. В чат картинки не уходят.
   //
   // Файл собираем СИНХРОННО из data-URL, а не через canvas.toBlob: toBlob
   // асинхронный, и к моменту вызова share жест пользователя уже «протух» —
@@ -95,9 +96,9 @@ const QR = (() => {
     }
   }
 
-  // Возвращает, каким путём ушло: download | share | cancelled | bot.
-  // Вызывающий решает, что сказать человеку: у листа «Поделиться» своя
-  // обратная связь, а у бота её нет.
+  // Возвращает, каким путём ушло: download | share | cancelled | image.
+  // Вызывающий решает, что сказать человеку: у листа «Поделиться» и у
+  // картинки во весь экран обратная связь своя.
   async function deliverCanvas(canvas, filename, title) {
     if (!TG.isAvailable()) {
       downloadCanvas(canvas, filename);
@@ -110,15 +111,13 @@ const QR = (() => {
         await navigator.share({ files: [file], title: title || filename });
         return "share";
       } catch (e) {
-        // Человек закрыл лист — это не ошибка и не повод дёргать бота.
+        // Человек закрыл лист — это не ошибка и не повод показывать картинку.
         if (e && e.name === "AbortError") return "cancelled";
       }
     }
 
-    await apiPost("/labels/send", {
-      files: [{ name: filename, png_base64: canvas.toDataURL("image/png").split(",")[1] }],
-    });
-    return "bot";
+    showImage(canvas, title || filename, "Удерживайте картинку, чтобы сохранить.");
+    return "image";
   }
 
   // Картинка во весь экран. Отдельно от showFullscreen, потому что показываем

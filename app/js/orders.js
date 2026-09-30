@@ -98,16 +98,21 @@ const OrdersScreen = (() => {
     return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
   }
 
-  // Один слушатель на список: заказов бывает под сотню, и вешать по два
-  // обработчика на каждый незачем. Нажатие на кнопку до карточки не доходит —
-  // открывать заказ при этом не надо. Звонок в обработчике не участвует: там
-  // ссылка tel:, и перехватывать её нельзя.
-  function bindQuickRow(list) {
+  // Один слушатель на список, и вешается он один раз — в init: элемент списка
+  // живёт всё время, а перерисовка идёт на каждое нажатие клавиши в поиске.
+  // Вешать здесь при каждом render значило копить слушатели, и одно нажатие
+  // на «Чат» открывало переписку столько раз, сколько было перерисовок.
+  // Нажатие на кнопку карточку не открывает. Звонок в обработчике не
+  // участвует: там ссылка tel:, и перехватывать её нельзя.
+  function bindList(list) {
     list.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act-url]");
-      if (act) { e.stopPropagation(); TG.openLink(act.dataset.actUrl); return; }
+      if (act) { TG.openLink(act.dataset.actUrl); return; }
       const chat = e.target.closest("[data-tg]");
-      if (chat) { e.stopPropagation(); TG.openTelegramLink("https://t.me/" + chat.dataset.tg); }
+      if (chat) { TG.openTelegramLink("https://t.me/" + chat.dataset.tg); return; }
+      if (e.target.closest("a, button, select, input")) return;
+      const card = e.target.closest("[data-order-id]");
+      if (card) Router.navigate("order", { orderId: card.dataset.orderId });
     });
   }
 
@@ -125,13 +130,6 @@ const OrdersScreen = (() => {
     // Свежие сверху: склад работает с тем, что оформлено недавно.
     visible.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
     list.innerHTML = visible.map(orderCardHtml).join("");
-    bindQuickRow(list);
-    list.querySelectorAll("[data-order-id]").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        if (e.target.closest("a, button, select, input")) return;
-        Router.navigate("order", { orderId: el.dataset.orderId });
-      });
-    });
   }
 
   async function loadList({ force = false } = {}) {
@@ -323,6 +321,57 @@ const OrdersScreen = (() => {
     }
   }
 
+  // После «Создать» ведём сразу в карточку нового заказа, а не перечитываем
+  // весь список: /orders/list — самый тяжёлый запрос экрана, и после него
+  // человек всё равно искал бы свой заказ глазами. Строку списка собираем из
+  // того, что отправили, и номера, который вернул бэкенд (/order/create отдаёт
+  // order_id, student_id, student_created, act_url), — в той же форме, что
+  // отдаёт /orders/list.
+  //
+  // Кладём только в свежий кэш: Cache.set обновляет возраст, и дописанный
+  // в старый список заказ выдал бы весь старый список за только что
+  // полученный. Старый кэш не трогаем — список перечитается при возврате,
+  // как и без этой правки.
+  function rememberCreated(payload, created) {
+    const cached = Cache.items(CACHE);
+    if (!cached || !Cache.isFresh(CACHE)) return;
+    const row = {
+      order_id: created.order_id,
+      order_no: String(payload.order_no || "").trim(),
+      request_code: String(payload.request_code || ""),
+      student_id: created.student_id,
+      student_name: String(payload.student_name || "").trim(),
+      student_phone: String(payload.student_phone || ""),
+      student_tg: String(payload.student_tg || ""),
+      is_adult: !(payload.is_adult === "FALSE" || payload.is_adult === false),
+      guardian_name: payload.guardian_name || "",
+      guardian_phone: String(payload.guardian_phone || ""),
+      project: payload.project || "",
+      issue_date: String(payload.issue_date || ""),
+      return_date: String(payload.return_date || ""),
+      extra_input: payload.extra_input || "",
+      amount: Number(payload.amount || 0),
+      currency: payload.currency || "",
+      status: "New",
+      issued_open: 0,
+      issued_total: 0,
+      created_at: new Date().toISOString(),
+      created_by_name: "",
+      items_text: (payload.items || []).map((line) => line.raw_name || "").join(", "),
+      archived_at: "",
+      act_url: String(created.act_url || ""),
+    };
+    Cache.set(CACHE, [row].concat(cached));
+  }
+
+  // Открываем карточку так же, как нажатие на строку списка (bindList).
+  function openCreated(payload, created) {
+    TG.hapticSuccess();
+    hideAdd();
+    rememberCreated(payload, created);
+    Router.navigate("order", { orderId: created.order_id });
+  }
+
   async function submitDraft() {
     if (!draft) return;
     // Подхватываем сопоставления, которые человек выбрал руками.
@@ -338,12 +387,7 @@ const OrdersScreen = (() => {
     try {
       const payload = Object.assign({}, draft.order, { items: draft.items });
       const created = await apiPost("/order/create", payload);
-      TG.hapticSuccess();
-      TG.showAlert("Заказ " + draft.order.order_no + " заведён" +
-        (created.student_created ? ". Арендатор добавлен впервые." : ""));
-      Cache.clear(CACHE);
-      hideAdd();
-      loadList({ force: true });
+      openCreated(payload, created);
     } catch (err) {
       TG.hapticError();
       showBoxError("orders-add-error", err.message);
@@ -360,7 +404,7 @@ const OrdersScreen = (() => {
     const btn = document.getElementById("orders-manual-submit");
     btn.disabled = true;
     try {
-      await apiPost("/order/create", {
+      const payload = {
         order_no: value("mo-no"),
         student_name: value("mo-name"),
         student_phone: value("mo-phone"),
@@ -372,11 +416,9 @@ const OrdersScreen = (() => {
         return_date: value("mo-return"),
         project: value("mo-project"),
         items: [],
-      });
-      TG.hapticSuccess();
-      Cache.clear(CACHE);
-      hideAdd();
-      loadList({ force: true });
+      };
+      const created = await apiPost("/order/create", payload);
+      openCreated(payload, created);
     } catch (err) {
       TG.hapticError();
       showBoxError("orders-add-error", err.message);
@@ -392,6 +434,7 @@ const OrdersScreen = (() => {
   }
 
   function init() {
+    bindList(document.getElementById("orders-list"));
     document.getElementById("orders-add-toggle").addEventListener("click", () => {
       const box = document.getElementById("orders-add");
       if (box.style.display === "block") hideAdd();

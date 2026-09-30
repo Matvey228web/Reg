@@ -124,18 +124,14 @@ function skeleton(count = 4) {
 
 // Отдать картинку человеку и сказать, чем кончилось. Сам выбор пути — в
 // QR.deliverCanvas: в браузере скачивание, внутри Telegram системный лист
-// «Поделиться», а если его нет — бот в чат склада.
-// Кнопку на время блокируем: за ботом идёт запрос в таблицу на 5–8 секунд,
-// и молчащая кнопка читается как зависшая.
+// «Поделиться», а если его нет — картинка во весь экран.
+// Кнопку на время блокируем, чтобы второй тап не открыл лист повторно.
 async function saveImageFor(canvas, filename, title, btn) {
   const before = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "Сохраняем…"; }
   try {
     const via = await QR.deliverCanvas(canvas, filename, title);
-    if (via === "bot") {
-      TG.hapticSuccess();
-      TG.showAlert("Скачать напрямую из Telegram нельзя — картинку прислал бот в чат склада.");
-    } else if (via === "share" || via === "download") {
+    if (via === "share" || via === "download" || via === "image") {
       TG.hapticSuccess();
     }
     return via;

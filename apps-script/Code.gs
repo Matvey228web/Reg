@@ -28,6 +28,10 @@ var SHEETS = {
   IMPORT_MAP: "ImportMap",
   IMPORT_RULES: "ImportRules",
   META: "Meta",
+  // Журнал служебных событий: ошибки сервера, отказы Telegram, несобравшиеся
+  // акты. Владелец решил, что такое в чат склада не идёт — там только заявки и
+  // акты, — а служебное лежит здесь и смотрится в самой таблице.
+  LOGS: "Logs",
 };
 
 // Значения по умолчанию для листа Categories. Сам справочник живёт в таблице
@@ -156,6 +160,9 @@ var SCHEMA = {
   Inventory: ["inventory_id", "kind", "item_id", "item_name", "expected_qty", "found_qty",
               "scope", "started_at", "finished_at", "staff_id", "staff_name"],
   Meta: ["key", "value"],
+  // Журнал служебных событий (см. logEvent). context — JSON с подробностями,
+  // обрезанный: ячейка не резиновая, а стек на пару экранов читать некому.
+  Logs: ["timestamp", "kind", "endpoint", "reason", "message", "context"],
 };
 
 // Колонки-идентификаторы храним как текст. Без этого Google Sheets приводит
@@ -180,6 +187,9 @@ var TEXT_COLUMNS = {
   // Журнал сверок: без этого номер 010101 записывался числом 10101 — ведущий
   // ноль съедала таблица, и поиск по номеру в журнале ничего не находил.
   Inventory: ["item_id"],
+  // Журнал — целиком текст: время строкой не сползает в дату с чужим поясом, а
+  // код ошибки Telegram «400» не становится числом.
+  Logs: ["timestamp", "kind", "endpoint", "reason", "message", "context"],
 };
 
 // Умолчания. Действующие значения живут в листе Meta и правятся в админке
@@ -781,6 +791,107 @@ function trimSheetRows(sheet, shouldRemove) {
   return doomed.length;
 }
 
+// ---------------------------------------------------------------------
+// Ночное обслуживание: копия таблицы и подрезка журнала Logs
+// ---------------------------------------------------------------------
+// Работает без разработчика: setupTriggers() один раз запускается руками из
+// редактора (как setupSheets), дальше dailyMaintenance идёт сам каждую ночь.
+// В чат ничего не пишет — неудачи только в лист Logs (logEvent).
+// Об успехе строку не пишем: копия видна в папке на Диске, а журнал, куда
+// каждую ночь ложится «всё хорошо», распухает и прячет настоящие отказы.
+
+var BACKUP_FOLDER_NAME = "Mifs Rent — копии";
+var BACKUP_KEEP = 14;          // сколько последних копий держать в папке
+var LOGS_KEEP_DAYS = 90;       // сколько дней держать строки журнала Logs
+var MAINTENANCE_HOUR = 3;      // час запуска, по часовому поясу скрипта
+
+// Точка входа для триггера. Каждый шаг в своём try: сломанная копия не должна
+// отменять подрезку журнала, и наоборот. Наружу не бросаем — иначе Google
+// шлёт владельцу письмо об ошибке триггера, а разбирать его некому.
+function dailyMaintenance() {
+  try { dailyBackup(); } catch (e) {
+    logEvent("backup", "dailyMaintenance", "exception", e && e.message ? e.message : String(e));
+  }
+  try { trimLogs(); } catch (e) {
+    logEvent("maintenance", "trimLogs", "exception", e && e.message ? e.message : String(e));
+  }
+}
+
+/**
+ * Копирует всю таблицу в папку «Mifs Rent — копии» под именем
+ * «Mifs Rent ГГГГ-ММ-ДД» и оставляет в папке только BACKUP_KEEP свежих копий,
+ * остальные — в корзину Диска (оттуда их ещё 30 дней можно достать).
+ * Неудачу пишет в Logs и не бросает.
+ */
+function dailyBackup() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    // Папка — как в archiveJournal: нашли по имени или создали.
+    var folders = DriveApp.getFoldersByName(BACKUP_FOLDER_NAME);
+    var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(BACKUP_FOLDER_NAME);
+    var name = "Mifs Rent " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    DriveApp.getFileById(ss.getId()).makeCopy(name, folder);
+
+    var copies = [];
+    var it = folder.getFiles();
+    while (it.hasNext()) {
+      var f = it.next();
+      if (!f.isTrashed()) copies.push(f);
+    }
+    copies.sort(function (a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime(); });
+    var trashed = 0;
+    copies.slice(BACKUP_KEEP).forEach(function (f) { f.setTrashed(true); trashed++; });
+
+    var message = "Копия «" + name + "» сохранена в папку «" + BACKUP_FOLDER_NAME +
+      "». Убрано старых копий: " + trashed + ".";
+    Logger.log(message);
+    return message;
+  } catch (e) {
+    var err = e && e.message ? e.message : String(e);
+    logEvent("backup", "dailyBackup", "failed", err, { folder: BACKUP_FOLDER_NAME });
+    Logger.log("Копия таблицы не сделана: " + err);
+    return "Копия таблицы не сделана: " + err;
+  }
+}
+
+// Удаляет из Logs строки старше LOGS_KEEP_DAYS дней. Строку с нечитаемой
+// датой оставляем: лучше лишняя строка, чем потерянная.
+function trimLogs() {
+  var cutoff = Date.now() - LOGS_KEEP_DAYS * 24 * 60 * 60 * 1000;
+  var removed = trimSheetRows(getSheet(SHEETS.LOGS), function (row) {
+    var t = new Date(row.timestamp).getTime();
+    return !isNaN(t) && t < cutoff;
+  });
+  Logger.log("Журнал Logs подрезан: удалено строк " + removed + ".");
+  return removed;
+}
+
+/**
+ * Ставит ночной триггер обслуживания. Запускать руками из редактора, как
+ * setupSheets; повторный запуск безопасен. Снимает прежние триггеры
+ * dailyMaintenance и убранного dailyOverdueDigest, затем ставит один новый.
+ */
+function setupTriggers() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var h = t.getHandlerFunction();
+    if (h === "dailyMaintenance" || h === "dailyOverdueDigest") {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  // atHour — по часовому поясу скрипта; Google сам выбирает минуту в пределах часа.
+  ScriptApp.newTrigger("dailyMaintenance").timeBased().everyDays(1).atHour(MAINTENANCE_HOUR).create();
+
+  var message = "Триггеры: снято старых " + removed + ", поставлен ежедневный dailyMaintenance " +
+    "около " + MAINTENANCE_HOUR + ":00 (" + Session.getScriptTimeZone() + "): копия таблицы в папку «" +
+    BACKUP_FOLDER_NAME + "» (хранится " + BACKUP_KEEP + ") и подрезка Logs старше " +
+    LOGS_KEEP_DAYS + " дней.";
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
 function importTrim(v) {
   return v === null || v === undefined ? "" : String(v).trim();
 }
@@ -1013,7 +1124,6 @@ function doPost(e) {
       case "/notify/test": data = handleNotifyTest(payload, token); break;
       case "/labels/send": data = handleLabelsSend(payload, token); break;
       case "/model/move": data = handleModelMove(payload, token); break;
-      case "/notify/overdue": data = handleNotifyOverdue(payload, token); break;
       case "/inventory/save": data = handleInventorySave(payload, token); break;
       case "/inventory/list": data = handleInventoryList(payload, token); break;
       case "/settings/get": data = handleSettingsGet(payload, token); break;
@@ -1029,6 +1139,10 @@ function doPost(e) {
     if (err && err.isApiError) {
       return respond(envelope(false, null, err.message, err.status));
     }
+    // Непредвиденная ошибка — в журнал. Только имя ручки, текст и стек: ни
+    // токена, ни тела запроса (там телефоны и ФИО).
+    logEvent("error", endpoint, "exception", err && err.message ? err.message : String(err),
+      err && err.stack ? { stack: String(err.stack) } : "");
     return respond(envelope(false, null, "Внутренняя ошибка сервера: " + (err && err.message ? err.message : err), 500));
   }
 }
@@ -1555,6 +1669,30 @@ function handleItemCreate(payload, token) {
 
 function handleTransactionCheckout(payload, token) {
   var staffRow = checkAuth(token);
+  var res = checkoutUnderLock(payload, staffRow);
+  // Сверх заявки — акт заказа уже не совпадает с тем, что на руках.
+  // Пересобираем после снятия замка (документ — это секунды), и неудача
+  // выдачу не отменяет: предмет уже записан как выданный.
+  if (res.order_line === "off-order" && res.order_id) {
+    rebuildActQuietly(res.order_id, staffRow.full_name);
+  }
+  delete res.order_id;
+  return res;
+}
+
+// Пересборка акта, которая никогда не бросает: причина неудачи — в Logs, как у
+// autoAct. Акта у заказа ещё нет (шаблона не было) — нечего и пересобирать.
+function rebuildActQuietly(orderId, masterName) {
+  try {
+    return rebuildAct(orderId, masterName);
+  } catch (err) {
+    logEvent("act", "rebuild", "rebuild-failed", err && err.message ? err.message : String(err),
+      { order_id: orderId });
+    return null;
+  }
+}
+
+function checkoutUnderLock(payload, staffRow) {
   var itemId = String(payload.item_id || "").trim();
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
@@ -1583,35 +1721,45 @@ function handleTransactionCheckout(payload, token) {
 
     // Выдача в счёт заказа: срок возврата берём из заказа, а сама выдача
     // списывается с подходящей строки состава.
-    var orderId = "", orderLine = "", expectedReturn = payload.expected_return_at || "";
+    // parts — на какие строки состава легла выдача: одна запись журнала на
+    // каждую. Вне заказа — одна запись без строки.
+    var orderId = "", parts = [{ line: "", qty: takeQty }];
+    var expectedReturn = payload.expected_return_at || "";
     if (payload.order_id) {
       var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", String(payload.order_id));
       if (!order) throw apiError(404, "Заказ не найден");
       if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
       orderId = Number(order.order_id);
       if (!expectedReturn) expectedReturn = String(order.return_date || "");
-      orderLine = claimOrderLine(orderId, item);
+      parts = claimOrderLine(orderId, item, takeQty);
       updateRow(getSheet(SHEETS.ORDERS), order.__row, { status: "Issued" });
     }
 
-    var txId = nextId("transaction_id", maxIdIn(getSheet(SHEETS.TRANSACTIONS), "transaction_id"));
-    appendRow(getSheet(SHEETS.TRANSACTIONS), {
-      transaction_id: txId,
-      item_id: itemId,
-      client_id: payload.client_id,
-      order_id: orderId,
-      order_line: orderLine,
-      staff_out: staffRow.staff_id,
-      staff_out_name: staffRow.full_name,
-      staff_in: "",
-      staff_in_name: "",
-      checked_out_at: new Date().toISOString(),
-      expected_return_at: expectedReturn,
-      checked_in_at: "",
-      status: "Open",
-      notes: payload.notes || "",
-      qty: takeQty,
-      qty_in: 0,
+    var txSheet = getSheet(SHEETS.TRANSACTIONS);
+    var txId = "", orderLine = "", now = new Date().toISOString();
+    parts.forEach(function (part) {
+      var id = nextId("transaction_id", maxIdIn(txSheet, "transaction_id"));
+      if (!txId) txId = id;
+      // Хоть часть легла вне состава — акт уже не совпадает с выданным.
+      if (!orderLine || part.line === "off-order") orderLine = part.line;
+      appendRow(txSheet, {
+        transaction_id: id,
+        item_id: itemId,
+        client_id: payload.client_id,
+        order_id: orderId,
+        order_line: part.line,
+        staff_out: staffRow.staff_id,
+        staff_out_name: staffRow.full_name,
+        staff_in: "",
+        staff_in_name: "",
+        checked_out_at: now,
+        expected_return_at: expectedReturn,
+        checked_in_at: "",
+        status: "Open",
+        notes: payload.notes || "",
+        qty: part.qty,
+        qty_in: 0,
+      });
     });
     if (byQty) {
       // Пока на складе что-то осталось, позиция остаётся доступной: иначе
@@ -1624,7 +1772,7 @@ function handleTransactionCheckout(payload, token) {
     } else {
       updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
     }
-    return { transaction_id: txId, order_line: orderLine, qty: takeQty };
+    return { transaction_id: txId, order_line: orderLine, qty: takeQty, order_id: orderId };
   } finally {
     lock.releaseLock();
   }
@@ -1636,13 +1784,20 @@ function handleTransactionCheckout(payload, token) {
 // потерянной техники.
 function settleOrderOnCheckin(openTx, txSheet) {
   if (!openTx.order_id) return;
-  releaseOrderLine(openTx.order_id, openTx.order_line);
+  releaseOrderLine(openTx.order_id, openTx.order_line, 1);
+  settleOrderStatus(openTx.order_id, txSheet);
+}
+
+// Заказ закрыт, когда по нему на руках ничего нет. Отдельно от строки
+// состава: приём количеством освобождает строки по каждой записи журнала,
+// а статус заказа считает один раз.
+function settleOrderStatus(orderId, txSheet) {
   var orderSheet = getSheet(SHEETS.ORDERS);
-  var order = findRowByValue(orderSheet, "order_id", String(openTx.order_id));
+  var order = findRowByValue(orderSheet, "order_id", String(orderId));
   if (!order || order.status === "Cancelled") return;
   var stillOut = 0;
   readRows(txSheet).forEach(function (t) {
-    if (String(t.order_id || "") === String(openTx.order_id) && t.status === "Open") stillOut += 1;
+    if (String(t.order_id || "") === String(orderId) && t.status === "Open") stillOut += 1;
   });
   updateRow(orderSheet, order.__row, stillOut
     ? { status: "Issued", closed_at: "" }
@@ -1666,39 +1821,45 @@ function reportDefect(itemId, staffRow, transactionId, payload) {
     resolved_at: "",
     resolution_notes: "",
   });
-  // В чат склада — только то, из-за чего техника выбывает из оборота. Сообщать
-  // о каждой выдаче значит завалить чат и приучить его не читать.
-  var item = findRowByValue(getSheet(SHEETS.EQUIPMENT), "item_id", itemId);
-  tgNotify("Дефект: " + ((item && item.name) || itemId) + " (" + itemId + ")\n" +
-    (payload.defect_description || "без описания") + "\n" +
-    "Заявил: " + staffRow.full_name);
   return defectId;
 }
 
-// Списывает экземпляр с подходящей строки состава заказа и возвращает её номер.
-// Если строки нет или она уже закрыта — «off-order», и выдача всё равно
-// проходит: в заказе есть свободное поле, которым технику дописывают руками
-// («+ 4 ковра гойда»), так что запретить выдачу вне состава значило бы
-// запретить реальную работу склада.
-function claimOrderLine(orderId, item) {
-  var sheet = getSheet(SHEETS.ORDER_ITEMS);
-  var rows = readRows(sheet);
+// Списывает выданное количество со строк состава заказа и возвращает, куда оно
+// легло: [{ line: номер строки, qty }]. Поштучная выдача — это qty = 1 и одна
+// часть. Количеством (10 мешков) — сколько выдали, столько и в строку: иначе
+// «выдано N из M» врёт. Больше, чем осталось по строке, в неё не пишем —
+// заполняем её, остаток идёт на следующую строку той же модели, а что не
+// влезло никуда — «off-order». Каждая часть станет своей записью журнала,
+// поэтому приём освобождает строку ровно на то, что на неё легло.
+// Вне состава выдача всё равно проходит: в заказе есть свободное поле, которым
+// технику дописывают руками («+ 4 ковра гойда»), так что запретить выдачу вне
+// состава значило бы запретить реальную работу склада.
+function claimOrderLine(orderId, item, qty) {
+  var want = Math.max(1, Math.floor(Number(qty || 1)));
+  var parts = [];
   var itemModel = item.model_code === "" ? "" : pad2(Number(item.model_code));
-  if (!itemModel) return "off-order";
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (String(r.order_id) !== String(orderId)) continue;
-    if (!r.model_code || String(r.category) !== String(item.category)) continue;
-    if (pad2(Number(r.model_code)) !== itemModel) continue;
-    var issued = Number(r.issued_qty || 0);
-    if (issued >= Number(r.qty || 0)) continue;
-    updateRow(sheet, r.__row, { issued_qty: issued + 1 });
-    return String(r.line_no);
+  if (itemModel) {
+    var sheet = getSheet(SHEETS.ORDER_ITEMS);
+    var rows = readRows(sheet);
+    for (var i = 0; i < rows.length && want > 0; i++) {
+      var r = rows[i];
+      if (String(r.order_id) !== String(orderId)) continue;
+      if (!r.model_code || String(r.category) !== String(item.category)) continue;
+      if (pad2(Number(r.model_code)) !== itemModel) continue;
+      var issued = Number(r.issued_qty || 0);
+      var take = Math.min(want, Number(r.qty || 0) - issued);
+      if (take <= 0) continue;
+      updateRow(sheet, r.__row, { issued_qty: issued + take });
+      parts.push({ line: String(r.line_no), qty: take });
+      want -= take;
+    }
   }
-  return "off-order";
+  if (want > 0) parts.push({ line: "off-order", qty: want });
+  return parts;
 }
 
-function releaseOrderLine(orderId, lineNo) {
+// Обратное claimOrderLine: строка освобождается на столько, сколько вернули.
+function releaseOrderLine(orderId, lineNo, qty) {
   if (!orderId || !lineNo || String(lineNo) === "off-order") return;
   var sheet = getSheet(SHEETS.ORDER_ITEMS);
   var rows = readRows(sheet);
@@ -1706,7 +1867,8 @@ function releaseOrderLine(orderId, lineNo) {
     if (String(rows[i].order_id) !== String(orderId)) continue;
     if (String(rows[i].line_no) !== String(lineNo)) continue;
     var issued = Number(rows[i].issued_qty || 0);
-    updateRow(sheet, rows[i].__row, { issued_qty: issued > 0 ? issued - 1 : 0 });
+    var back = Math.max(1, Math.floor(Number(qty || 1)));
+    updateRow(sheet, rows[i].__row, { issued_qty: Math.max(0, issued - back) });
     return;
   }
 }
@@ -1741,12 +1903,18 @@ function handleTransactionCheckin(payload, token) {
       if (!back || back < 1) throw apiError(400, "Укажите количество — целое число от одного");
       if (back > onHands) throw apiError(409, "На руках " + onHands + " — принять больше нельзя");
 
-      var left = back;
+      var left = back, touchedOrders = {};
       openList.forEach(function (t) {
         if (left <= 0) return;
         var remains = Number(t.qty || 1) - Number(t.qty_in || 0);
         var take = Math.min(remains, left);
         left -= take;
+        // Строка состава освобождается на принятое этой записью — ровно то,
+        // что при выдаче на неё легло.
+        if (t.order_id) {
+          releaseOrderLine(t.order_id, t.order_line, take);
+          touchedOrders[String(t.order_id)] = true;
+        }
         var filled = Number(t.qty_in || 0) + take;
         updateRow(txSheet, t.__row, filled >= Number(t.qty || 1)
           ? { qty_in: filled, status: "Closed", checked_in_at: new Date().toISOString(),
@@ -1763,7 +1931,7 @@ function handleTransactionCheckin(payload, token) {
         if (defectBlocksRental(payload.defect_severity || "Minor")) statusQty = "In Repair";
       }
       updateRow(eqSheet, item.__row, { qty_out: newOut, status: statusQty });
-      settleOrderOnCheckin(openTx, txSheet);
+      Object.keys(touchedOrders).forEach(function (id) { settleOrderStatus(id, txSheet); });
       return { transaction_id: openTx.transaction_id, defect_id: defectIdQty, qty: back, qty_out: newOut };
     }
 
@@ -1890,6 +2058,9 @@ function handleEquipmentList(payload, token) {
       serial_number: r.serial_number, inventory_number: r.inventory_number,
       model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
       qty: total, qty_out: out, qty_free: total - out,
+      // Карточка вещи рисуется из этого списка без отдельного lookup —
+      // без заметок о состоянии она потеряла бы строку «Состояние».
+      condition_notes: String(r.condition_notes || ""),
     };
   });
 }
@@ -2219,7 +2390,8 @@ function handleOrderCreate(payload, token) {
 //
 // Отдельно от записи заказа и после снятия замка: копия документа делается
 // секунды, и держать на это время замок — значит подвесить всех остальных.
-// Неудача акта заказ не отменяет: заказ уже записан, а про акт скажем в чат.
+// Неудача акта заказ не отменяет: заказ уже записан, а причина уходит в журнал
+// Logs — в чат склада служебное не пишем.
 function autoAct(orderId, masterName) {
   var settings = getSettings();
   if (!String(settings.act_template_id || "")) return "";
@@ -2227,9 +2399,8 @@ function autoAct(orderId, masterName) {
     var res = buildAct(orderId, masterName || "");
     return res.url;
   } catch (err) {
-    tgSend("Акт по заказу №" + orderId + " не собрался: " +
-      (err && err.message ? err.message : err) +
-      "\nЗаказ записан, акт можно собрать после исправления настроек.");
+    logEvent("act", "autoAct", "build-failed", err && err.message ? err.message : String(err),
+      { order_id: orderId });
     return "";
   }
 }
@@ -2708,113 +2879,171 @@ function notifyChatId() {
   return String(getSettings().notify_chat_id || "").trim();
 }
 
+// Тема форума для рода сообщений: "orders" — заявки, "acts" — акты. Всё
+// остальное — General (пустая строка).
+function notifyThreadId(kind) {
+  var key = kind === "orders" ? "notify_thread_orders" : kind === "acts" ? "notify_thread_acts" : "";
+  return key ? String(getSettings()[key] || "").trim() : "";
+}
+
 // Возвращает, что произошло, — это нужно кнопке проверки связи. Обычные вызовы
 // результат игнорируют.
-function tgSend(text, chatIdOverride) {
+//
+// kind выбирает тему форума (см. notifyThreadId). Тема берётся только для чата
+// из настроек: у явно названного чата (приветствие, проверка связи) своих тем
+// мы не знаем. Если Telegram отказал при заданной теме — её удалили или
+// закрыли, — пробуем ещё раз без неё, в General: заявка не должна пропасть из-за
+// темы. Тогда в ответе fallback: true.
+//
+// Неудача и откат в General пишутся в журнал Logs (tgSendLog), не в чат.
+function tgSend(text, chatIdOverride, kind) {
+  return tgSendLog(tgSendRaw(text, chatIdOverride, kind), chatIdOverride, kind);
+}
+
+// Кнопки приветствия и проверки связи (явный чат или род не задан) про «нет
+// токена» и «не выбран чат» и так отвечают человеку через notifyRefusal —
+// журналу там сказать нечего. Остальное — отказ Telegram, сеть, откат из темы в
+// General — пишется всегда: иначе заявка, не дошедшая до чата, пропала бы молча.
+function tgSendLog(res, chatIdOverride, kind) {
+  var fromButton = !!chatIdOverride || !kind;
+  var setupGap = res.reason === "no-token" || res.reason === "no-chat";
+  if (!res.ok && !(setupGap && fromButton)) {
+    logEvent("telegram", "sendMessage", res.reason, res.error || "",
+      { kind: kind || "", fallback: !!res.fallback });
+  } else if (res.fallback) {
+    logEvent("telegram", "sendMessage", "fallback",
+      "Тема форума не приняла сообщение, ушло в General. Проверьте id темы в настройках.",
+      { kind: kind || "", thread: notifyThreadId(kind) });
+  }
+  return res;
+}
+
+function tgSendRaw(text, chatIdOverride, kind) {
   var token = botToken();
   var chatId = String(chatIdOverride || notifyChatId());
   if (!token) return { ok: false, reason: "no-token" };
   if (!chatId) return { ok: false, reason: "no-chat" };
-  try {
+  var thread = chatIdOverride ? "" : notifyThreadId(kind);
+  function send(withThread) {
+    var msg = { chat_id: chatId, text: text, parse_mode: "HTML", disable_web_page_preview: true };
+    if (withThread) msg.message_thread_id = Number(thread);
     var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendMessage", {
       method: "post",
       contentType: "application/json",
-      payload: JSON.stringify({ chat_id: chatId, text: text, disable_web_page_preview: true }),
+      payload: JSON.stringify(msg),
       muteHttpExceptions: true,
     });
-    var body = JSON.parse(res.getContentText() || "{}");
-    return body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
-  } catch (e) {
-    return { ok: false, reason: "network", error: String(e) };
+    return JSON.parse(res.getContentText() || "{}");
   }
-}
-
-// Отправка файла. Отдельно от tgSend, потому что sendDocument — это multipart,
-// а не JSON: тело собирает сам UrlFetchApp из объекта с блобом.
-function tgSendDocument(blob, caption, chatIdOverride) {
-  var token = botToken();
-  var chatId = String(chatIdOverride || notifyChatId());
-  if (!token) return { ok: false, reason: "no-token" };
-  if (!chatId) return { ok: false, reason: "no-chat" };
   try {
-    var res = UrlFetchApp.fetch("https://api.telegram.org/bot" + token + "/sendDocument", {
-      method: "post",
-      payload: { chat_id: chatId, caption: String(caption || ""), document: blob },
-      muteHttpExceptions: true,
-    });
-    var body = JSON.parse(res.getContentText() || "{}");
-    return body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
+    var body = send(!!thread);
+    var fallback = false;
+    if (!body.ok && thread) {
+      body = send(false);
+      fallback = true;
+    }
+    var out = body.ok ? { ok: true } : { ok: false, reason: "telegram", error: body.description || "" };
+    if (fallback) out.fallback = true;
+    return out;
   } catch (e) {
     return { ok: false, reason: "network", error: String(e) };
   }
 }
 
-// Этикетки из мини-приложения. Сохранить файл прямо на устройство из вебвью
-// Telegram нельзя — атрибут download там не работает, — поэтому пачку забирает
-// бот и кладёт в чат склада одним архивом. Картинки рисует телефон, сюда
-// приходят готовые PNG в base64.
-var LABELS_MAX_FILES = 30;
-var LABELS_MAX_BYTES = 8 * 1024 * 1024;   // запас: sendDocument держит 50 МБ
-
+// Этикетки в чат больше не отправляем: владелец решил, что картинки в Telegram
+// не идут ни в каком виде. Ручка остаётся ради закэшированных версий
+// приложения — вместо молчаливого «неизвестный эндпоинт» они покажут, куда
+// теперь нажимать.
 function handleLabelsSend(payload, token) {
   checkAuth(token);
-  var files = payload && payload.files;
-  if (!files || !files.length) throw apiError(400, "Нечего отправлять: список файлов пуст.");
-  if (files.length > LABELS_MAX_FILES) {
-    throw apiError(400, "Сразу больше " + LABELS_MAX_FILES + " этикеток не отправляем. " +
-      "Сузьте фильтры и повторите.");
-  }
-
-  var blobs = [];
-  var total = 0;
-  for (var i = 0; i < files.length; i++) {
-    var name = String(files[i].name || ("label-" + (i + 1) + ".png"));
-    var data = String(files[i].png_base64 || "");
-    if (!data) throw apiError(400, "Файл «" + name + "» пришёл пустым.");
-    var bytes;
-    try {
-      bytes = Utilities.base64Decode(data);
-    } catch (e) {
-      throw apiError(400, "Файл «" + name + "» повреждён при передаче.");
-    }
-    total += bytes.length;
-    if (total > LABELS_MAX_BYTES) {
-      throw apiError(400, "Слишком много данных за раз. Сузьте фильтры и повторите.");
-    }
-    blobs.push(Utilities.newBlob(bytes, "image/png", name));
-  }
-
-  // Одна этикетка уходит картинкой, несколько — архивом: тридцать отдельных
-  // сообщений подряд в чате склада никому не нужны.
-  var one = blobs.length === 1;
-  var payloadBlob = one
-    ? blobs[0]
-    : Utilities.zip(blobs, "mifs-labels-" + new Date().toISOString().substring(0, 10) + ".zip");
-  var caption = one
-    ? "Этикетка: " + blobs[0].getName()
-    : "Этикетки, " + blobs.length + " шт.";
-
-  var res = tgSendDocument(payloadBlob, caption);
-  if (res.ok) {
-    return { ok: true, count: blobs.length,
-             message: one ? "Этикетка отправлена в чат склада."
-                          : blobs.length + " этикеток отправлены в чат склада одним архивом." };
-  }
-  if (res.reason === "no-token") {
-    throw apiError(400, "Токен бота не задан. Apps Script → Project Settings → " +
-      "Script Properties → добавьте свойство TELEGRAM_BOT_TOKEN со значением токена от BotFather.");
-  }
-  if (res.reason === "no-chat") {
-    throw apiError(400, "Не указан чат: впишите числовой id чата склада в настройках " +
-      "и сохраните.");
-  }
-  throw apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
-    ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
+  throw apiError(410, "Отправка этикеток в чат отключена. В Telegram сохраняйте по одной " +
+    "(кнопка «Сохранить»), пачкой — кнопкой «Печать» или откройте приложение в браузере.");
 }
 
-// Тихая отправка: всё, что зовётся по ходу работы склада, идёт через неё.
-function tgNotify(text) {
-  try { tgSend(text); } catch (e) { /* уведомление не важнее самой операции */ }
+// Экранирование для parse_mode "HTML": всё, что пришло из таблицы, формы или
+// от сотрудника, идёт в сообщение только через неё. Скопировано с escapeHtml
+// из app/js/util.js.
+function tgEscape(str) {
+  return String(str === undefined || str === null ? "" : str).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
+// Блок «Покупатель» в сообщении о новой заявке. Отдельно, чтобы владелец мог
+// дописать поля в одном месте. Берёт только то, что есть в fields, пустое
+// пропускает. Взрослый — ФИО, телефон, ник; несовершеннолетний — сначала
+// представитель, затем сам арендатор.
+function tgOrderBuyerBlock(fields) {
+  var adult = String(fields.is_adult).toUpperCase() !== "FALSE";
+  var lines = [];
+  function add(label, value) {
+    value = String(value || "").trim();
+    if (value) lines.push((label ? label + ": " : "") + tgEscape(value));
+  }
+  if (adult) {
+    add("", fields.student_name);
+    add("Телефон", fields.student_phone);
+    add("Telegram", fields.student_tg);
+  } else {
+    add("Представитель", fields.guardian_name);
+    add("Телефон представителя", fields.guardian_phone);
+    add("Несовершеннолетний", fields.student_name);
+    add("Телефон", fields.student_phone);
+    add("Telegram", fields.student_tg);
+  }
+  return lines.join("\n");
+}
+
+// Предел Telegram на одно сообщение.
+var TG_MAX_LEN = 4096;
+
+// Текст сообщения о новой заявке с сайта — раскладка прежних сообщений Tilda.
+// Не влезает в предел — режем список позиций, а не итог, покупателя и ссылку.
+function tgOrderMessage(parsed, fields, siteUrl) {
+  var items = parsed.items || [];
+  var total = 0;
+  var itemLines = items.map(function (it, i) {
+    var sum = Math.round(Number(it.total) || 0);
+    var unit = Number(it.price) || 0;
+    total += sum;
+    return (i + 1) + ". " + tgEscape(it.raw_name) + ": " + sum + " (" +
+      (Number(it.qty) || 0) + " x " + (unit ? unit : "0.00") + ")";
+  });
+
+  var tail = ["<b>Сумма: " + total + " RUB</b>", ""];
+  var buyer = tgOrderBuyerBlock(fields);
+  tail.push("<b>Покупатель</b>");
+  if (buyer) tail.push(buyer);
+  tail.push("");
+
+  function when(d, t) { return d ? d + (t ? " " + t : "") : ""; }
+  var from = when(fields.issue_date, fields.issue_time);
+  var to = when(fields.return_date, fields.return_time);
+  if (from || to) tail.push("<b>Даты:</b> " + tgEscape(from || "—") + " — " + tgEscape(to || "—"));
+  if (String(fields.project || "").trim()) tail.push("Проект: " + tgEscape(String(fields.project).trim()));
+  var extra = String(fields.extra_input || "").trim();
+  if (extra) tail.push("Дополнительно: " + tgEscape(extra.length > 500 ? extra.substring(0, 500) + "…" : extra));
+  if (siteUrl) {
+    tail.push("");
+    tail.push('<a href="' + tgEscape(siteUrl) + '">Открыть заказ на сайте</a>');
+  }
+
+  var head = "<b>Заказ №" + tgEscape(parsed.order_no) + "</b>";
+  var tailText = tail.join("\n");
+  var shown = itemLines.slice();
+  function build() {
+    var body = shown.slice();
+    if (shown.length < itemLines.length) {
+      body.push("… и ещё " + (itemLines.length - shown.length) + " поз.");
+    }
+    return [head].concat(body).join("\n") + "\n" + tailText;
+  }
+  var text = build();
+  while (text.length > TG_MAX_LEN && shown.length) {
+    shown.pop();
+    text = build();
+  }
+  return text;
 }
 
 // Откуда берётся id чата. Раньше инструкция звала открыть в браузере адрес
@@ -3015,15 +3244,14 @@ function helloText(chatId) {
     "",
     "Буду писать сюда:",
     "• новые заявки с сайта",
-    "• просрочки по заказам",
-    "• дефекты, отмеченные на складе",
     "• ссылки на акты сдачи-приёмки",
     "",
   ];
+  // Сообщения бота — HTML, поэтому литералы и значения экранируются.
   // Обещать кнопку, которой нет, хуже, чем промолчать: ссылка печатается
   // только когда её задали в настройках.
-  if (link) out.push("Склад: " + link);
-  out.push("Этот чат: " + chatId);
+  if (link) out.push("Склад: " + tgEscape(link));
+  out.push("Этот чат: " + tgEscape(chatId));
   return out.join("\n");
 }
 
@@ -3059,33 +3287,6 @@ function notifyRefusal(res) {
     ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
 }
 
-// Сводка просрочек. Вызывается кнопкой в админке и — если повесить временной
-// триггер на dailyOverdueDigest — раз в сутки сама.
-function overdueDigest() {
-  var today = new Date().toISOString().substring(0, 10);
-  var txRows = readRows(getSheet(SHEETS.TRANSACTIONS));
-  var counts = orderCounts(txRows);
-  var lines = [];
-  readRows(getSheet(SHEETS.ORDERS)).forEach(function (o) {
-    if (orderStatus(o, counts[String(o.order_id)]) !== "Issued") return;
-    var due = String(o.return_date || "").substring(0, 10);
-    if (!due || due >= today) return;
-    var open = (counts[String(o.order_id)] || {}).open || 0;
-    lines.push("№" + o.order_no + " · " + (o.student_name || "—") +
-      " · вернуть до " + due + " · на руках " + open);
-  });
-  if (!lines.length) return { overdue: 0, message: "Просрочек нет." };
-  var text = "Просроченные заказы — " + lines.length + ":\n" + lines.join("\n");
-  var res = tgSend(text);
-  return { overdue: lines.length, sent: res.ok, message: text };
-}
-
-// Отдельная функция для временного триггера: в редакторе Apps Script у
-// триггера можно выбрать только функцию без аргументов.
-function dailyOverdueDigest() {
-  overdueDigest();
-}
-
 // ---------------------------------------------------------------------
 // Инвентаризация: журнал сверок склада
 // ---------------------------------------------------------------------
@@ -3096,11 +3297,6 @@ function dailyOverdueDigest() {
 //
 // Пишем только итог и расхождения. Строка «ожидали найти и нашли» ничего не
 // сообщает, а на 628 позициях каждая сверка добавляла бы столько же строк.
-
-function handleNotifyOverdue(payload, token) {
-  requireAdmin(token);
-  return overdueDigest();
-}
 
 function handleInventorySave(payload, token) {
   var staffRow = checkAuth(token);
@@ -3349,7 +3545,7 @@ function handlePublicCatalog(payload) {
 // Заявка прямо с сайта. Это единственная ручка, в которую пишут без входа,
 // поэтому она устроена скучно и узко:
 //
-// — выключена, пока администратор не включит (настройка public_orders);
+// — включена по умолчанию, выключается настройкой public_orders = 0;
 // — берёт ровно тот текст, который сайт и так показывает студенту, и разбирает
 //   его тем же разбором, что и вставленное складменом сообщение: новых путей
 //   для данных не появляется;
@@ -3392,6 +3588,20 @@ function handlePublicOrder(payload) {
 
   publicOrderQuotaTake(Number(settings.public_orders_per_hour));
 
+  // Сопоставление с каталогом — как в handleOrderParse. Без него строки
+  // ложатся без модели, и любой скан по заявке с сайта уходит «вне заказа»:
+  // звёздочка в акте на каждой вещи и «Выдано N из M», который не растёт.
+  // Не нашлось — строка остаётся как есть, её выдают количеством.
+  var modelRows = readRows(getSheet(SHEETS.MODELS));
+  var items = parsed.items.map(function (line) {
+    var match = matchOrderLine(line.raw_name, modelRows);
+    return {
+      line_no: line.line_no, raw_name: line.raw_name, qty: line.qty,
+      price: line.price, total: line.total,
+      model_code: match.model_code, category: match.category,
+    };
+  });
+
   var order = writeOrder({
     order_no: parsed.order_no,
     request_code: parsed.order_no,
@@ -3407,27 +3617,21 @@ function handlePublicOrder(payload) {
     extra_input: fields.extra_input,
     source_url: String(payload.source_url || ""),
     raw_text: text,
-    items: parsed.items,
+    items: items,
   }, "", "сайт");
 
-  // В чат — короткое извещение, а не вся заявка: подробности уже в таблице, а
-  // ФИО и телефоны детей незачем множить по чатам.
+  // В чат — сообщение в том виде, в каком владелец раньше получал заявки из
+  // Tilda: состав, сумма, покупатель, даты. Владелец решил, что данные
+  // покупателя в чате нужны (раньше ФИО и телефоны детей не множили по чатам).
+  // Тело собирает tgOrderMessage, блок покупателя — tgOrderBuyerBlock.
   //
-  // Ссылка на приложение — из настройки: короткого имени мини-приложения код
-  // знать не может, его заводят в BotFather. Не задана — говорим словами, куда
-  // смотреть, а не даём ссылку в никуда.
+  // Ссылка — из настройки site_url; не задана — строки со ссылкой нет вовсе.
   var actUrl = autoAct(order.order_id, "");
 
-  var appLink = String(settings.app_link || "").trim();
-  tgSend("Заявка с сайта №" + parsed.order_no + "\n" +
-    fields.student_name + ", " + fields.student_phone + "\n" +
-    "Позиций: " + parsed.items.length +
-    (fields.issue_date ? "\nНа " + fields.issue_date +
-      (fields.issue_time ? " " + fields.issue_time : "") +
-      (fields.return_date && fields.return_date !== fields.issue_date
-        ? " — " + fields.return_date + (fields.return_time ? " " + fields.return_time : "")
-        : "") : "") +
-    (appLink ? "\n" + appLink : "\nОткройте «Заказы» в приложении."));
+  // Сборка текста внутри try: сбой уведомления не должен ронять приём заявки.
+  try {
+    tgSend(tgOrderMessage(parsed, fields, String(settings.site_url || "").trim()), "", "orders");
+  } catch (e) { /* заявка уже записана, уведомление не важнее её */ }
 
   return { order_id: order.order_id, order_no: parsed.order_no, repeat: false,
            act_url: actUrl };
@@ -3454,6 +3658,9 @@ function warehouseSummary() {
     open_defects: 0,
     orders: 0, orders_new: 0, orders_issued: 0, orders_overdue: 0,
     staff: 0, staff_active: 0, admins: 0,
+    // logs_24h: сколько строк в журнале Logs за последние сутки (по timestamp).
+    // Листа нет — 0. Строка с нечитаемой датой не считается.
+    logs_24h: 0,
   };
 
   readRows(getSheet(SHEETS.EQUIPMENT)).forEach(function (r) {
@@ -3492,6 +3699,15 @@ function warehouseSummary() {
     if (isTruthyCell(r.active)) out.staff_active += 1;
     if (r.role === "Admin") out.admins += 1;
   });
+
+  var logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.LOGS);
+  if (logSheet) {
+    var since = Date.now() - 24 * 60 * 60 * 1000;
+    readRows(logSheet).forEach(function (l) {
+      var t = new Date(l.timestamp).getTime();
+      if (!isNaN(t) && t >= since) out.logs_24h += 1;
+    });
+  }
 
   return out;
 }
@@ -3788,6 +4004,44 @@ function appendRow(sheet, rowObject) {
   sheet.getRange(target, 1, 1, headers.length).setValues([row]);
 }
 
+// Запись в журнал Logs. Служебное — ошибки, отказы Telegram, несобравшийся акт —
+// в чат склада не идёт никогда: там только заявки и акты.
+//
+// Замок не берём: журнал зовётся и изнутри операций, которые замок уже держат
+// (tgSend из buildAct, autoAct), и ждать самого себя не нужно. Цена — две
+// одновременные записи могут попасть в одну строку журнала; для журнала это
+// приемлемо, для заказа — нет, поэтому заказы пишутся под замком.
+//
+// Всё тело в try: журнал не должен ронять операцию. Листа нет (после выкладки
+// не запускали setupSheets) — молча пропускаем.
+var LOG_CONTEXT_MAX = 2000;
+
+function logEvent(kind, endpoint, reason, message, context) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.LOGS);
+    if (!sheet) return;
+    var ctx = "";
+    if (context !== undefined && context !== null && context !== "") {
+      ctx = typeof context === "string" ? context : JSON.stringify(context);
+      if (ctx.length > LOG_CONTEXT_MAX) ctx = ctx.substring(0, LOG_CONTEXT_MAX) + "…";
+    }
+    appendRow(sheet, {
+      timestamp: new Date().toISOString(),
+      kind: String(kind || ""),
+      endpoint: String(endpoint || ""),
+      reason: String(reason || ""),
+      message: logRedact(String(message === undefined || message === null ? "" : message)),
+      context: logRedact(ctx),
+    });
+  } catch (e) { /* журнал не важнее самой операции */ }
+}
+
+// Токен бота в журнал не пишем: адрес Telegram несёт его внутри
+// (api.telegram.org/bot<токен>/…), и сетевая ошибка UrlFetchApp цитирует адрес.
+function logRedact(str) {
+  return str.replace(/bot\d+:[A-Za-z0-9_-]+/g, "bot<token>");
+}
+
 // Подготовка строк под запись: доращивает сетку до нужного размера и ставит
 // текстовый формат колонкам-идентификаторам. Оба шага обязательны именно перед
 // записью: сетка после импорта имеет размер ровно по данным, а строка,
@@ -3922,6 +4176,20 @@ var SETTINGS_SPEC = {
     check: function (v) { return v === "" || /^-?\d{5,20}$/.test(v); },
     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит",
   },
+  // Темы форума в группе склада: заявки и акты — каждый в свою ленту. Пусто —
+  // сообщение уходит в General, как до появления тем.
+  notify_thread_orders: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^\d{1,10}$/.test(v); },
+    hint: "номер темы «ЗАЯВКИ» (из /id внутри темы) или пусто — тогда в General",
+  },
+  notify_thread_acts: {
+    def: "",
+    text: true,
+    check: function (v) { return v === "" || /^\d{1,10}$/.test(v); },
+    hint: "номер темы «АКТЫ» (из /id внутри темы) или пусто — тогда в General",
+  },
   // Сайт проката. Пока адреса нет, кнопки на главной тоже нет: пустая кнопка,
   // ведущая в никуда, хуже её отсутствия. Только https: Telegram открывает
   // ссылку своим встроенным браузером, и http он либо не откроет, либо откроет
@@ -3984,11 +4252,13 @@ var SETTINGS_SPEC = {
     hint: "как указывать директора в договоре, например «Директора Керзиной О.А.»",
   },
 
-  // Приём заявок прямо с сайта. Выключено по умолчанию намеренно: это
-  // единственная ручка, в которую можно писать без входа, и включать её должен
-  // человек, а не выкладка кода.
+  // Приём заявок прямо с сайта. Включён по умолчанию — решение владельца:
+  // заявка с сайта и есть основной путь, а копипаст — запасной. Это
+  // единственная ручка, в которую пишут без входа, поэтому выключатель
+  // остаётся: сохранённый 0 закрывает её (getSettings подставляет умолчание
+  // только для пустого значения, не для нуля). От завала — предел в час ниже.
   public_orders: {
-    def: 0,
+    def: 1,
     text: false,
     check: function (v) { return v === 0 || v === 1; },
     hint: "1 — сайт отправляет заявку сам, 0 — только копипастом",
@@ -4507,12 +4777,14 @@ function actLines(orderId) {
   equipment.forEach(function (e) { byId[String(e.item_id)] = e; });
 
   var models = readRows(getSheet(SHEETS.MODELS));
-  var priceOf = {};
+  var priceOf = {}, modelName = {};
   models.forEach(function (m) {
-    priceOf[String(m.category) + "-" + pad2(Number(m.model_code))] = Number(m.price || 0);
+    var key = String(m.category) + "-" + pad2(Number(m.model_code));
+    priceOf[key] = Number(m.price || 0);
+    modelName[key] = String(m.model_name || "").trim();
   });
 
-  return items.map(function (r) {
+  var requested = items.map(function (r) {
     // Заводские номера — только реально выданного. Выдачи не было — столбец
     // пустой: вписать туда номер «который выдадим» значит соврать в документе.
     var serials = txRows
@@ -4538,6 +4810,64 @@ function actLines(orderId) {
       serials: serials.join(", "),
       sum: sum,
       priced: sum > 0,
+    };
+  });
+
+  return requested.concat(actExtraLines(txRows, byId, priceOf, modelName));
+}
+
+// Выдано сверх заявки: то, что отсканировали по заказу, но в составе для него
+// строки не нашлось (claimOrderLine вернул «off-order»). В акт идёт тем же
+// списком, сразу после заявленного, со звёздочкой в конце наименования —
+// материальная ответственность и за это тоже. Одна модель — одна строка:
+// количество складываем, заводские номера перечисляем.
+//
+// Статус выдачи не смотрим, как и у заявленных строк: вернули — не значит «не
+// выдавали», акт о том, что передано.
+function actExtraLines(txRows, byId, priceOf, modelName) {
+  var groups = [], byKey = {};
+  var seen = {}, byQtyOf = {};
+  txRows.forEach(function (t) {
+    if (String(t.order_line) !== "off-order") return;
+    var e = byId[String(t.item_id)] || {};
+    var hasModel = e.model_code !== undefined && e.model_code !== "" && e.category;
+    var key = hasModel
+      ? String(e.category) + "-" + pad2(Number(e.model_code))
+      : "item-" + String(t.item_id);
+    var g = byKey[key];
+    if (!g) {
+      g = byKey[key] = {
+        name: (hasModel && modelName[key]) || String(e.name || "").trim() || String(t.item_id),
+        unit: hasModel ? (priceOf[key] || 0) : 0,
+        qty: 0, serials: [],
+      };
+      groups.push(g);
+    }
+    var cat = String(e.category || "");
+    if (!(cat in byQtyOf)) byQtyOf[cat] = categoryByQty(cat);
+    if (byQtyOf[cat]) {
+      // Количественная позиция: сколько выдано этой выдачей.
+      g.qty += Math.max(1, Number(t.qty || 1));
+      return;
+    }
+    // Поштучная: одна единица — одна штука, даже если её выдавали дважды.
+    var itemKey = String(t.item_id);
+    if (seen[itemKey]) return;
+    seen[itemKey] = true;
+    g.qty += 1;
+    var sn = String(e.serial_number || e.inventory_number || "").trim();
+    if (sn) g.serials.push(sn);
+  });
+
+  return groups.map(function (g) {
+    var sum = g.unit * g.qty;
+    return {
+      name: g.name + " *",
+      qty: g.qty,
+      serials: g.serials.join(", "),
+      sum: sum,
+      priced: sum > 0,
+      extra: true,
     };
   });
 }
@@ -4567,7 +4897,7 @@ function buildAct(orderId, masterName) {
 
   var stamp = actStamp();
   var fio = String(order.student_name || "").trim() || "без имени";
-  var total = lines.reduce(function (sum, l) { return sum + l.sum; }, 0);
+  var total = actTotal(lines);
   var unpriced = lines.filter(function (l) { return !l.priced; }).length;
 
   var copy;
@@ -4582,7 +4912,94 @@ function buildAct(orderId, masterName) {
       ". Проверьте идентификатор шаблона в настройках");
   }
 
-  var doc = DocumentApp.openById(copy.getId());
+  fillAct(DocumentApp.openById(copy.getId()), order, orderId, lines, settings, stamp, masterName);
+  var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
+
+  // Ссылку держим в строке заказа: карточка показывает её без обращения к
+  // Диску, и повторная сборка не плодит документы на один заказ.
+  updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
+
+  // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
+  tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
+    '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
+
+  return {
+    url: url, document_id: copy.getId(), lines: lines.length,
+    total: total, unpriced: unpriced,
+  };
+}
+
+function actTotal(lines) {
+  return lines.reduce(function (sum, l) { return sum + l.sum; }, 0);
+}
+
+// Пересборка акта в том же документе. Нужна, когда состав выдачи поменялся
+// после первой сборки: по заказу отсканировали то, чего в заявке не было, и
+// это должно попасть в акт (со звёздочкой, см. actExtraLines).
+//
+// Документ тот же, а не новая копия: ссылка на акт уже висит в теме «АКТЫ», и
+// новая копия сделала бы её устаревшей, а в чат пришлось бы слать вторую. Тело
+// документа очищается и заново набирается из шаблона — подстановок в готовом
+// акте уже нет, и найти, куда дописывать, иначе нечем. Дата акта остаётся
+// прежней: берётся из имени файла «<дата> <ФИО>».
+//
+// Открыть прежний документ не вышло (удалили, нет доступа) — собираем новый
+// обычным buildAct: он и ссылку в строке заказа заменит, и новую в чат пошлёт.
+function rebuildAct(orderId, masterName) {
+  var settings = getSettings();
+  var templateId = String(settings.act_template_id || "");
+  if (!templateId) return { skipped: "no-template" };
+
+  orderId = String(orderId || "");
+  var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
+  if (!order) throw apiError(404, "Заказ не найден");
+  var oldUrl = String(order.act_url || "");
+  if (!oldUrl) return { skipped: "no-act" };
+
+  var docId = (oldUrl.match(/\/document\/d\/([^\/?#]+)/) || [])[1] || "";
+  var doc = null;
+  try { if (docId) doc = DocumentApp.openById(docId); } catch (e) { doc = null; }
+  if (!doc) {
+    var fresh = buildAct(orderId, masterName);
+    fresh.same_document = false;
+    return fresh;
+  }
+
+  var lines = actLines(orderId);
+  if (!lines.length) throw apiError(409, "В заказе нет ни одной позиции");
+  var stamp = (String(doc.getName ? doc.getName() : "")
+    .match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/) || [])[0] || actStamp();
+
+  resetActBody(doc.getBody(), DocumentApp.openById(templateId).getBody());
+  fillAct(doc, order, orderId, lines, settings, stamp, masterName);
+  return {
+    url: oldUrl, document_id: docId, lines: lines.length, same_document: true,
+    total: actTotal(lines), unpriced: lines.filter(function (l) { return !l.priced; }).length,
+  };
+}
+
+// Тело готового акта заменяется телом шаблона: абзацы, таблицы и пункты
+// списков копируются по порядку. Колонтитулы не трогаем — они у копии и так
+// от того же шаблона. После clear() в теле остаётся один пустой абзац (пустым
+// тело Google не бывает) — убираем его, когда шаблон уже переложен.
+function resetActBody(body, templateBody) {
+  body.clear();
+  var T = DocumentApp.ElementType;
+  for (var i = 0; i < templateBody.getNumChildren(); i++) {
+    var el = templateBody.getChild(i);
+    var type = el.getType();
+    if (type === T.PARAGRAPH) body.appendParagraph(el.copy());
+    else if (type === T.TABLE) body.appendTable(el.copy());
+    else if (type === T.LIST_ITEM) body.appendListItem(el.copy());
+  }
+  if (body.getNumChildren() > 1) body.getChild(0).removeFromParent();
+}
+
+// Заполнение документа, уже скопированного из шаблона: таблица позиций и
+// подстановки. Общее у первой сборки (buildAct) и пересборки (rebuildAct).
+function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
+  var total = actTotal(lines);
+  var fio = String(order.student_name || "").trim() || "без имени";
   var body = doc.getBody();
 
   fillActItems(body, lines);
@@ -4606,19 +5023,6 @@ function buildAct(orderId, masterName) {
   }
 
   doc.saveAndClose();
-  var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
-
-  // Ссылку держим в строке заказа: карточка показывает её без обращения к
-  // Диску, и повторная сборка не плодит документы на один заказ.
-  updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
-
-  // Сообщение того же вида, что приходило раньше.
-  tgSend("АКТ от " + stamp + " " + fio + " >>> " + url);
-
-  return {
-    url: url, document_id: copy.getId(), lines: lines.length,
-    total: total, unpriced: unpriced,
-  };
 }
 
 // Заполнение таблицы позиций. Таблицу находим по подстановке в ней самой:
@@ -4654,7 +5058,15 @@ function fillActItems(body, lines) {
   });
 
   target.removeRow(sample);
+
+  // Звёздочка без расшифровки — загадка, а расшифровка без звёздочек — шум.
+  // Места под примечание в шаблоне нет, поэтому строка встаёт сразу под
+  // таблицей и только тогда, когда выдано что-то сверх заявки.
+  var hasExtra = lines.some(function (l) { return l.extra; });
+  if (hasExtra) body.insertParagraph(body.getChildIndex(target) + 1, ACT_EXTRA_LEGEND);
 }
+
+var ACT_EXTRA_LEGEND = "* — выдано сверх заявки";
 
 // «2026-09-28 22:44:10» — тем же видом, что в имени прежних файлов.
 function actStamp() {

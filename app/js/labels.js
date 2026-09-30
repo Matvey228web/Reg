@@ -28,6 +28,7 @@ const LabelsScreen = (() => {
   let items = [];          // что печатаем
   let sizeKey = DEFAULT_SIZE;
   let singleItemId = null; // пришли из карточки предмета
+  let catalogError = "";   // каталог не подтянулся — что ответил сервер
 
   function caption() {
     try {
@@ -50,10 +51,21 @@ const LabelsScreen = (() => {
     return SIZES[stored] ? stored : DEFAULT_SIZE;
   }
 
+  // Каталога в кэше нет — тянем его сами (Cache.ensure, как ensureItemsMap в
+  // order.js), а не отправляем человека в «Каталог» и обратно.
   function onShow(params) {
     singleItemId = params && params.itemId ? params.itemId : null;
     sizeKey = savedSize();
+    catalogError = "";
     render();
+    if (!Cache.items("equipment")) {
+      Cache.ensure("equipment", "/equipment/list", { category: "all", status: "all" })
+        .then(() => {
+          if (!Cache.items("equipment")) catalogError = "Каталог загрузился, но не сохранился на телефоне.";
+          render();
+        })
+        .catch((err) => { catalogError = err.message; render(); });
+    }
   }
 
   function source() {
@@ -67,8 +79,15 @@ const LabelsScreen = (() => {
     const all = source();
 
     if (!all.length) {
-      box.innerHTML = `<p class="empty">Каталог ещё не загружен. Откройте «Каталог»,
-        чтобы список подтянулся, и возвращайтесь.</p>`;
+      if (catalogError) {
+        box.innerHTML = `<div class="error-box">${escapeHtml(catalogError)}</div>`;
+      } else if (!Cache.items("equipment")) {
+        box.innerHTML = skeleton(3);   // onShow уже тянет каталог
+      } else {
+        box.innerHTML = `<p class="empty">${singleItemId
+          ? `Позиции ${escapeHtml(singleItemId)} нет в каталоге. Обновите «Каталог» и возвращайтесь.`
+          : "В каталоге нет ни одной позиции."}</p>`;
+      }
       return;
     }
 
@@ -105,8 +124,8 @@ const LabelsScreen = (() => {
       Bluetooth-принтеры (Niimbot, Phomemo) из браузера не печатают — для них
       сохраните картинками.</p>
       <p class="hint">Из Telegram скачать и напечатать нельзя: «Сохранить»
-      откроет лист «Поделиться», а если его нет — пришлёт бот в чат склада,
-      пачку одним архивом. Для печати откройте приложение в Safari.</p>
+      откроет лист «Поделиться», а если его нет — покажет картинку во весь
+      экран. Сохраняйте по одной; пачкой и для печати откройте приложение в Safari.</p>
       <div class="section-title">Размер в настоящую величину</div>
       <div class="size-row" id="labels-sizes"></div>
       <p class="hint">Нажмите на размер, чтобы взять его, на образец ниже —
@@ -212,7 +231,7 @@ const LabelsScreen = (() => {
       canvas,
       item.name + " · " + item.item_id,
       TG.isAvailable()
-        ? "Скачать напрямую из Telegram нельзя — кнопка откроет системный лист «Поделиться», а если его нет, картинку пришлёт бот."
+        ? "Скачать напрямую из Telegram нельзя — кнопка откроет системный лист «Поделиться», а если его нет — покажет картинку во весь экран (удерживайте, чтобы сохранить)."
         : "",
       () => saveImageFor(canvas, fileName(item, size), item.name,
                          document.getElementById("qr-overlay-save")));
@@ -540,8 +559,8 @@ const LabelsScreen = (() => {
   // Внутри Telegram атрибут download не поддерживается — вебвью вместо
   // сохранения УХОДИТ по ссылке и показывает голый файл без кнопки «назад».
   // Поэтому там его не трогаем вовсе: одну этикетку показываем во весь экран
-  // (сохраняется долгим нажатием), пачку отправляет бот в чат склада одним
-  // архивом. Прямого сохранения пачки из мини-приложения не существует:
+  // (сохраняется долгим нажатием), а пачку не сохраняем вовсе — в чат
+  // картинки не уходят. Прямого сохранения пачки из мини-приложения не существует:
   // WebApp.downloadFile умеет только https-адреса, а наши этикетки рисуются
   // на устройстве и адреса не имеют.
   function fileName(item, size) {
@@ -576,31 +595,8 @@ const LabelsScreen = (() => {
                    fileName(items[0], size), items[0].name, btn);
       return;
     }
-    sendToChat(size);
-  }
-
-  async function sendToChat(size) {
-    const btn = document.getElementById("labels-save");
-    const before = btn ? btn.textContent : "";
-    // Молчащая кнопка на запросе в 5–8 секунд читается как зависшая — это мы
-    // уже проходили на «Завершить» в сверке.
-    if (btn) { btn.disabled = true; btn.textContent = "Отправляем…"; }
-    try {
-      const files = items.map((item) => ({
-        name: fileName(item, size),
-        // Только сами данные, без приставки data:image/png;base64,
-        png_base64: labelCanvas(item, size, caption(), FILE_SCALE)
-          .toDataURL("image/png").split(",")[1],
-      }));
-      const res = await apiPost("/labels/send", { files });
-      TG.hapticSuccess();
-      TG.showAlert(res.message || "Отправлено в чат склада.");
-    } catch (err) {
-      TG.hapticError();
-      TG.showAlert(err.message || "Не получилось отправить");
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = before; }
-    }
+    TG.showAlert("Пачкой внутри Telegram не сохранить. Сохраняйте по одной, " +
+      "печатайте кнопкой «Печать» или откройте приложение в браузере.");
   }
 
   function init() {

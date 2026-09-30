@@ -17,12 +17,14 @@ const mockSettings = {
   site_url: "",
   app_link: "",
   api_url: "https://mifs-rent-api.example.workers.dev",
-  public_orders: 0,
+  public_orders: 1,
   public_orders_per_hour: 20,
   act_template_id: "",
   act_master: "",
   act_director: "",
   act_folder_id: "",
+  notify_thread_orders: "",
+  notify_thread_acts: "",
 };
 // Состояние постоянной связи с Telegram. В демо её никто не устанавливает —
 // важно лишь, что экран умеет показать оба состояния и переключить их.
@@ -45,6 +47,10 @@ const MOCK_SETTINGS_SPEC = {
              hint: "адрес Worker целиком, начиная с https:// — на него Telegram присылает события бота" },
   notify_chat_id: { def: "", text: true, check: (v) => v === "" || /^-?\d{5,20}$/.test(String(v)),
                     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит" },
+  notify_thread_orders: { def: "", text: true, check: (v) => v === "" || /^\d{1,10}$/.test(String(v)),
+                          hint: "номер темы «ЗАЯВКИ» (из /id внутри темы) или пусто — тогда в General" },
+  notify_thread_acts: { def: "", text: true, check: (v) => v === "" || /^\d{1,10}$/.test(String(v)),
+                        hint: "номер темы «АКТЫ» (из /id внутри темы) или пусто — тогда в General" },
   session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },
   max_login_attempts: { min: 3, max: 20, hint: "от 3 до 20 попыток" },
   login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
@@ -633,7 +639,8 @@ const MockAPI = {
           e.status = 409;
           throw e;
         }
-        let order_id = "", order_line = "", expected = body.expected_return_at || null;
+        let order_id = "", expected = body.expected_return_at || null;
+        let parts = [{ line: "", qty: takeQty }];
         if (body.order_id) {
           const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
           if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
@@ -644,25 +651,38 @@ const MockAPI = {
           }
           order_id = order.order_id;
           if (!expected) expected = order.return_date || null;
-          // Списываем экземпляр с подходящей строки состава; не нашлось —
-          // «вне заказа», но выдача проходит.
-          const line = MockStore.orderItems.find((i) =>
-            String(i.order_id) === String(order_id) && i.model_code &&
-            i.category === item.category &&
-            String(i.model_code) === String(item.model_code) && i.issued_qty < i.qty);
-          if (line) { line.issued_qty += 1; order_line = String(line.line_no); }
-          else order_line = "off-order";
+          // Как claimOrderLine в Code.gs: выданное количество ложится на строки
+          // той же модели, пока в них есть место; остаток — «вне заказа», но
+          // выдача проходит. Каждая часть — своя запись журнала.
+          parts = [];
+          let want = takeQty;
+          MockStore.orderItems.forEach((i) => {
+            if (want <= 0) return;
+            if (String(i.order_id) !== String(order_id) || !i.model_code) return;
+            if (i.category !== item.category || String(i.model_code) !== String(item.model_code)) return;
+            const take = Math.min(want, Number(i.qty || 0) - Number(i.issued_qty || 0));
+            if (take <= 0) return;
+            i.issued_qty = Number(i.issued_qty || 0) + take;
+            parts.push({ line: String(i.line_no), qty: take });
+            want -= take;
+          });
+          if (want > 0) parts.push({ line: "off-order", qty: want });
           order.status = "Issued";
         }
-        const transaction_id = MockStore.nextTransactionId();
-        MockStore.transactions.push({
-          transaction_id, item_id: item.item_id, client_id: body.client_id,
-          order_id, order_line,
-          staff_out: staff_id, staff_in: null,
-          checked_out_at: new Date().toISOString(),
-          expected_return_at: expected,
-          checked_in_at: null, status: "Open", notes: body.notes || "",
-          qty: takeQty, qty_in: 0,
+        let transaction_id = null, order_line = "";
+        parts.forEach((part) => {
+          const id = MockStore.nextTransactionId();
+          if (transaction_id === null) transaction_id = id;
+          if (!order_line || part.line === "off-order") order_line = part.line;
+          MockStore.transactions.push({
+            transaction_id: id, item_id: item.item_id, client_id: body.client_id,
+            order_id, order_line: part.line,
+            staff_out: staff_id, staff_in: null,
+            checked_out_at: new Date().toISOString(),
+            expected_return_at: expected,
+            checked_in_at: null, status: "Open", notes: body.notes || "",
+            qty: part.qty, qty_in: 0,
+          });
         });
         if (bulkOut) {
           item.qty_out = alreadyOut + takeQty;
@@ -682,6 +702,16 @@ const MockAPI = {
         if (!openList.length) { const e = new Error("Открытой выдачи для этого предмета не найдено"); e.status = 409; throw e; }
         const tx = openList[0];
         const bulkIn = mockByQty(item.category);
+        // Строка состава освобождается на принятое каждой записью — как
+        // releaseOrderLine в Code.gs.
+        const touched = new Set();
+        const release = (t, n) => {
+          if (!t.order_id) return;
+          touched.add(String(t.order_id));
+          const line = MockStore.orderItems.find((i) =>
+            String(i.order_id) === String(t.order_id) && String(i.line_no) === String(t.order_line));
+          if (line) line.issued_qty = Math.max(0, Number(line.issued_qty || 0) - n);
+        };
 
         if (bulkIn) {
           // Приём количеством закрывает выдачи по очереди, начиная с ранней.
@@ -694,6 +724,7 @@ const MockAPI = {
             if (left <= 0) return;
             const take = Math.min(Number(t.qty || 1) - Number(t.qty_in || 0), left);
             left -= take;
+            release(t, take);
             t.qty_in = Number(t.qty_in || 0) + take;
             if (t.qty_in >= Number(t.qty || 1)) {
               t.status = "Closed";
@@ -707,20 +738,18 @@ const MockAPI = {
           tx.status = "Closed";
           tx.checked_in_at = new Date().toISOString();
           tx.staff_in = staff_id;
+          release(tx, 1);
         }
 
-        if (tx.order_id) {
-          const line = MockStore.orderItems.find((i) =>
-            String(i.order_id) === String(tx.order_id) && String(i.line_no) === String(tx.order_line));
-          if (line && line.issued_qty > 0) line.issued_qty -= 1;
-          const order = MockStore.orders.find((o) => String(o.order_id) === String(tx.order_id));
+        touched.forEach((orderId) => {
+          const order = MockStore.orders.find((o) => String(o.order_id) === orderId);
           if (order && order.status !== "Cancelled") {
             const stillOut = MockStore.transactions.filter(
-              (t) => String(t.order_id) === String(tx.order_id) && t.status === "Open").length;
+              (t) => String(t.order_id) === orderId && t.status === "Open").length;
             order.status = stillOut ? "Issued" : "Returned";
             order.closed_at = stillOut ? "" : new Date().toISOString();
           }
-        }
+        });
 
         let defect_id = null;
         if (body.has_defect) {
@@ -792,6 +821,7 @@ const MockAPI = {
             item_id: i.item_id, name: i.name, category: i.category, status: i.status,
             serial_number: i.serial_number, inventory_number: i.inventory_number,
             model_code: i.model_code, qty: total, qty_out: out, qty_free: total - out,
+            condition_notes: i.condition_notes || "",
           };
         });
       }
@@ -1306,34 +1336,13 @@ const MockAPI = {
         return { ok: true, message: "Сообщение отправлено — проверьте чат." };
       }
 
-      // Отправка этикеток ботом. Мок проверяет ровно то, что проверяет бэкенд:
-      // список не пуст, файлы не пустые и их не больше тридцати. Самой отправки
-      // здесь нет — она живёт в Apps Script и требует токена бота.
+      // Этикетки в чат больше не отправляются: картинки в Telegram не уходят
+      // вовсе. Ручка отвечает отказом, как живой бэкенд.
       case "/labels/send": {
         MockStore.requireToken(token);
-        const files = body.files || [];
-        if (!files.length) {
-          const e = new Error("Нечего отправлять: список файлов пуст.");
-          e.status = 400; throw e;
-        }
-        if (files.length > 30) {
-          const e = new Error("Сразу больше 30 этикеток не отправляем. Сузьте фильтры и повторите.");
-          e.status = 400; throw e;
-        }
-        const empty = files.filter((f) => !f.png_base64);
-        if (empty.length) {
-          const e = new Error("Файл «" + (empty[0].name || "без имени") + "» пришёл пустым.");
-          e.status = 400; throw e;
-        }
-        return { ok: true, count: files.length,
-                 message: files.length === 1
-                   ? "Этикетка отправлена в чат склада."
-                   : files.length + " этикеток отправлены в чат склада одним архивом." };
-      }
-
-      case "/notify/overdue": {
-        MockStore.requireAdmin(token);
-        return { overdue: 1, sent: true, message: "Просроченные заказы — 1" };
+        const e = new Error("Отправка этикеток в чат отключена. В Telegram сохраняйте по одной " +
+          "(кнопка «Сохранить»), пачкой — кнопкой «Печать» или откройте приложение в браузере.");
+        e.status = 410; throw e;
       }
 
       case "/inventory/save": {
@@ -1387,6 +1396,8 @@ const MockAPI = {
             staff: MockStore.staff.length,
             staff_active: MockStore.staff.filter((x) => x.active).length,
             admins: MockStore.staff.filter((x) => x.role === "Admin").length,
+            // В демо журнала Logs нет — ошибок за сутки ноль, как на чистой таблице.
+            logs_24h: 0,
           },
           maintenance: { journal_archived_at: "", journal_trimmed_at: "" },
         };

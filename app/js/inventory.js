@@ -19,6 +19,7 @@ const InventoryScreen = (() => {
 
   let session = null;   // { scope, started_at, found: {id: qty}, unknown: [] }
   let expected = [];    // снимок области на момент старта
+  let catalogError = "";  // каталог не подтянулся — что ответил сервер
   // Что случилось с последним кодом. Живёт отдельно от DOM: экран
   // перерисовывается после каждого скана, и надпись внутри него затиралась бы
   // ровно тем действием, о котором сообщает.
@@ -231,9 +232,15 @@ const InventoryScreen = (() => {
   function renderStart(box) {
     const items = catalog();
     if (!items.length) {
-      box.innerHTML = `<p class="empty">Каталог ещё не загружен. Откройте «Каталог»,
-        чтобы список подтянулся, и возвращайтесь: сверка работает по нему и в сеть
-        во время обхода не ходит.</p>`;
+      // Каталога нет — onShow уже тянет его сам; пока ждём, показываем
+      // заготовку, а не просим сходить за ним в другой раздел.
+      if (catalogError) {
+        box.innerHTML = `<div class="error-box">${escapeHtml(catalogError)}</div>`;
+      } else if (Cache.items("equipment")) {
+        box.innerHTML = `<p class="empty">В каталоге нет ни одной позиции — сверять нечего.</p>`;
+      } else {
+        box.innerHTML = skeleton(3);
+      }
       return;
     }
     const counts = {};
@@ -779,10 +786,24 @@ const InventoryScreen = (() => {
     }
   }
 
+  // Сверка работает по каталогу и в сеть во время обхода не ходит. Если
+  // каталога в кэше нет, тянем его один раз здесь же (Cache.ensure, как
+  // ensureItemsMap в order.js), а не отправляем человека в «Каталог».
   function onShow() {
     load();
     refreshExpected();
+    catalogError = "";
     render();
+    if (!Cache.items("equipment")) {
+      Cache.ensure("equipment", "/equipment/list", { category: "all", status: "all" })
+        .then(() => {
+          // Пришёл, но не лёг в хранилище (оно переполнено) — сверке не с чем работать.
+          if (!Cache.items("equipment")) catalogError = "Каталог загрузился, но не сохранился на телефоне — сверка без него не работает.";
+          refreshExpected();
+          render();
+        })
+        .catch((err) => { catalogError = err.message; render(); });
+    }
   }
 
   function init() {

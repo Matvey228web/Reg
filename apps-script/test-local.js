@@ -133,6 +133,7 @@ class FakeSpreadsheet {
   getSheets() { return this.sheets.slice(); }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
   toast() {}
+  getId() { return 'ss-main'; }
 }
 
 const spreadsheet = new FakeSpreadsheet();
@@ -199,6 +200,7 @@ function makeDocBody() {
     items: [],           // абзацы и таблицы по порядку
     clear() { body.items.length = 0; return body; },
     appendParagraph(text) {
+      if (text && text.kind === 'p') text = text.text;
       const p = { kind: 'p', text: String(text),
         setHeading() { return p; }, setAlignment() { return p; },
         setItalic() { return p; }, setBold() { return p; },
@@ -212,6 +214,7 @@ function makeDocBody() {
     appendListItem(text) { return body.appendParagraph(text); },
     appendPageBreak() { return body.appendParagraph('\f'); },
     appendTable(rows) {
+      if (rows && rows.kind === 't') rows = rows.grid;
       const grid = (rows || []).map((r) => r.slice());
       const table = {
         kind: 't', grid,
@@ -243,6 +246,25 @@ function makeDocBody() {
       return table;
     },
     getTables: () => body.items.filter((i) => i.kind === 't'),
+    // Обход детей — для пересборки акта в том же документе (resetActBody):
+    // тело шаблона перекладывается поэлементно, копиями.
+    getNumChildren: () => body.items.length,
+    getChild: (i) => {
+      const el = body.items[i];
+      return {
+        getType: () => (el.kind === 't' ? 'TABLE' : 'PARAGRAPH'),
+        copy: () => (el.kind === 't' ? { kind: 't', grid: el.grid.map((r) => r.slice()) }
+          : { kind: 'p', text: el.text }),
+        removeFromParent() { body.items.splice(body.items.indexOf(el), 1); },
+      };
+    },
+    getChildIndex: (el) => body.items.indexOf(el),
+    insertParagraph(idx, text) {
+      const p = body.appendParagraph(text);
+      body.items.pop();
+      body.items.splice(idx, 0, p);
+      return p;
+    },
     replaceText(pattern, value) {
       const re = new RegExp(pattern, 'g');
       body.items.forEach((i) => {
@@ -268,7 +290,24 @@ global.HtmlService = {
     return { getContent: () => html };
   },
 };
-global.ScriptApp = { getOAuthToken: () => 'test-token' };
+// Триггеры проекта держим списком — setupTriggers проверяется на повторный запуск.
+const triggers = [];
+global.ScriptApp = {
+  getOAuthToken: () => 'test-token',
+  getProjectTriggers: () => triggers.slice(),
+  deleteTrigger(t) { triggers.splice(triggers.indexOf(t), 1); },
+  newTrigger(handler) {
+    const t = { handler, getHandlerFunction: () => handler };
+    const chain = {
+      timeBased: () => chain,
+      everyDays(n) { t.days = n; return chain; },
+      atHour(h) { t.hour = h; return chain; },
+      create() { triggers.push(t); return t; },
+    };
+    return chain;
+  },
+};
+global.Session = { getScriptTimeZone: () => 'Europe/Moscow' };
 
 // Преобразование HTML в документ у Google на стороне Диска. Здесь — грубый
 // разбор той же разметки: абзацы абзацами, таблицы сетками. Этого хватает,
@@ -305,13 +344,14 @@ function docFromHtml(html) {
 
 const docs = new Map();
 global.DocumentApp = {
+  ElementType: { PARAGRAPH: 'PARAGRAPH', TABLE: 'TABLE', LIST_ITEM: 'LIST_ITEM' },
   ParagraphHeading: { HEADING1: 'h1', HEADING2: 'h2' },
   HorizontalAlignment: { CENTER: 'center' },
   GlyphType: { NUMBER: 'number' },
   create(name) {
     const id = 'doc' + (docs.size + 1);
     const doc = { id, name, body: makeDocBody(),
-      getBody: () => doc.body, getId: () => id, saveAndClose() {} };
+      getBody: () => doc.body, getId: () => id, getName: () => doc.name, saveAndClose() {} };
     docs.set(id, doc);
     return doc;
   },
@@ -331,6 +371,8 @@ global.Utilities = {
     return Array.from(buf).map(b => (b > 127 ? b - 256 : b));
   },
   getUuid: () => crypto.randomUUID(),
+  // Часовой пояс здесь не учитываем: проверяется только вид имени копии.
+  formatDate: (d, _tz, _fmt) => d.toISOString().slice(0, 10),
   base64Decode(str) {
     return Array.from(Buffer.from(String(str), 'base64')).map(b => (b > 127 ? b - 256 : b));
   },
@@ -364,9 +406,16 @@ let __telegramMe = { ok: true, result: { username: 'mifs_rent_bot', first_name: 
 // «опрос больше не нужен» ничего не проверяла бы.
 let __telegramWebhook = { url: '', pending_update_count: 0, last_error_message: '' };
 let __telegramSetReply = { ok: true, result: true };
+// Ответ на sendMessage: тест подставляет функцию от тела запроса, чтобы
+// Telegram «отказал» — например, в удалённую тему форума. null — обычный ответ.
+let __telegramSendReply = null;
 global.UrlFetchApp = {
   fetch(url, opts) {
     sent.push({ url, opts });
+    if (__telegramSendReply && /\/sendMessage$/.test(url)) {
+      const reply = __telegramSendReply(JSON.parse(opts.payload));
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify(reply) };
+    }
     // Загрузка документа в Диск: разбираем multipart так же, как это сделал бы
     // Google, и складываем получившийся документ в набор — дальше по нему
     // собирается акт.
@@ -449,6 +498,26 @@ function fakeFolder(name) {
   if (!drive.folders[name]) drive.folders[name] = { name, files: [] };
   const folder = drive.folders[name];
   return {
+    // Копия таблицы (dailyBackup): дата создания задаётся тестом через __driveNow.
+    _addCopy(fileName) {
+      const file = { name: fileName, id: 'file-' + (folder.files.length + 1),
+                     created: global.__driveNow || new Date(), trashed: false };
+      folder.files.push(file);
+      return { getId: () => file.id, getName: () => file.name };
+    },
+    getFiles() {
+      let i = 0;
+      const list = folder.files.slice();
+      return {
+        hasNext: () => i < list.length,
+        next: () => {
+          const f = list[i++];
+          return { getName: () => f.name, isTrashed: () => !!f.trashed,
+                   getDateCreated: () => f.created || new Date(0),
+                   setTrashed(v) { f.trashed = v; } };
+        },
+      };
+    },
     createFile(fileName, content) {
       const file = { name: fileName, content, id: 'file-' + (folder.files.length + 1) };
       folder.files.push(file);
@@ -468,6 +537,10 @@ global.DriveApp = {
   createFolder: (name) => fakeFolder(name),
   // Документы акта: копия шаблона живёт в том же наборе, что и сам шаблон.
   getFileById(id) {
+    if (id === 'ss-main') {
+      if (global.__driveFail) throw new Error(global.__driveFail);
+      return { makeCopy: (name, folder) => folder._addCopy(name) };
+    }
     const doc = docs.get(id);
     if (!doc) throw new Error('нет файла ' + id);
     return {
@@ -479,7 +552,7 @@ global.DriveApp = {
           else body.appendTable(i.grid.map((r) => r.slice()));
         });
         const copy = { id: copyId, name, body,
-          getBody: () => body, getId: () => copyId, saveAndClose() {} };
+          getBody: () => body, getId: () => copyId, getName: () => name, saveAndClose() {} };
         docs.set(copyId, copy);
         return copy;
       },
@@ -499,6 +572,8 @@ function check(label, cond, extra) {
   if (cond) { console.log('  ok   ' + label); }
   else { failures++; console.log('  FAIL ' + label + (extra !== undefined ? '  → ' + JSON.stringify(extra) : '')); }
 }
+// Строки журнала Logs (служебные события, которые в чат не идут).
+const logRows = () => readRows(getSheet(SHEETS.LOGS));
 function call(endpoint, payload, token) {
   const res = doPost({ postData: { contents: JSON.stringify({ endpoint, token, payload: payload || {} }) } });
   return JSON.parse(res.getContent());
@@ -516,7 +591,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 14 вкладок', spreadsheet.getSheets().length === 14, spreadsheet.getSheets().map(s => s.name));
+check('создано 15 вкладок (с журналом Logs)', spreadsheet.getSheets().length === 15 && !!spreadsheet.getSheetByName('Logs'), spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -526,7 +601,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 14', spreadsheet.getSheets().length === 14);
+check('вкладок по-прежнему 15', spreadsheet.getSheets().length === 15);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -1781,9 +1856,10 @@ console.log('\n== карточку предмета без входа не пр�
 r = call('/item/lookup', { item_id: '010101' });
 check('без токена карточка не отдаётся', r.ok === false && r.status === 401, r);
 
-console.log('\n== этикетки уходят ботом ==');
-// Сохранить файл прямо на устройство из вебвью Telegram нельзя, поэтому пачку
-// забирает бот. Проверяем разбор входа и то, что уходит в Telegram.
+console.log('\n== этикетки в чат не уходят ==');
+// Владелец решил: картинки этикеток в Telegram не идут ни в каком виде. Ручка
+// оставлена ради закэшированных версий приложения — они получают 410 с
+// объяснением, куда теперь нажимать, а в Telegram не уходит ничего.
 // Входим заново: к этому месту прежние токены уже отозваны сменой PIN, выходом
 // и чисткой листа Staff в проверках выше.
 const labelLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
@@ -1791,45 +1867,21 @@ check('вход перед отправкой этикеток', labelLogin.ok =
 const labelToken = labelLogin.ok ? labelLogin.data.token : null;
 const png = Buffer.from('PNG-заглушка').toString('base64');
 
-scriptProps = {};
-r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
-check('без токена бота — понятный отказ, а не молчание',
-  r.ok === false && /TELEGRAM_BOT_TOKEN/.test(String(r.error)), r);
-
 scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
-metaSet('setting_notify_chat_id', '');
-r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
-check('без чата — тоже понятный отказ', r.ok === false && /id чата/.test(String(r.error)), r);
-
 metaSet('setting_notify_chat_id', '-1001234567890');
 sent.length = 0;
 r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, labelToken);
-check('одна этикетка уходит', r.ok === true && r.data.count === 1, r);
-check('ушла именно в sendDocument', /\/sendDocument$/.test(sent[0].url), sent[0] && sent[0].url);
-check('чат взят из настроек', sent[0].opts.payload.chat_id === '-1001234567890', sent[0].opts.payload.chat_id);
-check('картинка дошла целой',
-  Buffer.from(sent[0].opts.payload.document.getBytes().map(b => (b < 0 ? b + 256 : b)))
-    .toString() === 'PNG-заглушка',
-  sent[0].opts.payload.document.getName());
-
-sent.length = 0;
+check('одна этикетка — 410 с объяснением',
+  r.ok === false && r.status === 410 && /Отправка этикеток в чат отключена/.test(String(r.error)) &&
+  /«Печать»/.test(String(r.error)), r);
 r = call('/labels/send', { files: [
   { name: 'a.png', png_base64: png }, { name: 'b.png', png_base64: png },
 ] }, labelToken);
-check('несколько этикеток уходят одним архивом',
-  r.ok === true && r.data.count === 2 && /\.zip$/.test(sent[0].opts.payload.document.getName()),
-  sent[0] && sent[0].opts.payload.document.getName());
-
-r = call('/labels/send', { files: [] }, labelToken);
-check('пустой список отклонён', r.ok === false && r.status === 400, r);
-r = call('/labels/send', { files: [{ name: 'a.png', png_base64: '' }] }, labelToken);
-check('пустой файл отклонён', r.ok === false && /пустым/.test(String(r.error)), r);
-r = call('/labels/send', {
-  files: Array.from({ length: 31 }, (_, i) => ({ name: i + '.png', png_base64: png })),
-}, labelToken);
-check('больше тридцати за раз не берём', r.ok === false && /30/.test(String(r.error)), r);
+check('пачка — тоже 410', r.ok === false && r.status === 410, r);
+check('в Telegram не ушло ни одного запроса', sent.length === 0, sent.map((x) => x.url));
+check('sendDocument не звали', !sent.some((x) => /sendDocument/.test(x.url)));
 r = call('/labels/send', { files: [{ name: 'a.png', png_base64: png }] }, 'чужой-токен');
-check('без входа этикетки не отправить', r.ok === false && r.status === 401, r);  // недействительная сессия — 401, не 403
+check('без входа — 401, а не 410', r.ok === false && r.status === 401, r);
 
 console.log('\n== исправление номеров у вещи ==');
 // Опечатку в заводском номере находят, когда вещь уже в таблице. Главное, что
@@ -2006,12 +2058,21 @@ function siteText(no, extra) {
   ]).join('\n');
 }
 
-// Выключено по умолчанию: включать ручку, в которую пишут без входа, должен
-// человек, а не выкладка кода.
+// Включено по умолчанию (решение владельца): заявка с сайта — основной путь.
+// Но выключатель работает: сохранённый 0 закрывает ручку, а не теряется в
+// «пусто — значит умолчание».
+check('по умолчанию приём заявок включён',
+  getSettings().public_orders === 1 && handlePublicCatalog({}).orders_open === 1,
+  getSettings().public_orders);
+check('выключается настройкой',
+  call('/settings/set', { settings: { public_orders: 0 } }, siteAdmin).ok === true);
+check('сохранённый ноль читается как ноль, а не как умолчание',
+  getSettings().public_orders === 0 && handlePublicCatalog({}).orders_open === 0,
+  getSettings().public_orders);
 let so = call('/public/order', { raw_text: siteText('260101-1111') });
-check('пока не включено — отказ', so.ok === false && so.status === 403, so);
+check('выключено — отказ', so.ok === false && so.status === 403, so);
 
-check('включается настройкой',
+check('включается обратно',
   call('/settings/set', { settings: { public_orders: 1 } }, siteAdmin).ok === true);
 
 so = call('/public/order', { raw_text: siteText('260101-1111') });
@@ -2051,6 +2112,99 @@ check('без ФИО отклонена',
   call('/public/order', { raw_text: siteText('260101-5555').replace(/^Full_name_minor.*\n/m, '') }).status === 400);
 check('слишком длинная отклонена',
   call('/public/order', { raw_text: siteText('260101-6666') + '\n' + 'я'.repeat(4000) }).status === 400);
+
+console.log('\n== сообщение бота о заявке (HTML) ==');
+// Раскладка прежних сообщений Tilda, только в HTML. Данные выдуманные.
+const siteTg = () => {
+  const msgs = sent.filter((r) => /sendMessage/.test(r.url));
+  return msgs.length ? JSON.parse(msgs[msgs.length - 1].opts.payload) : null;
+};
+function botOrderText(no, itemLines, buyerLines) {
+  return ['Заказ №' + no].concat(itemLines).concat(['', 'Информация о покупателе:'])
+    .concat(buyerLines).concat([
+      'Type_and_name_of_the_project: курсовая',
+      'Date_of_issue: 01.10.2026', 'Time_of_issue: 10:00',
+      'Date_completion: 05.10.2026', 'Time_completion: 18:00',
+    ]).join('\n');
+}
+const adultBuyer = ['Are_you_an_adult: Да', 'Full_name_minor: Тестов Тест Тестович',
+  'Phone_minors: +70000000000', 'Telegram_Minors: @testov'];
+metaSet('setting_site_url', 'https://example.test/site?a=1&b=2');
+sent.length = 0;
+so = call('/public/order', { raw_text: botOrderText('270101-0001', [
+  '1. ' + siteCat.model_name + ': 77000 (2 x 38500)',
+  '2. Бесплатная вещь: 0 (1 x 0)',
+], adultBuyer) });
+check('заявка для сообщения принята', so.ok === true, so);
+let tgm = siteTg();
+check('parse_mode HTML в сообщении о заявке', tgm && tgm.parse_mode === 'HTML', tgm);
+check('заголовок с номером жирным', /^<b>Заказ №270101-0001<\/b>\n/.test(tgm.text), tgm.text);
+check('строка позиции: сумма и (кол-во x цена)',
+  tgm.text.indexOf('1. ' + siteCat.model_name + ': 77000 (2 x 38500)') !== -1, tgm.text);
+check('нулевая цена печатается как у Tilda',
+  tgm.text.indexOf('2. Бесплатная вещь: 0 (1 x 0.00)') !== -1, tgm.text);
+check('сумма — по строкам', /<b>Сумма: 77000 RUB<\/b>/.test(tgm.text), tgm.text);
+check('блок покупателя для взрослого: ФИО, телефон, ник',
+  /<b>Покупатель<\/b>\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
+check('даты со временем', /<b>Даты:<\/b> 2026-10-01 10:00 — 2026-10-05 18:00/.test(tgm.text), tgm.text);
+check('проект отдельной строкой', /Проект: курсовая/.test(tgm.text), tgm.text);
+check('ссылка на сайт из site_url, экранированная',
+  tgm.text.indexOf('<a href="https://example.test/site?a=1&amp;b=2">Открыть заказ на сайте</a>') !== -1, tgm.text);
+
+// Несовершеннолетний: представитель, затем сам арендатор.
+so = call('/public/order', { raw_text: botOrderText('270101-0002', [
+  '1. ' + siteCat.model_name + ': 100 (1 x 100)',
+], ['Are_you_an_adult: Нет', 'Full_name_guardian: Опекунов Опекун Опекунович',
+  'Phone_guardian: +70000000001', 'Full_name_minor: Юнов Юн Юнович',
+  'Phone_minors: +70000000002', 'Telegram_Minors: @yunov']) });
+tgm = siteTg();
+check('блок покупателя для несовершеннолетнего',
+  /<b>Покупатель<\/b>\nПредставитель: Опекунов Опекун Опекунович\nТелефон представителя: \+70000000001\nНесовершеннолетний: Юнов Юн Юнович\nТелефон: \+70000000002\nTelegram: @yunov/.test(tgm.text), tgm.text);
+
+// Всё, что пришло с формы, экранируется.
+so = call('/public/order', { raw_text: botOrderText('270101-0003', [
+  '1. Кран <i>&Ко: 5 (1 x 5)',
+], ['Are_you_an_adult: Да', 'Full_name_minor: Иван <b>&', 'Phone_minors: +70000000000']) });
+tgm = siteTg();
+check('«<b>&» в имени экранирован', tgm.text.indexOf('Иван &lt;b&gt;&amp;') !== -1 &&
+  tgm.text.indexOf('Иван <b>&') === -1, tgm.text);
+check('и в названии позиции', tgm.text.indexOf('Кран &lt;i&gt;&amp;Ко') !== -1, tgm.text);
+
+// Без site_url строки со ссылкой нет.
+metaSet('setting_site_url', '');
+so = call('/public/order', { raw_text: botOrderText('270101-0004', [
+  '1. ' + siteCat.model_name + ': 100 (1 x 100)',
+], adultBuyer) });
+tgm = siteTg();
+check('без site_url ссылки нет', !/<a href|Открыть заказ/.test(tgm.text), tgm.text);
+
+// Длинная заявка: режется список позиций, а итог, покупатель и ссылка остаются.
+metaSet('setting_site_url', 'https://example.test/');
+so = call('/public/order', { raw_text: botOrderText('270101-0005',
+  Array.from({ length: 30 }, (_, i) => (i + 1) + '. ' + '&'.repeat(60) + ': 100 (1 x 100)'),
+  adultBuyer) });
+check('длинная заявка принята', so.ok === true, so);
+tgm = siteTg();
+check('сообщение укладывается в предел Telegram', tgm.text.length <= 4096, tgm.text.length);
+check('список урезан пометкой «… и ещё N поз.»', /… и ещё \d+ поз\./.test(tgm.text), tgm.text.slice(0, 200));
+check('сумма по всем позициям сохранена', /<b>Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
+check('покупатель и ссылка уцелели',
+  /Тестов Тест Тестович/.test(tgm.text) && /<a href="https:\/\/example\.test\/">/.test(tgm.text), tgm.text.slice(-400));
+metaSet('setting_site_url', '');
+
+// Дефект в чат не идёт: владелец решил, что чат — только заявки и акты.
+const bdItem = call('/item/create', { name: 'Штатив <тест>', category: 'LGT' }, siteAdmin).data.item_id;
+call('/transaction/checkout', { item_id: bdItem, client_id: clientId }, siteAdmin);
+sent.length = 0;
+const bdIn = call('/transaction/checkin',
+  { item_id: bdItem, has_defect: true, defect_description: 'Сломано <b>&', defect_severity: 'Minor' }, siteAdmin);
+check('приём с дефектом прошёл', bdIn.ok === true, bdIn);
+check('о дефекте в Telegram не написано ничего',
+  sent.filter((x) => /api\.telegram\.org/.test(x.url)).length === 0, sent.map((x) => x.url));
+
+check('ручки просрочек в Telegram больше нет',
+  /неизвестн|не найден|Unknown/i.test(String(call('/notify/overdue', {}, siteAdmin).error)),
+  call('/notify/overdue', {}, siteAdmin));
 
 console.log('\n== предел на заявки с сайта ==');
 call('/settings/set', { settings: { public_orders_per_hour: 2 } }, siteAdmin);
@@ -2136,6 +2290,37 @@ check('несопоставленную строку выдать нельзя',
   call('/order/issue', { order_id: 1, line_no: 1 }, issAdmin).status === 409);
 check('несуществующую строку тоже',
   call('/order/issue', { order_id: issOrder, line_no: 99 }, issAdmin).status === 404);
+
+console.log('\n== выдача количеством в счёт заказа ==');
+// «Выдано N из M» у позиции количеством: 10 мешков — это 10 в строке, а не 1.
+check('категория GEL учитывается количеством', categoryByQty('GEL') === true);
+const qtyItem = call('/item/create', { name: 'Скотч по заказу', category: 'GEL', qty: 30 }, issAdmin);
+check('позиция количеством заведена', qtyItem.ok === true, qtyItem);
+const qtyRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(qtyItem.data.item_id))[0];
+const qtyOrder = call('/order/create', {
+  order_no: 'QTY-1', student_name: 'Количеством Петрович', student_phone: '+79990000002',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [{ line_no: 1, raw_name: 'Скотч', category: 'GEL', model_code: qtyRow.model_code, qty: 12 }],
+}, issAdmin).data.order_id;
+const qtyLine = () => call('/order/card', { order_id: qtyOrder }, issAdmin).data.items[0].issued_qty;
+r = call('/transaction/checkout', { item_id: qtyItem.data.item_id, order_id: qtyOrder, qty: 10 }, issAdmin);
+check('выдали 10 из 12 — строка в составе', r.ok && r.data.order_line === '1', r);
+check('в строке «выдано 10 из 12»', qtyLine() === 10, qtyLine());
+r = call('/transaction/checkout', { item_id: qtyItem.data.item_id, order_id: qtyOrder, qty: 5 }, issAdmin);
+check('сверх строки — остаток помечен вне заказа', r.ok && r.data.order_line === 'off-order', r);
+check('строка заполнена до конца, не больше', qtyLine() === 12, qtyLine());
+const qtyTx = readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.order_id) === String(qtyOrder));
+check('выдача разложена по записям: 10, 2 по строке и 3 вне заказа',
+  qtyTx.map((t) => String(t.order_line) + ':' + t.qty).join(',') === '1:10,1:2,off-order:3',
+  qtyTx.map((t) => String(t.order_line) + ':' + t.qty));
+r = call('/transaction/checkin', { item_id: qtyItem.data.item_id, qty: 4 }, issAdmin);
+check('приняли 4 — строка освободилась на 4', r.ok && qtyLine() === 8, qtyLine());
+r = call('/transaction/checkin', { item_id: qtyItem.data.item_id, qty: 11 }, issAdmin);
+check('приняли всё — строка пуста', r.ok && qtyLine() === 0, qtyLine());
+check('заказ закрылся, когда вернули всё',
+  call('/order/card', { order_id: qtyOrder }, issAdmin).data.order.status === 'Returned');
+// Поштучная выдача по-прежнему +1 — выше, в «выдаче по заявке без скана».
+check('поштучная выдача по-прежнему +1', issCard.data.items[0].issued_qty === 1, issCard.data.items[0]);
 
 console.log('\n== архив заказа ==');
 check('заказ с вещью на руках в архив не уходит',
@@ -2262,8 +2447,10 @@ check('ушло в указанный чат, а не в чат из настр�
 check('бот представился',
   /^Здравствуйте! Я бот склада Mifs Rent\./.test(tgLast().text), tgLast().text);
 check('перечислил, о чём будет писать',
-  /заявки с сайта/.test(tgLast().text) && /просрочки/.test(tgLast().text) &&
-  /дефекты/.test(tgLast().text) && /акт/.test(tgLast().text), tgLast().text);
+  /заявки с сайта/.test(tgLast().text) && !/просрочки/.test(tgLast().text) &&
+  !/дефект/.test(tgLast().text) && !/не собрал/.test(tgLast().text) &&
+  /акт/.test(tgLast().text), tgLast().text);
+check('приветствие уходит как HTML', tgLast().parse_mode === 'HTML', tgLast());
 check('назвал чат, чтобы было видно — тот самый',
   /Этот чат: -100555/.test(tgLast().text), tgLast().text);
 check('про склад молчит, пока ссылки нет',
@@ -2483,8 +2670,8 @@ check('ссылка на акт лежит в заказе',
 const tgTexts = () => sent
   .filter((r) => /sendMessage/.test(r.url))
   .map((r) => JSON.parse(r.opts.payload).text);
-check('в чат ушло сообщение того же вида, что раньше',
-  tgTexts().some((m) => /^АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} .* >>> https/.test(m)),
+check('в чат ушло сообщение об акте со ссылкой <a href>',
+  tgTexts().some((m) => /^<b>АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/b> .*\n<a href="https:\/\/docs\.google\.com[^"]*">Открыть акт<\/a>$/.test(m)),
   tgTexts().slice(-3));
 
 // Шаблон сломали — заказ всё равно должен записаться: это договорённость со
@@ -2492,6 +2679,7 @@ check('в чат ушло сообщение того же вида, что ра
 const broke = call('/settings/set',
   { settings: { act_template_id: 'AAAAAAAAAAAAAAAAAAAAAA' } }, actAdmin);
 check('настройку шаблона удалось подменить', broke.ok === true, broke);
+const actSentBefore = sent.length;
 const stillOrder = call('/order/create', {
   order_no: '260930-7778',
   student_name: 'Петрова Анна Сергеевна',
@@ -2500,8 +2688,393 @@ const stillOrder = call('/order/create', {
 }, actAdmin);
 check('со сломанным шаблоном заказ всё равно записан', stillOrder.ok === true, stillOrder);
 check('ссылки на акт при этом нет', !stillOrder.data.act_url, stillOrder.data.act_url);
-check('и о неудаче сказано в чат',
-  tgTexts().some((m) => /не собрался/.test(m)), tgTexts().slice(-2));
+check('о неудаче в чат не сказано ничего',
+  sent.length === actSentBefore, sent.slice(actSentBefore).map((x) => x.url));
+const actLog = logRows().filter((l) => l.kind === 'act');
+check('неудача акта записана в журнал Logs',
+  actLog.length === 1 && actLog[0].endpoint === 'autoAct' && actLog[0].reason === 'build-failed' &&
+  actLog[0].message !== '' && String(JSON.parse(actLog[0].context).order_id) === String(stillOrder.data.order_id),
+  actLog);
+
+console.log('\n== акт: выдано сверх заявки ==');
+// Складмен отсканировал по заказу то, чего в заявке нет. Выдача проходит
+// (claimOrderLine → «off-order»), а акт пересобирается в том же документе:
+// ссылка в теме «АКТЫ» остаётся рабочей, второго сообщения нет.
+metaSet('setting_act_template_id', tpl.data.template_id);
+const exA = call('/item/create', { name: 'Прожектор Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+const exB = call('/item/create', { name: 'Прожектор Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+const exC = call('/item/create', { name: 'Отражатель Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+const exD = call('/item/create', { name: 'Отражатель Сверхзаказ', category: 'LGT' }, actAdmin).data.item_id;
+call('/item/numbers', { item_id: exA, serial_number: 'SN-EX-1' }, actAdmin);
+call('/item/numbers', { item_id: exB, serial_number: 'SN-EX-2' }, actAdmin);
+const exModel = readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(exA))[0];
+check('у лишней позиции есть модель',
+  exModel && exModel.model_code !== '' && exModel.model_code !== undefined, exModel);
+call('/models/price', { category: 'LGT', model_code: exModel.model_code, price: 1500 }, actAdmin);
+
+const exOrder = call('/order/create', {
+  order_no: '260930-8888', student_name: 'Сверхов Иван Петрович', student_phone: '+79990008888',
+  issue_date: '30-09-2026', return_date: '02-10-2026',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+check('заказ с актом записан', exOrder.ok === true && /docs.google.com/.test(String(exOrder.data.act_url)), exOrder);
+const exUrl = exOrder.data.act_url;
+const exDoc = __docs.get((exUrl.match(/\/document\/d\/([^/]+)/) || [])[1]);
+const exTable = () => exDoc.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
+const legendCount = () => exDoc.body.items
+  .filter((i) => i.kind === 'p' && i.text === '* — выдано сверх заявки').length;
+check('только заявленное — звёздочек нет',
+  exTable().grid.slice(1).every((r) => !/\*$/.test(r[1])), exTable().grid);
+check('только заявленное — расшифровки звёздочки нет', legendCount() === 0);
+
+const docsBefore = __docs.size;
+const actMsgsBefore = tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length;
+const stampBefore = exDoc.name.slice(0, 19);
+const exR1 = call('/transaction/checkout', { item_id: exA, order_id: exOrder.data.order_id }, actAdmin);
+const exR2 = call('/transaction/checkout', { item_id: exB, order_id: exOrder.data.order_id }, actAdmin);
+check('лишнее выдаётся вне заказа',
+  exR1.ok && exR2.ok && exR1.data.order_line === 'off-order' && exR2.data.order_line === 'off-order',
+  [exR1, exR2]);
+check('ответ выдачи прежний, без служебных полей',
+  exR1.data.order_id === undefined && exR1.data.transaction_id > 0, exR1.data);
+let exRows = exTable().grid.slice(1);
+check('сначала заявленное, потом сверх заявки',
+  exRows.length === 2 && exRows[0][1] === 'Видеоштатив' && exRows[1][0] === '2', exRows);
+check('лишнее — одной строкой на модель, со звёздочкой',
+  exRows[1][1] === 'Прожектор Сверхзаказ *' && exRows[1][2] === '2', exRows[1]);
+check('заводские номера лишнего перечислены',
+  exRows[1][3] === 'SN-EX-1, SN-EX-2', exRows[1][3]);
+check('цена лишнего — по модели, за штуку на количество',
+  exRows[1][4] === moneyDigits(3000), exRows[1][4]);
+check('под таблицей одна строка «* — выдано сверх заявки»', legendCount() === 1);
+check('расшифровка стоит сразу под таблицей',
+  exDoc.body.items[exDoc.body.items.indexOf(exTable()) + 1].text === '* — выдано сверх заявки');
+check('подстановок после пересборки не осталось', !exDoc.body.getText().includes('{{'));
+check('сумма пересчитана с лишним', exDoc.body.getText().includes(moneyDigits(3000)));
+check('пересобран тот же документ — новых нет', __docs.size === docsBefore, __docs.size - docsBefore);
+check('ссылка в заказе та же',
+  call('/order/card', { order_id: exOrder.data.order_id }, actAdmin).data.order.act_url === exUrl);
+check('второго сообщения об акте в чат нет',
+  tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length === actMsgsBefore);
+check('дата акта прежняя', exDoc.body.getText().includes(stampBefore), stampBefore);
+
+// Вернули — всё равно выдавали: акт о переданном, как и у заявленных строк.
+call('/transaction/checkin', { item_id: exA }, actAdmin);
+call('/transaction/checkout', { item_id: exC, order_id: exOrder.data.order_id }, actAdmin);
+exRows = exTable().grid.slice(1);
+check('возвращённое лишнее из акта не пропало',
+  exRows.some((r) => r[1] === 'Прожектор Сверхзаказ *' && r[3] === 'SN-EX-1, SN-EX-2'), exRows);
+check('другая модель — своя строка, без цены прочерк',
+  exRows.some((r) => r[1] === 'Отражатель Сверхзаказ *' && r[2] === '1' && r[4] === '—'), exRows);
+check('расшифровка всё так же одна', legendCount() === 1);
+
+// Пересборка сломалась — выдача всё равно прошла, причина в журнале.
+metaSet('setting_act_template_id', 'AAAAAAAAAAAAAAAAAAAAAA');
+const rebuildLogBefore = logRows().filter((l) => l.kind === 'act' && l.endpoint === 'rebuild').length;
+const exR4 = call('/transaction/checkout', { item_id: exD, order_id: exOrder.data.order_id }, actAdmin);
+check('со сломанным шаблоном выдача сверх заявки прошла',
+  exR4.ok === true && exR4.data.order_line === 'off-order', exR4);
+const rebuildLog = logRows().filter((l) => l.kind === 'act' && l.endpoint === 'rebuild');
+check('неудача пересборки записана в Logs',
+  rebuildLog.length === rebuildLogBefore + 1 && rebuildLog[rebuildLog.length - 1].reason === 'rebuild-failed' &&
+  String(JSON.parse(rebuildLog[rebuildLog.length - 1].context).order_id) === String(exOrder.data.order_id),
+  rebuildLog);
+check('выданное со сломанным шаблоном на руках',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(exD))[0].status === 'Rented');
+metaSet('setting_act_template_id', tpl.data.template_id);
+
+console.log('\n== заявка с сайта: строки сопоставлены с каталогом ==');
+// Сайт пишет в заявку model_name из /public/catalog. Без сопоставления строка
+// ложилась без модели, и каждый скан по заявке уходил «вне заказа».
+call('/settings/set', { settings: { public_orders: 1, public_orders_per_hour: 50 } }, actAdmin);
+__cacheStore.clear();
+const scA = call('/item/create', { name: 'Софтбокс Сайтовый', category: 'LGT' }, actAdmin).data.item_id;
+const scB = call('/item/create', { name: 'Софтбокс Сайтовый', category: 'LGT' }, actAdmin).data.item_id;
+const scX = call('/item/create', { name: 'Флаг Внезаказный', category: 'LGT' }, actAdmin).data.item_id;
+const scModel = call('/public/catalog', {}).data.models
+  .filter((m) => m.model_name === 'Софтбокс Сайтовый')[0];
+check('модель есть в каталоге сайта', !!scModel, scModel);
+// Строку собираем так же, как site/cart.js (orderText): имя из каталога.
+const scText = botOrderText('270301-0001', [
+  '1. ' + scModel.model_name + ': 0 (2 x 0)',
+  '2. Неизвестная штуковина: 0 (1 x 0)',
+], adultBuyer);
+const scOrder = call('/public/order', { raw_text: scText });
+check('заявка с сайта принята', scOrder.ok === true, scOrder);
+let scCard = call('/order/card', { order_id: scOrder.data.order_id }, actAdmin).data;
+check('строка из каталога получила модель и категорию',
+  scCard.items[0].model_code === scModel.model_code && scCard.items[0].category === 'LGT',
+  scCard.items[0]);
+check('неизвестная строка осталась без модели',
+  scCard.items[1].model_code === '' && scCard.items[1].raw_name === 'Неизвестная штуковина',
+  scCard.items[1]);
+check('повтор той же заявки по-прежнему узнаётся',
+  call('/public/order', { raw_text: scText }).data.repeat === true);
+check('регистр и лишние пробелы не мешают сопоставлению',
+  matchOrderLine('  софтбокс   САЙТОВЫЙ ', readRows(getSheet(SHEETS.MODELS))).model_code === scModel.model_code);
+
+const scR1 = call('/transaction/checkout', { item_id: scA, order_id: scOrder.data.order_id }, actAdmin);
+check('скан по заявке с сайта — не «вне заказа»',
+  scR1.ok === true && scR1.data.order_line === '1', scR1);
+scCard = call('/order/card', { order_id: scOrder.data.order_id }, actAdmin).data;
+check('«Выдано» по строке растёт', scCard.items[0].issued_qty === 1, scCard.items[0]);
+call('/transaction/checkout', { item_id: scB, order_id: scOrder.data.order_id }, actAdmin);
+check('вторая единица — та же строка, 2 из 2',
+  call('/order/card', { order_id: scOrder.data.order_id }, actAdmin).data.items[0].issued_qty === 2);
+
+const scDoc = __docs.get((String(scCard.order.act_url).match(/\/document\/d\/([^/]+)/) || [])[1]);
+const scTable = () => scDoc.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
+check('в акте у сопоставленной строки звёздочки нет',
+  !!scDoc && scTable().grid.slice(1).every((r) => !/\*$/.test(r[1])), scDoc && scTable().grid);
+
+const scR3 = call('/transaction/checkout', { item_id: scX, order_id: scOrder.data.order_id }, actAdmin);
+check('чужая вещь при несопоставленной строке — «вне заказа»',
+  scR3.ok === true && scR3.data.order_line === 'off-order', scR3);
+check('и только она в акте со звёздочкой',
+  scTable().grid.slice(1).filter((r) => /\*$/.test(r[1])).map((r) => r[1]).join('|') === 'Флаг Внезаказный *',
+  scTable().grid);
+call('/settings/set', { settings: { public_orders: 0 } }, actAdmin);
+
+console.log('\n== темы форума: заявки и акты ==');
+// Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
+// настройка — General, как было до тем.
+const tgMsgs = () => sent.filter((r) => /sendMessage/.test(r.url)).map((r) => JSON.parse(r.opts.payload));
+const orderMsgs = () => tgMsgs().filter((m) => /^<b>Заказ №/.test(m.text));
+check('номер темы: пусто принимается',
+  call('/settings/set', { settings: { notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin).ok === true);
+check('номер темы: число принимается',
+  call('/settings/set', { settings: { notify_thread_orders: '123' } }, actAdmin).ok === true);
+check('номер темы: буквы отклонены',
+  call('/settings/set', { settings: { notify_thread_orders: 'abc' } }, actAdmin).status === 400);
+check('номер темы: минус отклонён',
+  call('/settings/set', { settings: { notify_thread_acts: '-5' } }, actAdmin).status === 400);
+check('отклонённое не сохранилось',
+  call('/settings/get', {}, actAdmin).data.settings.notify_thread_orders === '123');
+call('/settings/set', { settings: { public_orders: 1, public_orders_per_hour: 50,
+  notify_thread_acts: '456' } }, actAdmin);
+// Шаблон выше нарочно сломали; возвращаем настоящий, иначе акт не соберётся.
+metaSet('setting_act_template_id', tpl.data.template_id);
+metaSet('setting_notify_chat_id', '-1001234567890');
+
+sent.length = 0;
+let thr = call('/public/order', { raw_text: siteText('260201-0001') });
+check('заявка принята', thr.ok === true, thr);
+check('заявка ушла в тему «ЗАЯВКИ»',
+  orderMsgs().length === 1 && orderMsgs()[0].message_thread_id === 123, tgMsgs());
+
+sent.length = 0;
+const thrOrder = call('/order/create', {
+  order_no: '260201-0002', student_name: 'Темов Тема Темович', student_phone: '+79990002002',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+check('заказ с актом записан', thrOrder.ok === true, thrOrder);
+const actMsgs = tgMsgs().filter((m) => /^<b>АКТ от /.test(m.text));
+check('акт ушёл в тему «АКТЫ»',
+  actMsgs.length === 1 && actMsgs[0].message_thread_id === 456, tgMsgs());
+
+sent.length = 0;
+call('/notify/hello', {}, actAdmin);
+call('/notify/hello', { chat_id: '-100555' }, actAdmin);
+call('/notify/test', {}, actAdmin);
+check('приветствие и проверка связи — без темы, в General',
+  tgMsgs().length >= 2 && tgMsgs().every((m) => !('message_thread_id' in m)), tgMsgs());
+
+call('/settings/set', { settings: { notify_thread_orders: '' } }, actAdmin);
+sent.length = 0;
+call('/public/order', { raw_text: siteText('260201-0003') });
+check('пустая тема — заявка в General, поля нет',
+  orderMsgs().length === 1 && !('message_thread_id' in orderMsgs()[0]), tgMsgs());
+
+// Тему удалили или закрыли: Telegram отказывает, а заявка всё равно должна
+// дойти — одним повтором без темы.
+call('/settings/set', { settings: { notify_thread_orders: '999' } }, actAdmin);
+__telegramSendReply = (m) => ('message_thread_id' in m)
+  ? { ok: false, error_code: 400, description: 'Bad Request: message thread not found' }
+  : { ok: true, result: {} };
+sent.length = 0;
+thr = call('/public/order', { raw_text: siteText('260201-0004') });
+check('заявка принята и при отказе темы', thr.ok === true, thr);
+check('ровно один повтор, и он без темы',
+  orderMsgs().length === 2 && orderMsgs()[0].message_thread_id === 999 &&
+  !('message_thread_id' in orderMsgs()[1]), tgMsgs());
+check('повтор помечен fallback',
+  JSON.stringify(tgSend('проба', '', 'orders')) === JSON.stringify({ ok: true, fallback: true }));
+__telegramSendReply = () => ({ ok: false, description: 'Forbidden' });
+sent.length = 0;
+const bothFail = tgSend('проба', '', 'orders');
+check('отказ и без темы — ошибка повтора, повтор один',
+  bothFail.ok === false && bothFail.fallback === true && bothFail.error === 'Forbidden' &&
+  tgMsgs().length === 2, [bothFail, tgMsgs()]);
+__telegramSendReply = null;
+call('/settings/set', { settings: { public_orders: 0, notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin);
+
+console.log('\n== журнал Logs: служебное — в таблицу, не в чат ==');
+// Владелец решил: в чат склада — только заявки и акты. Ошибки сервера, отказы
+// Telegram и откат из темы в General пишутся в лист Logs.
+scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+metaSet('setting_notify_chat_id', '-1001234567890');
+const logLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const logToken = logLogin.ok ? logLogin.data.token : null;
+check('вход перед проверкой журнала', !!logToken, logLogin);
+
+// Внутренняя ошибка: ответ по-прежнему 500, а в журнале — строка без токена и
+// без тела запроса.
+check('ошибка с отказом ручки (ApiError) в журнал не идёт',
+  (() => { const n = logRows().length; call('/inventory/list', {}, 'чужой-токен'); return logRows().length === n; })());
+const realInventoryList = handleInventoryList;
+globalThis.handleInventoryList = () => { throw new Error('внезапно сломалось'); };
+let logBefore = logRows().length;
+let boom = call('/inventory/list', { phone: '+79990001122' }, logToken);
+check('внутренняя ошибка — по-прежнему 500 с текстом',
+  boom.ok === false && boom.status === 500 && /внезапно сломалось/.test(String(boom.error)), boom);
+let errLog = logRows().slice(logBefore);
+check('внутренняя ошибка записана в журнал',
+  errLog.length === 1 && errLog[0].kind === 'error' && errLog[0].endpoint === '/inventory/list' &&
+  errLog[0].message === 'внезапно сломалось' && /stack/.test(errLog[0].context), errLog);
+check('в журнале нет ни токена сессии, ни данных запроса',
+  JSON.stringify(errLog).indexOf(logToken) === -1 && JSON.stringify(errLog).indexOf('+79990001122') === -1,
+  errLog);
+
+// Отказ Telegram по заявке — строка в журнале, в чат ничего сверх попытки.
+__telegramSendReply = () => ({ ok: false, error_code: 403, description: 'Forbidden: bot was kicked' });
+logBefore = logRows().length;
+let failed = tgSend('<b>Заказ №1</b>', '', 'orders');
+let tgLog = logRows().slice(logBefore);
+check('неудачная заявка в чат — строка в журнале',
+  failed.ok === false && tgLog.length === 1 && tgLog[0].kind === 'telegram' &&
+  tgLog[0].reason === 'telegram' && /kicked/.test(tgLog[0].message) &&
+  JSON.parse(tgLog[0].context).kind === 'orders', tgLog);
+
+// Откат из темы в General — тоже в журнал: заявка дошла, но тему пора чинить.
+metaSet('setting_notify_thread_orders', '999');
+__telegramSendReply = (m) => ('message_thread_id' in m)
+  ? { ok: false, error_code: 400, description: 'Bad Request: message thread not found' }
+  : { ok: true, result: {} };
+logBefore = logRows().length;
+const fb = tgSend('<b>Заказ №2</b>', '', 'orders');
+tgLog = logRows().slice(logBefore);
+check('откат в General записан в журнал',
+  fb.ok === true && fb.fallback === true && tgLog.length === 1 && tgLog[0].reason === 'fallback' &&
+  JSON.parse(tgLog[0].context).thread === '999', tgLog);
+metaSet('setting_notify_thread_orders', '');
+__telegramSendReply = null;
+
+// Нет чата: заявка — в журнал; кнопка приветствия — нет, она и так отвечает
+// человеку через notifyRefusal.
+metaSet('setting_notify_chat_id', '');
+logBefore = logRows().length;
+tgSend('<b>Заказ №3</b>', '', 'orders');
+check('заявка без чата — строка no-chat в журнале',
+  logRows().slice(logBefore).map((l) => l.reason).join() === 'no-chat', logRows().slice(logBefore));
+logBefore = logRows().length;
+const noChatHello = call('/notify/hello', {}, logToken);
+check('приветствие без чата отвечает человеку', noChatHello.ok === false && noChatHello.status === 400,
+  noChatHello);
+check('и в журнал не пишет', logRows().length === logBefore, logRows().slice(logBefore));
+metaSet('setting_notify_chat_id', '-1001234567890');
+
+// Сетевая ошибка цитирует адрес с токеном бота — в журнал он не попадает.
+__telegramSendReply = () => { throw new Error('Request failed for https://api.telegram.org/bot123:ABC/sendMessage'); };
+logBefore = logRows().length;
+tgSend('<b>Заказ №4</b>', '', 'orders');
+tgLog = logRows().slice(logBefore);
+check('сетевая ошибка в журнале, токен вырезан',
+  tgLog.length === 1 && tgLog[0].reason === 'network' &&
+  JSON.stringify(tgLog).indexOf('123:ABC') === -1 && /bot<token>/.test(tgLog[0].message), tgLog);
+__telegramSendReply = null;
+
+// Длинный контекст обрезается.
+logBefore = logRows().length;
+logEvent('error', '/x', 'test', 'длинно', { big: 'я'.repeat(5000) });
+check('контекст журнала обрезан до ~2000 знаков',
+  logRows().slice(logBefore)[0].context.length <= 2001, logRows().slice(logBefore)[0].context.length);
+
+// Листа Logs нет (после выкладки не запускали setupSheets) — журнал молчит,
+// запрос отвечает как обычно.
+const logsSheet = spreadsheet.getSheetByName('Logs');
+spreadsheet.deleteSheet(logsSheet);
+let noLogThrew = false;
+try { logEvent('error', '/x', 'test', 'без листа', {}); } catch (e) { noLogThrew = true; }
+check('logEvent без листа Logs не бросает', noLogThrew === false);
+check('без листа Logs сводка склада даёт logs_24h = 0',
+  warehouseSummary().logs_24h === 0, warehouseSummary().logs_24h);
+boom = call('/inventory/list', {}, logToken);
+check('без листа Logs внутренняя ошибка — всё тот же 500',
+  boom.ok === false && boom.status === 500 && /внезапно сломалось/.test(String(boom.error)), boom);
+__telegramSendReply = () => ({ ok: false, description: 'Forbidden' });
+check('без листа Logs неудачный tgSend просто возвращает отказ',
+  tgSend('проба', '', 'orders').ok === false);
+__telegramSendReply = null;
+spreadsheet.sheets.push(logsSheet);
+globalThis.handleInventoryList = realInventoryList;
+check('ручка после проверки снова работает', call('/inventory/list', {}, logToken).ok === true);
+
+console.log('\n== ночное обслуживание: копия таблицы ==');
+// 15 копий уже лежат в папке, по дню разницы; шестнадцатая делается сейчас.
+fakeFolder(BACKUP_FOLDER_NAME);
+const backupFiles = drive.folders[BACKUP_FOLDER_NAME].files;
+for (let d = 15; d >= 1; d--) {
+  backupFiles.push({ name: 'Mifs Rent old-' + d, id: 'old-' + d,
+                     created: new Date(Date.now() - d * 86400000), trashed: false });
+}
+r = dailyBackup();
+const alive = backupFiles.filter(f => !f.trashed);
+check('копия сделана с датой в имени', backupFiles.some(f => /^Mifs Rent \d{4}-\d{2}-\d{2}$/.test(f.name) && !f.trashed), r);
+check('из 16 копий осталось 14', alive.length === 14, alive.length);
+check('в корзину ушли две самые старые',
+  backupFiles.filter(f => f.trashed).map(f => f.id).sort().join() === 'old-14,old-15',
+  backupFiles.filter(f => f.trashed).map(f => f.id));
+
+logBefore = logRows().length;
+global.__driveFail = 'Drive недоступен';
+let backupThrew = false;
+try { dailyMaintenance(); } catch (e) { backupThrew = true; }
+global.__driveFail = null;
+const backupLog = logRows().slice(logBefore).filter(l => l.kind === 'backup');
+check('ошибка Диска не роняет триггер', backupThrew === false);
+check('ошибка Диска записана в Logs',
+  backupLog.length === 1 && /Drive недоступен/.test(backupLog[0].message), backupLog);
+check('после неудачи копий по-прежнему 14', backupFiles.filter(f => !f.trashed).length === 14);
+
+console.log('\n== ночное обслуживание: триггеры ==');
+ScriptApp.newTrigger('dailyOverdueDigest').timeBased().everyDays(1).atHour(9).create();
+ScriptApp.newTrigger('doSomethingElse').timeBased().everyDays(1).atHour(9).create();
+const trig1 = setupTriggers();
+const trig2 = setupTriggers();
+const byHandler = (h) => triggers.filter(t => t.handler === h);
+check('после двух запусков ровно один dailyMaintenance', byHandler('dailyMaintenance').length === 1, triggers.map(t => t.handler));
+check('dailyMaintenance ежедневно в 3 часа',
+  byHandler('dailyMaintenance')[0].days === 1 && byHandler('dailyMaintenance')[0].hour === 3);
+check('старый dailyOverdueDigest снят', byHandler('dailyOverdueDigest').length === 0);
+check('чужой триггер не тронут', byHandler('doSomethingElse').length === 1);
+check('сводка говорит, сколько снято', /снято старых 1/.test(trig1) && /снято старых 1/.test(trig2), [trig1, trig2]);
+
+console.log('\n== ночное обслуживание: подрезка Logs ==');
+const logSheet = getSheet(SHEETS.LOGS);
+appendRow(logSheet, { timestamp: new Date(Date.now() - 91 * 86400000).toISOString(), kind: 'test', message: 'старая' });
+appendRow(logSheet, { timestamp: new Date(Date.now() - 89 * 86400000).toISOString(), kind: 'test', message: 'свежая' });
+const logsBeforeTrim = logRows().length;
+const trimmed = trimLogs();
+const testLogs = logRows().filter(l => l.kind === 'test');
+check('удалена одна строка старше 90 дней', trimmed === 1 && logRows().length === logsBeforeTrim - 1, trimmed);
+check('свежая строка осталась, старая ушла',
+  testLogs.length === 1 && testLogs[0].message === 'свежая', testLogs);
+check('сегодняшние строки на месте', logRows().some(l => l.kind === 'backup'));
+
+console.log('\n== сводка склада: записи журнала за сутки ==');
+// logs_24h — строки Logs со временем не старше суток. Позавчерашняя и строка
+// с нечитаемой датой не считаются.
+const logs24Before = warehouseSummary().logs_24h;
+check('сегодняшние записи посчитаны', logs24Before > 0 &&
+  logs24Before === logRows().filter(l => Date.now() - new Date(l.timestamp).getTime() <= 86400000).length,
+  logs24Before);
+appendRow(logSheet, { timestamp: new Date(Date.now() - 25 * 3600000).toISOString(), kind: 'test', message: '25 ч' });
+appendRow(logSheet, { timestamp: new Date(Date.now() - 23 * 3600000).toISOString(), kind: 'test', message: '23 ч' });
+appendRow(logSheet, { timestamp: 'не дата', kind: 'test', message: 'мусор' });
+check('logs_24h считает только последние сутки',
+  warehouseSummary().logs_24h === logs24Before + 1, warehouseSummary().logs_24h);
+check('logs_24h отдаётся вместе с настройками',
+  call('/settings/get', {}, logToken).data.summary.logs_24h === logs24Before + 1);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

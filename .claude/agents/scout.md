@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Находит в репозитории аналог для новой задачи и выдаёт цепочку файлов, которые придётся тронуть. Только читает.
-model: haiku
+model: sonnet
 tools:
   - Read
   - Grep

@@ -305,6 +305,8 @@
   function flat(s) { return String(s).replace(/\s+/g, " ").trim(); }
 
   // Дата плюс случайный хвост: без сервера уникальность не гарантировать.
+  // Номер живёт до успешной отправки: повторное нажатие шлёт тот же номер,
+  // а следующая заявка в этой же вкладке получает новый (см. sendOrder ниже).
   var code = null;
   function requestCode() {
     if (code) return code;
@@ -488,6 +490,9 @@
 
     Site.sendOrder(orderText())
       .then(function (res) {
+        // Заявка принята — номер израсходован. Иначе вторая заявка из той же
+        // вкладки ушла бы под прежним номером и столкнулась с первой.
+        code = null;
         btn.textContent = "Забронировано";
         note.hidden = false;
         note.textContent = res.repeat

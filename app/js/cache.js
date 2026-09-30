@@ -41,9 +41,11 @@ const Cache = (() => {
     set(name, [value]);
   }
 
-  function set(name, list) {
+  // savedAt передаёт только patch: поправленная запись не делает свежим весь
+  // список, и «обновлено N минут назад» должно остаться честным.
+  function set(name, list, savedAt) {
     try {
-      localStorage.setItem(key(name), JSON.stringify({ items: list, saved_at: Date.now() }));
+      localStorage.setItem(key(name), JSON.stringify({ items: list, saved_at: savedAt || Date.now() }));
     } catch {
       // переполнение хранилища не должно ломать экран
     }
@@ -60,15 +62,46 @@ const Cache = (() => {
   }
 
   // Точечная правка: после своей же выдачи или приёма незачем перезапрашивать
-  // весь список — достаточно поправить одну запись.
+  // весь список — достаточно поправить одну запись. Возраст списка не
+  // меняется: остальные строки свежее от этого не стали.
+  //
+  // patchObject может быть функцией от строки — когда новое значение считается
+  // от того, что лежит в кэше (например, «на руках стало на 3 больше»).
   function patch(name, idField, idValue, patchObject) {
     const entry = get(name);
     if (!entry) return false;
     const idx = entry.items.findIndex((row) => String(row[idField]) === String(idValue));
     if (idx === -1) return false;
-    entry.items[idx] = { ...entry.items[idx], ...patchObject };
-    set(name, entry.items);
+    const row = entry.items[idx];
+    const changes = typeof patchObject === "function" ? patchObject(row) : patchObject;
+    entry.items[idx] = { ...row, ...changes };
+    set(name, entry.items, entry.saved_at);
     return true;
+  }
+
+  // «Подгрузи, если нет». Экран, которому нужен чужой список (названия из
+  // каталога, заказы для выдачи), раньше говорил «откройте Каталог и
+  // возвращайтесь» — теперь тянет его сам, один раз, и кладёт туда же, откуда
+  // список потом прочитает его собственный экран. Сделано как ensureItemsMap
+  // в order.js.
+  //
+  // Лежит в кэше — отдаём как есть, даже не свежее: экраны, которые так
+  // подгружают, берут из списка названия и номера, и ждать ради них 5–8 секунд
+  // при каждом открытии хуже, чем показать список пятиминутной давности. Свой
+  // возраст список показывает на собственном экране, там же и «Обновить».
+  //
+  // Одновременные вызовы делят один запрос: «Ремонт» и карточка заказа могут
+  // попросить каталог в одну и ту же секунду.
+  const inflight = {};
+  function ensure(name, endpoint, body) {
+    const cached = items(name);
+    if (cached) return Promise.resolve(cached);
+    if (!inflight[name]) {
+      inflight[name] = apiPost(endpoint, body || {})
+        .then((list) => { set(name, list); return list; })
+        .finally(() => { delete inflight[name]; });
+    }
+    return inflight[name];
   }
 
   function clear(name) {
@@ -93,7 +126,74 @@ const Cache = (() => {
     return `обновлено ${hours} часов назад`;
   }
 
-  return { items, one, get, set, setOne, age, ageText, isFresh, patch, clear, FRESH_MS };
+  return { items, one, get, set, setOne, age, ageText, isFresh, patch, ensure, clear, FRESH_MS };
+})();
+
+// Как своя запись меняет строку каталога. Повторяет правила Code.gs
+// (checkoutUnderLock, handleTransactionCheckin, handleDefectReport,
+// handleDefectResolve): после выдачи или приёма незачем ждать 6–9 секунд, пока
+// склад перечитается, — новое состояние известно и так.
+//
+// Это догадка клиента, а не источник правды. Каждую запись по-прежнему
+// проверяет бэкенд, поэтому устаревшая догадка кончится понятным отказом
+// («предмет уже выдан»), а не неверной записью. Отказываться ради неё от
+// запроса на запись нельзя.
+//
+// Работает и со строкой каталога, и с ответом /item/lookup: поля те же.
+const ItemState = (() => {
+  // То же правило, что defectBlocksRental в Code.gs.
+  function blocksRental(severity) {
+    return severity === "Major" || severity === "Out of Service";
+  }
+
+  // В ответе /item/lookup признак есть, в строке каталога — нет: там его
+  // знает категория.
+  function byQty(item) {
+    return item.by_qty !== undefined ? !!item.by_qty : categoryByQty(item.category);
+  }
+
+  function qtyChanges(item, out, status) {
+    return { qty_out: out, qty_free: Number(item.qty || 1) - out, status };
+  }
+
+  // Пока на складе что-то осталось, позиция количеством остаётся доступной.
+  function afterCheckout(item, qty, transactionId) {
+    if (byQty(item)) {
+      const total = Number(item.qty || 1);
+      const out = Number(item.qty_out || 0) + Math.max(1, Math.floor(Number(qty) || 1));
+      return qtyChanges(item, out, out >= total ? "Rented" : "Available");
+    }
+    return { status: "Rented", current_transaction_id: transactionId || "" };
+  }
+
+  // qtyOutFromServer — остаток на руках из ответа приёма: бэкенд его
+  // возвращает, и считать самим тогда незачем.
+  function afterCheckin(item, qty, defectSeverity, qtyOutFromServer) {
+    const repair = !!defectSeverity && blocksRental(defectSeverity);
+    if (byQty(item)) {
+      const total = Number(item.qty || 1);
+      const out = qtyOutFromServer !== undefined && qtyOutFromServer !== null
+        ? Number(qtyOutFromServer)
+        : Math.max(0, Number(item.qty_out || 0) - Math.max(1, Math.floor(Number(qty) || 1)));
+      return qtyChanges(item, out, repair ? "In Repair" : out >= total ? "Rented" : "Available");
+    }
+    return { status: repair ? "In Repair" : "Available", current_transaction_id: "" };
+  }
+
+  // Статус после заявки о дефекте бэкенд возвращает сам; своё правило — на
+  // случай, если в ответе его нет.
+  function afterDefect(item, severity, statusFromServer) {
+    if (statusFromServer) return { status: statusFromServer };
+    return blocksRental(severity) && item.status === "Available" ? { status: "In Repair" } : {};
+  }
+
+  // Из ремонта предмет выходит, только если снимающих с выдачи дефектов у
+  // него больше не осталось.
+  function afterResolve(item, otherBlocking) {
+    return item.status === "In Repair" && !otherBlocking ? { status: "Available" } : {};
+  }
+
+  return { blocksRental, afterCheckout, afterCheckin, afterDefect, afterResolve };
 })();
 
 // Строка над списком: когда данные получены и кнопка обновления.
