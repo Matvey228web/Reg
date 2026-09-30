@@ -791,6 +791,107 @@ function trimSheetRows(sheet, shouldRemove) {
   return doomed.length;
 }
 
+// ---------------------------------------------------------------------
+// Ночное обслуживание: копия таблицы и подрезка журнала Logs
+// ---------------------------------------------------------------------
+// Работает без разработчика: setupTriggers() один раз запускается руками из
+// редактора (как setupSheets), дальше dailyMaintenance идёт сам каждую ночь.
+// В чат ничего не пишет — неудачи только в лист Logs (logEvent).
+// Об успехе строку не пишем: копия видна в папке на Диске, а журнал, куда
+// каждую ночь ложится «всё хорошо», распухает и прячет настоящие отказы.
+
+var BACKUP_FOLDER_NAME = "Mifs Rent — копии";
+var BACKUP_KEEP = 14;          // сколько последних копий держать в папке
+var LOGS_KEEP_DAYS = 90;       // сколько дней держать строки журнала Logs
+var MAINTENANCE_HOUR = 3;      // час запуска, по часовому поясу скрипта
+
+// Точка входа для триггера. Каждый шаг в своём try: сломанная копия не должна
+// отменять подрезку журнала, и наоборот. Наружу не бросаем — иначе Google
+// шлёт владельцу письмо об ошибке триггера, а разбирать его некому.
+function dailyMaintenance() {
+  try { dailyBackup(); } catch (e) {
+    logEvent("backup", "dailyMaintenance", "exception", e && e.message ? e.message : String(e));
+  }
+  try { trimLogs(); } catch (e) {
+    logEvent("maintenance", "trimLogs", "exception", e && e.message ? e.message : String(e));
+  }
+}
+
+/**
+ * Копирует всю таблицу в папку «Mifs Rent — копии» под именем
+ * «Mifs Rent ГГГГ-ММ-ДД» и оставляет в папке только BACKUP_KEEP свежих копий,
+ * остальные — в корзину Диска (оттуда их ещё 30 дней можно достать).
+ * Неудачу пишет в Logs и не бросает.
+ */
+function dailyBackup() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    // Папка — как в archiveJournal: нашли по имени или создали.
+    var folders = DriveApp.getFoldersByName(BACKUP_FOLDER_NAME);
+    var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(BACKUP_FOLDER_NAME);
+    var name = "Mifs Rent " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    DriveApp.getFileById(ss.getId()).makeCopy(name, folder);
+
+    var copies = [];
+    var it = folder.getFiles();
+    while (it.hasNext()) {
+      var f = it.next();
+      if (!f.isTrashed()) copies.push(f);
+    }
+    copies.sort(function (a, b) { return b.getDateCreated().getTime() - a.getDateCreated().getTime(); });
+    var trashed = 0;
+    copies.slice(BACKUP_KEEP).forEach(function (f) { f.setTrashed(true); trashed++; });
+
+    var message = "Копия «" + name + "» сохранена в папку «" + BACKUP_FOLDER_NAME +
+      "». Убрано старых копий: " + trashed + ".";
+    Logger.log(message);
+    return message;
+  } catch (e) {
+    var err = e && e.message ? e.message : String(e);
+    logEvent("backup", "dailyBackup", "failed", err, { folder: BACKUP_FOLDER_NAME });
+    Logger.log("Копия таблицы не сделана: " + err);
+    return "Копия таблицы не сделана: " + err;
+  }
+}
+
+// Удаляет из Logs строки старше LOGS_KEEP_DAYS дней. Строку с нечитаемой
+// датой оставляем: лучше лишняя строка, чем потерянная.
+function trimLogs() {
+  var cutoff = Date.now() - LOGS_KEEP_DAYS * 24 * 60 * 60 * 1000;
+  var removed = trimSheetRows(getSheet(SHEETS.LOGS), function (row) {
+    var t = new Date(row.timestamp).getTime();
+    return !isNaN(t) && t < cutoff;
+  });
+  Logger.log("Журнал Logs подрезан: удалено строк " + removed + ".");
+  return removed;
+}
+
+/**
+ * Ставит ночной триггер обслуживания. Запускать руками из редактора, как
+ * setupSheets; повторный запуск безопасен. Снимает прежние триггеры
+ * dailyMaintenance и убранного dailyOverdueDigest, затем ставит один новый.
+ */
+function setupTriggers() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var h = t.getHandlerFunction();
+    if (h === "dailyMaintenance" || h === "dailyOverdueDigest") {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  // atHour — по часовому поясу скрипта; Google сам выбирает минуту в пределах часа.
+  ScriptApp.newTrigger("dailyMaintenance").timeBased().everyDays(1).atHour(MAINTENANCE_HOUR).create();
+
+  var message = "Триггеры: снято старых " + removed + ", поставлен ежедневный dailyMaintenance " +
+    "около " + MAINTENANCE_HOUR + ":00 (" + Session.getScriptTimeZone() + "): копия таблицы в папку «" +
+    BACKUP_FOLDER_NAME + "» (хранится " + BACKUP_KEEP + ") и подрезка Logs старше " +
+    LOGS_KEEP_DAYS + " дней.";
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
 function importTrim(v) {
   return v === null || v === undefined ? "" : String(v).trim();
 }

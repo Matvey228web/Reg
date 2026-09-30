@@ -133,6 +133,7 @@ class FakeSpreadsheet {
   getSheets() { return this.sheets.slice(); }
   deleteSheet(s) { this.sheets = this.sheets.filter(x => x !== s); }
   toast() {}
+  getId() { return 'ss-main'; }
 }
 
 const spreadsheet = new FakeSpreadsheet();
@@ -268,7 +269,24 @@ global.HtmlService = {
     return { getContent: () => html };
   },
 };
-global.ScriptApp = { getOAuthToken: () => 'test-token' };
+// Триггеры проекта держим списком — setupTriggers проверяется на повторный запуск.
+const triggers = [];
+global.ScriptApp = {
+  getOAuthToken: () => 'test-token',
+  getProjectTriggers: () => triggers.slice(),
+  deleteTrigger(t) { triggers.splice(triggers.indexOf(t), 1); },
+  newTrigger(handler) {
+    const t = { handler, getHandlerFunction: () => handler };
+    const chain = {
+      timeBased: () => chain,
+      everyDays(n) { t.days = n; return chain; },
+      atHour(h) { t.hour = h; return chain; },
+      create() { triggers.push(t); return t; },
+    };
+    return chain;
+  },
+};
+global.Session = { getScriptTimeZone: () => 'Europe/Moscow' };
 
 // Преобразование HTML в документ у Google на стороне Диска. Здесь — грубый
 // разбор той же разметки: абзацы абзацами, таблицы сетками. Этого хватает,
@@ -331,6 +349,8 @@ global.Utilities = {
     return Array.from(buf).map(b => (b > 127 ? b - 256 : b));
   },
   getUuid: () => crypto.randomUUID(),
+  // Часовой пояс здесь не учитываем: проверяется только вид имени копии.
+  formatDate: (d, _tz, _fmt) => d.toISOString().slice(0, 10),
   base64Decode(str) {
     return Array.from(Buffer.from(String(str), 'base64')).map(b => (b > 127 ? b - 256 : b));
   },
@@ -456,6 +476,26 @@ function fakeFolder(name) {
   if (!drive.folders[name]) drive.folders[name] = { name, files: [] };
   const folder = drive.folders[name];
   return {
+    // Копия таблицы (dailyBackup): дата создания задаётся тестом через __driveNow.
+    _addCopy(fileName) {
+      const file = { name: fileName, id: 'file-' + (folder.files.length + 1),
+                     created: global.__driveNow || new Date(), trashed: false };
+      folder.files.push(file);
+      return { getId: () => file.id, getName: () => file.name };
+    },
+    getFiles() {
+      let i = 0;
+      const list = folder.files.slice();
+      return {
+        hasNext: () => i < list.length,
+        next: () => {
+          const f = list[i++];
+          return { getName: () => f.name, isTrashed: () => !!f.trashed,
+                   getDateCreated: () => f.created || new Date(0),
+                   setTrashed(v) { f.trashed = v; } };
+        },
+      };
+    },
     createFile(fileName, content) {
       const file = { name: fileName, content, id: 'file-' + (folder.files.length + 1) };
       folder.files.push(file);
@@ -475,6 +515,10 @@ global.DriveApp = {
   createFolder: (name) => fakeFolder(name),
   // Документы акта: копия шаблона живёт в том же наборе, что и сам шаблон.
   getFileById(id) {
+    if (id === 'ss-main') {
+      if (global.__driveFail) throw new Error(global.__driveFail);
+      return { makeCopy: (name, folder) => folder._addCopy(name) };
+    }
     const doc = docs.get(id);
     if (!doc) throw new Error('нет файла ' + id);
     return {
@@ -2761,6 +2805,58 @@ __telegramSendReply = null;
 spreadsheet.sheets.push(logsSheet);
 globalThis.handleInventoryList = realInventoryList;
 check('ручка после проверки снова работает', call('/inventory/list', {}, logToken).ok === true);
+
+console.log('\n== ночное обслуживание: копия таблицы ==');
+// 15 копий уже лежат в папке, по дню разницы; шестнадцатая делается сейчас.
+fakeFolder(BACKUP_FOLDER_NAME);
+const backupFiles = drive.folders[BACKUP_FOLDER_NAME].files;
+for (let d = 15; d >= 1; d--) {
+  backupFiles.push({ name: 'Mifs Rent old-' + d, id: 'old-' + d,
+                     created: new Date(Date.now() - d * 86400000), trashed: false });
+}
+r = dailyBackup();
+const alive = backupFiles.filter(f => !f.trashed);
+check('копия сделана с датой в имени', backupFiles.some(f => /^Mifs Rent \d{4}-\d{2}-\d{2}$/.test(f.name) && !f.trashed), r);
+check('из 16 копий осталось 14', alive.length === 14, alive.length);
+check('в корзину ушли две самые старые',
+  backupFiles.filter(f => f.trashed).map(f => f.id).sort().join() === 'old-14,old-15',
+  backupFiles.filter(f => f.trashed).map(f => f.id));
+
+logBefore = logRows().length;
+global.__driveFail = 'Drive недоступен';
+let backupThrew = false;
+try { dailyMaintenance(); } catch (e) { backupThrew = true; }
+global.__driveFail = null;
+const backupLog = logRows().slice(logBefore).filter(l => l.kind === 'backup');
+check('ошибка Диска не роняет триггер', backupThrew === false);
+check('ошибка Диска записана в Logs',
+  backupLog.length === 1 && /Drive недоступен/.test(backupLog[0].message), backupLog);
+check('после неудачи копий по-прежнему 14', backupFiles.filter(f => !f.trashed).length === 14);
+
+console.log('\n== ночное обслуживание: триггеры ==');
+ScriptApp.newTrigger('dailyOverdueDigest').timeBased().everyDays(1).atHour(9).create();
+ScriptApp.newTrigger('doSomethingElse').timeBased().everyDays(1).atHour(9).create();
+const trig1 = setupTriggers();
+const trig2 = setupTriggers();
+const byHandler = (h) => triggers.filter(t => t.handler === h);
+check('после двух запусков ровно один dailyMaintenance', byHandler('dailyMaintenance').length === 1, triggers.map(t => t.handler));
+check('dailyMaintenance ежедневно в 3 часа',
+  byHandler('dailyMaintenance')[0].days === 1 && byHandler('dailyMaintenance')[0].hour === 3);
+check('старый dailyOverdueDigest снят', byHandler('dailyOverdueDigest').length === 0);
+check('чужой триггер не тронут', byHandler('doSomethingElse').length === 1);
+check('сводка говорит, сколько снято', /снято старых 1/.test(trig1) && /снято старых 1/.test(trig2), [trig1, trig2]);
+
+console.log('\n== ночное обслуживание: подрезка Logs ==');
+const logSheet = getSheet(SHEETS.LOGS);
+appendRow(logSheet, { timestamp: new Date(Date.now() - 91 * 86400000).toISOString(), kind: 'test', message: 'старая' });
+appendRow(logSheet, { timestamp: new Date(Date.now() - 89 * 86400000).toISOString(), kind: 'test', message: 'свежая' });
+const logsBeforeTrim = logRows().length;
+const trimmed = trimLogs();
+const testLogs = logRows().filter(l => l.kind === 'test');
+check('удалена одна строка старше 90 дней', trimmed === 1 && logRows().length === logsBeforeTrim - 1, trimmed);
+check('свежая строка осталась, старая ушла',
+  testLogs.length === 1 && testLogs[0].message === 'свежая', testLogs);
+check('сегодняшние строки на месте', logRows().some(l => l.kind === 'backup'));
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
