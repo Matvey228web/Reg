@@ -2291,6 +2291,37 @@ check('несопоставленную строку выдать нельзя',
 check('несуществующую строку тоже',
   call('/order/issue', { order_id: issOrder, line_no: 99 }, issAdmin).status === 404);
 
+console.log('\n== выдача количеством в счёт заказа ==');
+// «Выдано N из M» у позиции количеством: 10 мешков — это 10 в строке, а не 1.
+check('категория GEL учитывается количеством', categoryByQty('GEL') === true);
+const qtyItem = call('/item/create', { name: 'Скотч по заказу', category: 'GEL', qty: 30 }, issAdmin);
+check('позиция количеством заведена', qtyItem.ok === true, qtyItem);
+const qtyRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(qtyItem.data.item_id))[0];
+const qtyOrder = call('/order/create', {
+  order_no: 'QTY-1', student_name: 'Количеством Петрович', student_phone: '+79990000002',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [{ line_no: 1, raw_name: 'Скотч', category: 'GEL', model_code: qtyRow.model_code, qty: 12 }],
+}, issAdmin).data.order_id;
+const qtyLine = () => call('/order/card', { order_id: qtyOrder }, issAdmin).data.items[0].issued_qty;
+r = call('/transaction/checkout', { item_id: qtyItem.data.item_id, order_id: qtyOrder, qty: 10 }, issAdmin);
+check('выдали 10 из 12 — строка в составе', r.ok && r.data.order_line === '1', r);
+check('в строке «выдано 10 из 12»', qtyLine() === 10, qtyLine());
+r = call('/transaction/checkout', { item_id: qtyItem.data.item_id, order_id: qtyOrder, qty: 5 }, issAdmin);
+check('сверх строки — остаток помечен вне заказа', r.ok && r.data.order_line === 'off-order', r);
+check('строка заполнена до конца, не больше', qtyLine() === 12, qtyLine());
+const qtyTx = readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.order_id) === String(qtyOrder));
+check('выдача разложена по записям: 10, 2 по строке и 3 вне заказа',
+  qtyTx.map((t) => String(t.order_line) + ':' + t.qty).join(',') === '1:10,1:2,off-order:3',
+  qtyTx.map((t) => String(t.order_line) + ':' + t.qty));
+r = call('/transaction/checkin', { item_id: qtyItem.data.item_id, qty: 4 }, issAdmin);
+check('приняли 4 — строка освободилась на 4', r.ok && qtyLine() === 8, qtyLine());
+r = call('/transaction/checkin', { item_id: qtyItem.data.item_id, qty: 11 }, issAdmin);
+check('приняли всё — строка пуста', r.ok && qtyLine() === 0, qtyLine());
+check('заказ закрылся, когда вернули всё',
+  call('/order/card', { order_id: qtyOrder }, issAdmin).data.order.status === 'Returned');
+// Поштучная выдача по-прежнему +1 — выше, в «выдаче по заявке без скана».
+check('поштучная выдача по-прежнему +1', issCard.data.items[0].issued_qty === 1, issCard.data.items[0]);
+
 console.log('\n== архив заказа ==');
 check('заказ с вещью на руках в архив не уходит',
   call('/order/archive', { order_id: issOrder }, issAdmin).status === 409,

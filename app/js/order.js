@@ -290,15 +290,6 @@ const OrderScreen = (() => {
     });
     const allBtn = document.getElementById("order-checkin-all");
     if (allBtn) allBtn.addEventListener("click", () => checkinAll(open));
-
-    // Ник — обработчиком, чтобы переписку открыл сам Telegram. Телефон здесь
-    // не перехватываем: ссылка tel: должна уйти в систему как есть.
-    document.getElementById("order-content").addEventListener("click", (e) => {
-      const chat = e.target.closest("[data-tg]");
-      if (!chat) return;
-      e.preventDefault();
-      TG.openTelegramLink("https://t.me/" + chat.dataset.tg);
-    });
   }
 
   // Выдача без сканирования. Сканер остаётся главным путём — он не даёт выдать
@@ -409,6 +400,16 @@ const OrderScreen = (() => {
   }
 
   function init() {
+    // Ник — обработчиком, чтобы переписку открыл сам Telegram. Телефон здесь
+    // не перехватываем: ссылка tel: должна уйти в систему как есть. Вешаем
+    // один раз: #order-content живёт всё время, а render за показ идёт дважды
+    // (из кэша, потом свежий) — в wire слушатели копились бы.
+    document.getElementById("order-content").addEventListener("click", (e) => {
+      const chat = e.target.closest("[data-tg]");
+      if (!chat) return;
+      e.preventDefault();
+      TG.openTelegramLink("https://t.me/" + chat.dataset.tg);
+    });
     Router.register("order", { onShow });
   }
 

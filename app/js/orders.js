@@ -98,16 +98,21 @@ const OrdersScreen = (() => {
     return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
   }
 
-  // Один слушатель на список: заказов бывает под сотню, и вешать по два
-  // обработчика на каждый незачем. Нажатие на кнопку до карточки не доходит —
-  // открывать заказ при этом не надо. Звонок в обработчике не участвует: там
-  // ссылка tel:, и перехватывать её нельзя.
-  function bindQuickRow(list) {
+  // Один слушатель на список, и вешается он один раз — в init: элемент списка
+  // живёт всё время, а перерисовка идёт на каждое нажатие клавиши в поиске.
+  // Вешать здесь при каждом render значило копить слушатели, и одно нажатие
+  // на «Чат» открывало переписку столько раз, сколько было перерисовок.
+  // Нажатие на кнопку карточку не открывает. Звонок в обработчике не
+  // участвует: там ссылка tel:, и перехватывать её нельзя.
+  function bindList(list) {
     list.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act-url]");
-      if (act) { e.stopPropagation(); TG.openLink(act.dataset.actUrl); return; }
+      if (act) { TG.openLink(act.dataset.actUrl); return; }
       const chat = e.target.closest("[data-tg]");
-      if (chat) { e.stopPropagation(); TG.openTelegramLink("https://t.me/" + chat.dataset.tg); }
+      if (chat) { TG.openTelegramLink("https://t.me/" + chat.dataset.tg); return; }
+      if (e.target.closest("a, button, select, input")) return;
+      const card = e.target.closest("[data-order-id]");
+      if (card) Router.navigate("order", { orderId: card.dataset.orderId });
     });
   }
 
@@ -125,13 +130,6 @@ const OrdersScreen = (() => {
     // Свежие сверху: склад работает с тем, что оформлено недавно.
     visible.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
     list.innerHTML = visible.map(orderCardHtml).join("");
-    bindQuickRow(list);
-    list.querySelectorAll("[data-order-id]").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        if (e.target.closest("a, button, select, input")) return;
-        Router.navigate("order", { orderId: el.dataset.orderId });
-      });
-    });
   }
 
   async function loadList({ force = false } = {}) {
@@ -392,6 +390,7 @@ const OrdersScreen = (() => {
   }
 
   function init() {
+    bindList(document.getElementById("orders-list"));
     document.getElementById("orders-add-toggle").addEventListener("click", () => {
       const box = document.getElementById("orders-add");
       if (box.style.display === "block") hideAdd();

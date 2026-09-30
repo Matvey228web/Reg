@@ -37,6 +37,17 @@ function getStoredSession() {
   }
 }
 
+// Сессия истекла или отозвана. Мало стереть её: человек остался бы на экране
+// с ошибкой до перезапуска — а без токена там уже ничего не выйдет. Поэтому
+// сразу на вход. Сам вход не уводим: 401 на неверный PIN — его обычная
+// ошибка, и перерисовка экрана входа стёрла бы её. Не уводим и запрос без
+// токена: тогда и сессии не было, уводить некуда — это и защищает от петли.
+function sessionExpired(endpoint, token) {
+  localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
+  if (!token || endpoint === "/auth/login") return;
+  if (typeof Router !== "undefined") Router.reset("login");
+}
+
 // fresh — «пойди за свежим, минуя кэш». Нужно кнопке «Обновить»: человек жмёт
 // её именно потому, что не верит показанному. Кэш в браузере мы и так обходим,
 // а этот флаг доезжает до Worker перед таблицей (worker/src/index.js), где
@@ -49,9 +60,7 @@ async function apiPost(endpoint, body = {}, { fresh = false } = {}) {
     try {
       return await MockAPI.handle(endpoint, body, token);
     } catch (e) {
-      if (e.status === 401) {
-        localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
-      }
+      if (e.status === 401) sessionExpired(endpoint, token);
       throw new ApiError(humanError(e.message), e.status || 500);
     }
   }
@@ -95,9 +104,7 @@ async function apiPost(endpoint, body = {}, { fresh = false } = {}) {
   // статус (401/403/404/409...) лежит внутри JSON-тела, не в res.status.
   const logicalStatus = payload.status || (payload.ok ? 200 : 500);
 
-  if (logicalStatus === 401) {
-    localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
-  }
+  if (logicalStatus === 401) sessionExpired(endpoint, token);
 
   if (!payload.ok) {
     throw new ApiError(humanError(payload.error), logicalStatus);

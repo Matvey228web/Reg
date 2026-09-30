@@ -1721,35 +1721,45 @@ function checkoutUnderLock(payload, staffRow) {
 
     // Выдача в счёт заказа: срок возврата берём из заказа, а сама выдача
     // списывается с подходящей строки состава.
-    var orderId = "", orderLine = "", expectedReturn = payload.expected_return_at || "";
+    // parts — на какие строки состава легла выдача: одна запись журнала на
+    // каждую. Вне заказа — одна запись без строки.
+    var orderId = "", parts = [{ line: "", qty: takeQty }];
+    var expectedReturn = payload.expected_return_at || "";
     if (payload.order_id) {
       var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", String(payload.order_id));
       if (!order) throw apiError(404, "Заказ не найден");
       if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
       orderId = Number(order.order_id);
       if (!expectedReturn) expectedReturn = String(order.return_date || "");
-      orderLine = claimOrderLine(orderId, item);
+      parts = claimOrderLine(orderId, item, takeQty);
       updateRow(getSheet(SHEETS.ORDERS), order.__row, { status: "Issued" });
     }
 
-    var txId = nextId("transaction_id", maxIdIn(getSheet(SHEETS.TRANSACTIONS), "transaction_id"));
-    appendRow(getSheet(SHEETS.TRANSACTIONS), {
-      transaction_id: txId,
-      item_id: itemId,
-      client_id: payload.client_id,
-      order_id: orderId,
-      order_line: orderLine,
-      staff_out: staffRow.staff_id,
-      staff_out_name: staffRow.full_name,
-      staff_in: "",
-      staff_in_name: "",
-      checked_out_at: new Date().toISOString(),
-      expected_return_at: expectedReturn,
-      checked_in_at: "",
-      status: "Open",
-      notes: payload.notes || "",
-      qty: takeQty,
-      qty_in: 0,
+    var txSheet = getSheet(SHEETS.TRANSACTIONS);
+    var txId = "", orderLine = "", now = new Date().toISOString();
+    parts.forEach(function (part) {
+      var id = nextId("transaction_id", maxIdIn(txSheet, "transaction_id"));
+      if (!txId) txId = id;
+      // Хоть часть легла вне состава — акт уже не совпадает с выданным.
+      if (!orderLine || part.line === "off-order") orderLine = part.line;
+      appendRow(txSheet, {
+        transaction_id: id,
+        item_id: itemId,
+        client_id: payload.client_id,
+        order_id: orderId,
+        order_line: part.line,
+        staff_out: staffRow.staff_id,
+        staff_out_name: staffRow.full_name,
+        staff_in: "",
+        staff_in_name: "",
+        checked_out_at: now,
+        expected_return_at: expectedReturn,
+        checked_in_at: "",
+        status: "Open",
+        notes: payload.notes || "",
+        qty: part.qty,
+        qty_in: 0,
+      });
     });
     if (byQty) {
       // Пока на складе что-то осталось, позиция остаётся доступной: иначе
@@ -1774,13 +1784,20 @@ function checkoutUnderLock(payload, staffRow) {
 // потерянной техники.
 function settleOrderOnCheckin(openTx, txSheet) {
   if (!openTx.order_id) return;
-  releaseOrderLine(openTx.order_id, openTx.order_line);
+  releaseOrderLine(openTx.order_id, openTx.order_line, 1);
+  settleOrderStatus(openTx.order_id, txSheet);
+}
+
+// Заказ закрыт, когда по нему на руках ничего нет. Отдельно от строки
+// состава: приём количеством освобождает строки по каждой записи журнала,
+// а статус заказа считает один раз.
+function settleOrderStatus(orderId, txSheet) {
   var orderSheet = getSheet(SHEETS.ORDERS);
-  var order = findRowByValue(orderSheet, "order_id", String(openTx.order_id));
+  var order = findRowByValue(orderSheet, "order_id", String(orderId));
   if (!order || order.status === "Cancelled") return;
   var stillOut = 0;
   readRows(txSheet).forEach(function (t) {
-    if (String(t.order_id || "") === String(openTx.order_id) && t.status === "Open") stillOut += 1;
+    if (String(t.order_id || "") === String(orderId) && t.status === "Open") stillOut += 1;
   });
   updateRow(orderSheet, order.__row, stillOut
     ? { status: "Issued", closed_at: "" }
@@ -1807,30 +1824,42 @@ function reportDefect(itemId, staffRow, transactionId, payload) {
   return defectId;
 }
 
-// Списывает экземпляр с подходящей строки состава заказа и возвращает её номер.
-// Если строки нет или она уже закрыта — «off-order», и выдача всё равно
-// проходит: в заказе есть свободное поле, которым технику дописывают руками
-// («+ 4 ковра гойда»), так что запретить выдачу вне состава значило бы
-// запретить реальную работу склада.
-function claimOrderLine(orderId, item) {
-  var sheet = getSheet(SHEETS.ORDER_ITEMS);
-  var rows = readRows(sheet);
+// Списывает выданное количество со строк состава заказа и возвращает, куда оно
+// легло: [{ line: номер строки, qty }]. Поштучная выдача — это qty = 1 и одна
+// часть. Количеством (10 мешков) — сколько выдали, столько и в строку: иначе
+// «выдано N из M» врёт. Больше, чем осталось по строке, в неё не пишем —
+// заполняем её, остаток идёт на следующую строку той же модели, а что не
+// влезло никуда — «off-order». Каждая часть станет своей записью журнала,
+// поэтому приём освобождает строку ровно на то, что на неё легло.
+// Вне состава выдача всё равно проходит: в заказе есть свободное поле, которым
+// технику дописывают руками («+ 4 ковра гойда»), так что запретить выдачу вне
+// состава значило бы запретить реальную работу склада.
+function claimOrderLine(orderId, item, qty) {
+  var want = Math.max(1, Math.floor(Number(qty || 1)));
+  var parts = [];
   var itemModel = item.model_code === "" ? "" : pad2(Number(item.model_code));
-  if (!itemModel) return "off-order";
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (String(r.order_id) !== String(orderId)) continue;
-    if (!r.model_code || String(r.category) !== String(item.category)) continue;
-    if (pad2(Number(r.model_code)) !== itemModel) continue;
-    var issued = Number(r.issued_qty || 0);
-    if (issued >= Number(r.qty || 0)) continue;
-    updateRow(sheet, r.__row, { issued_qty: issued + 1 });
-    return String(r.line_no);
+  if (itemModel) {
+    var sheet = getSheet(SHEETS.ORDER_ITEMS);
+    var rows = readRows(sheet);
+    for (var i = 0; i < rows.length && want > 0; i++) {
+      var r = rows[i];
+      if (String(r.order_id) !== String(orderId)) continue;
+      if (!r.model_code || String(r.category) !== String(item.category)) continue;
+      if (pad2(Number(r.model_code)) !== itemModel) continue;
+      var issued = Number(r.issued_qty || 0);
+      var take = Math.min(want, Number(r.qty || 0) - issued);
+      if (take <= 0) continue;
+      updateRow(sheet, r.__row, { issued_qty: issued + take });
+      parts.push({ line: String(r.line_no), qty: take });
+      want -= take;
+    }
   }
-  return "off-order";
+  if (want > 0) parts.push({ line: "off-order", qty: want });
+  return parts;
 }
 
-function releaseOrderLine(orderId, lineNo) {
+// Обратное claimOrderLine: строка освобождается на столько, сколько вернули.
+function releaseOrderLine(orderId, lineNo, qty) {
   if (!orderId || !lineNo || String(lineNo) === "off-order") return;
   var sheet = getSheet(SHEETS.ORDER_ITEMS);
   var rows = readRows(sheet);
@@ -1838,7 +1867,8 @@ function releaseOrderLine(orderId, lineNo) {
     if (String(rows[i].order_id) !== String(orderId)) continue;
     if (String(rows[i].line_no) !== String(lineNo)) continue;
     var issued = Number(rows[i].issued_qty || 0);
-    updateRow(sheet, rows[i].__row, { issued_qty: issued > 0 ? issued - 1 : 0 });
+    var back = Math.max(1, Math.floor(Number(qty || 1)));
+    updateRow(sheet, rows[i].__row, { issued_qty: Math.max(0, issued - back) });
     return;
   }
 }
@@ -1873,12 +1903,18 @@ function handleTransactionCheckin(payload, token) {
       if (!back || back < 1) throw apiError(400, "Укажите количество — целое число от одного");
       if (back > onHands) throw apiError(409, "На руках " + onHands + " — принять больше нельзя");
 
-      var left = back;
+      var left = back, touchedOrders = {};
       openList.forEach(function (t) {
         if (left <= 0) return;
         var remains = Number(t.qty || 1) - Number(t.qty_in || 0);
         var take = Math.min(remains, left);
         left -= take;
+        // Строка состава освобождается на принятое этой записью — ровно то,
+        // что при выдаче на неё легло.
+        if (t.order_id) {
+          releaseOrderLine(t.order_id, t.order_line, take);
+          touchedOrders[String(t.order_id)] = true;
+        }
         var filled = Number(t.qty_in || 0) + take;
         updateRow(txSheet, t.__row, filled >= Number(t.qty || 1)
           ? { qty_in: filled, status: "Closed", checked_in_at: new Date().toISOString(),
@@ -1895,7 +1931,7 @@ function handleTransactionCheckin(payload, token) {
         if (defectBlocksRental(payload.defect_severity || "Minor")) statusQty = "In Repair";
       }
       updateRow(eqSheet, item.__row, { qty_out: newOut, status: statusQty });
-      settleOrderOnCheckin(openTx, txSheet);
+      Object.keys(touchedOrders).forEach(function (id) { settleOrderStatus(id, txSheet); });
       return { transaction_id: openTx.transaction_id, defect_id: defectIdQty, qty: back, qty_out: newOut };
     }
 
