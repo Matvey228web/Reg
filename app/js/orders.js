@@ -321,6 +321,57 @@ const OrdersScreen = (() => {
     }
   }
 
+  // После «Создать» ведём сразу в карточку нового заказа, а не перечитываем
+  // весь список: /orders/list — самый тяжёлый запрос экрана, и после него
+  // человек всё равно искал бы свой заказ глазами. Строку списка собираем из
+  // того, что отправили, и номера, который вернул бэкенд (/order/create отдаёт
+  // order_id, student_id, student_created, act_url), — в той же форме, что
+  // отдаёт /orders/list.
+  //
+  // Кладём только в свежий кэш: Cache.set обновляет возраст, и дописанный
+  // в старый список заказ выдал бы весь старый список за только что
+  // полученный. Старый кэш не трогаем — список перечитается при возврате,
+  // как и без этой правки.
+  function rememberCreated(payload, created) {
+    const cached = Cache.items(CACHE);
+    if (!cached || !Cache.isFresh(CACHE)) return;
+    const row = {
+      order_id: created.order_id,
+      order_no: String(payload.order_no || "").trim(),
+      request_code: String(payload.request_code || ""),
+      student_id: created.student_id,
+      student_name: String(payload.student_name || "").trim(),
+      student_phone: String(payload.student_phone || ""),
+      student_tg: String(payload.student_tg || ""),
+      is_adult: !(payload.is_adult === "FALSE" || payload.is_adult === false),
+      guardian_name: payload.guardian_name || "",
+      guardian_phone: String(payload.guardian_phone || ""),
+      project: payload.project || "",
+      issue_date: String(payload.issue_date || ""),
+      return_date: String(payload.return_date || ""),
+      extra_input: payload.extra_input || "",
+      amount: Number(payload.amount || 0),
+      currency: payload.currency || "",
+      status: "New",
+      issued_open: 0,
+      issued_total: 0,
+      created_at: new Date().toISOString(),
+      created_by_name: "",
+      items_text: (payload.items || []).map((line) => line.raw_name || "").join(", "),
+      archived_at: "",
+      act_url: String(created.act_url || ""),
+    };
+    Cache.set(CACHE, [row].concat(cached));
+  }
+
+  // Открываем карточку так же, как нажатие на строку списка (bindList).
+  function openCreated(payload, created) {
+    TG.hapticSuccess();
+    hideAdd();
+    rememberCreated(payload, created);
+    Router.navigate("order", { orderId: created.order_id });
+  }
+
   async function submitDraft() {
     if (!draft) return;
     // Подхватываем сопоставления, которые человек выбрал руками.
@@ -336,12 +387,7 @@ const OrdersScreen = (() => {
     try {
       const payload = Object.assign({}, draft.order, { items: draft.items });
       const created = await apiPost("/order/create", payload);
-      TG.hapticSuccess();
-      TG.showAlert("Заказ " + draft.order.order_no + " заведён" +
-        (created.student_created ? ". Арендатор добавлен впервые." : ""));
-      Cache.clear(CACHE);
-      hideAdd();
-      loadList({ force: true });
+      openCreated(payload, created);
     } catch (err) {
       TG.hapticError();
       showBoxError("orders-add-error", err.message);
@@ -358,7 +404,7 @@ const OrdersScreen = (() => {
     const btn = document.getElementById("orders-manual-submit");
     btn.disabled = true;
     try {
-      await apiPost("/order/create", {
+      const payload = {
         order_no: value("mo-no"),
         student_name: value("mo-name"),
         student_phone: value("mo-phone"),
@@ -370,11 +416,9 @@ const OrdersScreen = (() => {
         return_date: value("mo-return"),
         project: value("mo-project"),
         items: [],
-      });
-      TG.hapticSuccess();
-      Cache.clear(CACHE);
-      hideAdd();
-      loadList({ force: true });
+      };
+      const created = await apiPost("/order/create", payload);
+      openCreated(payload, created);
     } catch (err) {
       TG.hapticError();
       showBoxError("orders-add-error", err.message);
