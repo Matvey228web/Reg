@@ -123,7 +123,24 @@ const ScanScreen = (() => {
         ${session.length
           ? `<div class="card-sub">В этот заход выдано: ${session.map(escapeHtml).join(", ")}</div>`
           : `<div class="card-sub">Сканируйте позиции заказа одну за другой.</div>`}
-      </div>`;
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="scan-order-done" type="button">Готово</button>
+        <button class="btn btn--secondary" id="scan-order-exit" type="button">Выйти</button>
+      </div>
+      <p class="hint">«Выйти» — к обычному скану без заказа. Выданное остаётся выданным.</p>`;
+    // Выход из заказа — в шапке, как у сверки в inventory.js: иначе закончить
+    // заход можно было только стрелкой «назад», о которой у стойки не думают.
+    // «Готово» возвращает на карточку заказа, с которой сюда пришли (она лежит
+    // в стеке под сканом и сама перечитается), — там счётчик «выдано N из M».
+    document.getElementById("scan-order-done").addEventListener("click", () => {
+      Router.back();
+    });
+    // «Выйти», а не «Отменить»: отменять здесь нечего — выдачи уже записаны.
+    // Экран тот же, что по вкладке «Скан»: стек сброшен, заказа нет.
+    document.getElementById("scan-order-exit").addEventListener("click", () => {
+      Router.reset("scan");
+    });
   }
 
   function orderLabel(order) {
@@ -219,24 +236,31 @@ const ScanScreen = (() => {
     const box = document.getElementById("mode-form");
     if (!box) return;
     if (mode === "checkout") {
+      // Заказ выбран на его карточке — список из одного пункта и поле срока,
+      // которое всё равно подставлено из заказа, только отнимали тап и внимание.
+      // Показываем их строками только для чтения — значения те же, что уходят
+      // на сервер.
+      const lockedWho = lockedOrder
+        ? String(lockedOrder.studentName || "").split(" ").slice(0, 2).join(" ") : "";
       box.innerHTML = `
         <div class="section form-group">
+          ${lockedOrder ? `
+          <div class="field">
+            <label for="scan-order-locked">Заказ</label>
+            <input type="text" id="scan-order-locked" readonly tabindex="-1"
+                   value="${escapeHtml("№" + lockedOrder.orderNo + (lockedWho ? " · " + lockedWho : ""))}" />
+            <input type="hidden" id="scan-order" value="${escapeHtml(String(lockedOrder.orderId))}" />
+          </div>` : `
           <div class="field">
             <label for="scan-order">Заказ</label>
-            ${lockedOrder ? `
-            <select id="scan-order">
-              <option value="${escapeHtml(String(lockedOrder.orderId))}" selected>${escapeHtml("№" + lockedOrder.orderNo)}</option>
-            </select>
-            <p class="hint">Выдача идёт по этому заказу. Чтобы выдать вне заказа,
-            откройте «Скан» с вкладки внизу.</p>` : `
             <select id="scan-order">
               <option value="">— выберите —</option>
               ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
               <option value="none">Без заказа (для склада)</option>
             </select>
             ${orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
-            или выдайте без заказа.</p>`}`}
-          </div>
+            или выдайте без заказа.</p>`}
+          </div>`}
           ${currentItem.by_qty ? `
           <div class="field">
             <label for="scan-qty">Сколько выдаём</label>
@@ -244,11 +268,17 @@ const ScanScreen = (() => {
                    max="${Number(currentItem.qty_free || 1)}" value="1" />
             <p class="hint">${escapeHtml(qtyText(currentItem))}</p>
           </div>` : ""}
+          ${lockedOrder ? `
+          <div class="field">
+            <label for="scan-return-date">Вернуть до</label>
+            <input type="text" id="scan-return-date" readonly tabindex="-1"
+                   value="${escapeHtml(lockedOrder.returnDate || "")}" placeholder="не указано в заказе" />
+          </div>` : `
           <div class="field">
             <label for="scan-return-date">Ожидаемая дата возврата</label>
             <input type="date" id="scan-return-date" />
             <p class="hint">Подставляется из заказа; можно поправить.</p>
-          </div>
+          </div>`}
           <div class="field field--stacked">
             <label for="scan-notes">Заметки</label>
             <textarea id="scan-notes"></textarea>
@@ -256,15 +286,12 @@ const ScanScreen = (() => {
         </div>`;
       // Срок возврата приходит из заказа — вводить его заново значит рано или
       // поздно ввести не то, что обещано студенту на сайте.
-      document.getElementById("scan-order").addEventListener("change", (e) => {
-        const picked = e.target.selectedOptions[0];
-        const date = picked ? picked.dataset.return : "";
-        if (date) document.getElementById("scan-return-date").value = date;
-      });
-      // В списке из одного пункта события change не будет, а срок возврата всё
-      // равно должен быть тем, что обещан студенту на сайте.
-      if (lockedOrder && lockedOrder.returnDate) {
-        document.getElementById("scan-return-date").value = lockedOrder.returnDate;
+      if (!lockedOrder) {
+        document.getElementById("scan-order").addEventListener("change", (e) => {
+          const picked = e.target.selectedOptions[0];
+          const date = picked ? picked.dataset.return : "";
+          if (date) document.getElementById("scan-return-date").value = date;
+        });
       }
       confirmButton("Подтвердить выдачу", submitCheckout);
     } else if (mode === "checkin") {
@@ -385,8 +412,9 @@ const ScanScreen = (() => {
       // ту же карточку и ждать, пока человек сам нажмёт «сканировать», значит
       // добавить к каждой позиции лишний тап: сразу открываем сканер снова.
       if (lockedOrder) {
-        const qtyText = qtyField && Number(qtyField.value) > 1 ? " ×" + Number(qtyField.value) : "";
-        session.push(currentItem.name + qtyText + (offOrder ? " — сверх заявки" : ""));
+        // У штучных позиций важно, сколько ушло: «Кабель XLR — 4 шт».
+        const qtyNote = currentItem.by_qty && qtyField ? " — " + (Number(qtyField.value) || 1) + " шт" : "";
+        session.push(currentItem.name + qtyNote + (offOrder ? " — сверх заявки" : ""));
         currentItem = null;
         mode = null;
         document.getElementById("scan-result").innerHTML = "";
