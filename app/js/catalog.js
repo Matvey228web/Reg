@@ -259,7 +259,7 @@ const CatalogScreen = (() => {
       </div>
       <button class="btn" id="qr-download-btn">Сохранить этикетку</button>
       <p class="hint">Из Telegram скачать нельзя: кнопка откроет лист «Поделиться»,
-      а если его нет — пришлёт бот в чат склада. Печать — на экране «Этикетки».</p>
+      а если его нет — покажет картинку во весь экран (удерживайте, чтобы сохранить). Печать — на экране «Этикетки».</p>
     `;
     const canvas = document.getElementById("new-item-qr-canvas");
     QR.render(canvas, itemId, 8);

@@ -23,6 +23,8 @@ const SettingsScreen = (() => {
     { key: "login_lock_minutes", label: "Блокировка, минут", grp: "login" },
     { key: "import_source_id", label: "Исходная таблица", text: true, ph: "идентификатор", grp: "links" },
     { key: "notify_chat_id", label: "Чат склада", text: true, ph: "-1001234567890", grp: "links" },
+    { key: "notify_thread_orders", label: "Тема для заявок", text: true, ph: "123", grp: "links" },
+    { key: "notify_thread_acts", label: "Тема для актов", text: true, ph: "123", grp: "links" },
     { key: "site_url", label: "Сайт проката", text: true, ph: "https://", grp: "links" },
     { key: "app_link", label: "Ссылка на приложение", text: true, ph: "https://t.me/бот/app", grp: "links" },
     { key: "api_url", label: "Адрес Worker", text: true, ph: "https://", grp: "links" },
@@ -146,7 +148,7 @@ const SettingsScreen = (() => {
     { key: "cats", label: "Категории и модели", hint: "номера, названия, где лежит модель" },
     { key: "public", label: "Заявки с сайта", hint: "принимать ли заявки и как часто" },
     { key: "act", label: "Акт сдачи-приёмки", hint: "шаблон, подписи, папка" },
-    { key: "bot", label: "Бот в Telegram", hint: "проверка связи и сводки" },
+    { key: "bot", label: "Бот в Telegram", hint: "чат, темы и проверка связи" },
     { key: "links", label: "Адреса и связи", hint: "таблица, чат, сайт, приложение" },
     { key: "login", label: "Вход и защита", hint: "срок сессии, попытки, блокировка" },
     { key: "maint", label: "Обслуживание", hint: "выгрузка и подрезка журналов" },
@@ -314,7 +316,13 @@ const SettingsScreen = (() => {
       <div class="section" data-panel="bot" hidden>
         <button class="sub-back" type="button" data-close="1">← Настройки</button>
         <h2>Бот в Telegram</h2>
-        <p class="hint">Бот пишет в чат склада о новых заказах с сайта и о дефектах. Токен бота — не здесь,
+        <p class="hint">Бот пишет в чат склада только заявки и акты. Чат находит кнопка
+          «Найти чат склада». Если в группе включены темы, заявки и акты можно
+          развести по своим: номер темы — из /id внутри темы, впишите его в поля
+          «Тема для заявок» и «Тема для актов» (раздел «Адреса и связи»); пусто —
+          сообщение уходит в General.
+          «Поздороваться в чате» проверяет связь.</p>
+        <p class="hint">Токен бота — не здесь,
           а в Script Properties, ключ TELEGRAM_BOT_TOKEN (эти настройки видит любой
           сотрудник). Как завести — в BOT.md.</p>
         <p class="hint">Чат склада сейчас:

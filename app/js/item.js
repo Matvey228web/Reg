@@ -190,7 +190,7 @@ const ItemScreen = (() => {
           <button class="btn btn--secondary" id="item-qr-label">Этикетка</button>
         </div>
         <p class="hint">Из Telegram скачать нельзя: «Сохранить» откроет лист
-        «Поделиться», а если его нет — пришлёт бот в чат склада.</p>
+        «Поделиться», а если его нет — покажет картинку во весь экран (удерживайте, чтобы сохранить).</p>
       </div>
 
       <div class="section">

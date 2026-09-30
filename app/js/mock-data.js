@@ -23,6 +23,8 @@ const mockSettings = {
   act_master: "",
   act_director: "",
   act_folder_id: "",
+  notify_thread_orders: "",
+  notify_thread_acts: "",
 };
 // Состояние постоянной связи с Telegram. В демо её никто не устанавливает —
 // важно лишь, что экран умеет показать оба состояния и переключить их.
@@ -45,6 +47,10 @@ const MOCK_SETTINGS_SPEC = {
              hint: "адрес Worker целиком, начиная с https:// — на него Telegram присылает события бота" },
   notify_chat_id: { def: "", text: true, check: (v) => v === "" || /^-?\d{5,20}$/.test(String(v)),
                     hint: "числовой id чата склада (у групп он отрицательный) или пусто — тогда бот молчит" },
+  notify_thread_orders: { def: "", text: true, check: (v) => v === "" || /^\d{1,10}$/.test(String(v)),
+                          hint: "номер темы «ЗАЯВКИ» (из /id внутри темы) или пусто — тогда в General" },
+  notify_thread_acts: { def: "", text: true, check: (v) => v === "" || /^\d{1,10}$/.test(String(v)),
+                        hint: "номер темы «АКТЫ» (из /id внутри темы) или пусто — тогда в General" },
   session_ttl_hours: { min: 1, max: 720, hint: "от 1 часа до 30 суток" },
   max_login_attempts: { min: 3, max: 20, hint: "от 3 до 20 попыток" },
   login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
@@ -1306,29 +1312,13 @@ const MockAPI = {
         return { ok: true, message: "Сообщение отправлено — проверьте чат." };
       }
 
-      // Отправка этикеток ботом. Мок проверяет ровно то, что проверяет бэкенд:
-      // список не пуст, файлы не пустые и их не больше тридцати. Самой отправки
-      // здесь нет — она живёт в Apps Script и требует токена бота.
+      // Этикетки в чат больше не отправляются: картинки в Telegram не уходят
+      // вовсе. Ручка отвечает отказом, как живой бэкенд.
       case "/labels/send": {
         MockStore.requireToken(token);
-        const files = body.files || [];
-        if (!files.length) {
-          const e = new Error("Нечего отправлять: список файлов пуст.");
-          e.status = 400; throw e;
-        }
-        if (files.length > 30) {
-          const e = new Error("Сразу больше 30 этикеток не отправляем. Сузьте фильтры и повторите.");
-          e.status = 400; throw e;
-        }
-        const empty = files.filter((f) => !f.png_base64);
-        if (empty.length) {
-          const e = new Error("Файл «" + (empty[0].name || "без имени") + "» пришёл пустым.");
-          e.status = 400; throw e;
-        }
-        return { ok: true, count: files.length,
-                 message: files.length === 1
-                   ? "Этикетка отправлена в чат склада."
-                   : files.length + " этикеток отправлены в чат склада одним архивом." };
+        const e = new Error("Отправка этикеток в чат отключена. В Telegram сохраняйте по одной " +
+          "(кнопка «Сохранить»), пачкой — кнопкой «Печать» или откройте приложение в браузере.");
+        e.status = 410; throw e;
       }
 
       case "/inventory/save": {
