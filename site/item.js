@@ -44,12 +44,12 @@
 
   function render() {
     $("item").innerHTML =
-      '<div class="item-shot">' +
+      '<div class="item-shot"' + Site.shotAttr(model) + ">" +
         // Нет файла — нет и запроса: иначе на каждую позицию уходит 404.
         (Site.photo(model)
           ? '<img src="' + esc(Site.photo(model)) + '" alt="" decoding="async"' +
             ' onerror="this.remove()" />'
-          : "") + Site.shotIcon() +
+          : "") + Site.shotIcon(model) +
       "</div>" +
       '<div class="item-main">' +
         // Код позиции здесь не показываем: это складское обозначение, человеку
@@ -58,9 +58,9 @@
         "<h1>" + esc(model.model_name) + "</h1>" +
         '<div class="item-add">' +
           '<div class="stepper">' +
-            '<button type="button" id="minus" aria-label="Меньше">−</button>' +
+            '<button type="button" id="minus" aria-label="Меньше">' + Site.icon("minus") + "</button>" +
             '<input type="number" id="qty" value="1" min="1" inputmode="numeric" />' +
-            '<button type="button" id="plus" aria-label="Больше">+</button>' +
+            '<button type="button" id="plus" aria-label="Больше">' + Site.icon("plus") + "</button>" +
           "</div>" +
           '<button class="btn" id="add">В корзину</button>' +
         "</div>" + noteHtml() +
@@ -72,10 +72,12 @@
   function bind() {
     var qty = $("qty");
     $("minus").addEventListener("click", function () {
-      qty.value = Math.max(1, Number(qty.value) - 1);
+      var was = qty.value;
+      Site.tick(qty, Math.max(1, Number(qty.value) - 1), was);
     });
     $("plus").addEventListener("click", function () {
-      qty.value = Number(qty.value) + 1;
+      var was = qty.value;
+      Site.tick(qty, Number(qty.value) + 1, was);
     });
 
     var add = $("add");

@@ -102,6 +102,7 @@ var Site = (function () {
     "mic": '<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>',
     "wrench": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>',
     "package": '<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/>',
+    "search": '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
     "plus": '<path d="M5 12h14"/><path d="M12 5v14"/>',
     "minus": '<path d="M5 12h14"/>',
   };
@@ -135,38 +136,46 @@ var Site = (function () {
   // что стояло раньше; страницы, которые перерисовываются целиком (корзина),
   // берут его из старой разметки и передают сюда. Нет старого значения — это
   // первая отрисовка, и анимации нет. Уменьшенное движение — просто подмена.
+  // Работает и с <input> (счётчик в карточке и в корзине), и с обычным
+  // элементом (число в шапке и на витрине): призрак старого числа лежит поверх
+  // и ничего не двигает, стили — в style.css (.num-box, .num-ghost).
   function tick(el, value, old) {
     if (!el) return;
     value = String(value);
     var input = el.tagName === "INPUT";
-    var box = input ? el.parentNode : el;
     var target = el;
     if (!input) {
       target = el.querySelector(".num-v");
       if (!target) {
+        // Число обёрнуто один раз; то, что стояло в элементе, сохраняется.
+        var prev = el.textContent;
         el.innerHTML = '<span class="num-v"></span>';
         target = el.firstChild;
+        target.textContent = prev;
       }
-      if (old === undefined) old = target.textContent;
-    } else if (old === undefined) {
-      old = el.value;
     }
+    if (old === undefined) old = input ? el.value : target.textContent;
     if (input) el.value = value; else target.textContent = value;
-    if (!old || String(old) === value) return;
+    if (old === "" || old === null || String(old) === value) return;
     var calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (calm || !target.animate) return;
 
+    var box = input ? el.parentNode : el;
     box.classList.add("num-box");
     var ghost = document.createElement("span");
     ghost.className = "num-ghost";
     ghost.textContent = old;
     box.appendChild(ghost);
-    var rise = [{ transform: "translateY(0)", opacity: 1 }, { transform: "translateY(-70%)", opacity: 0 }];
-    var enter = [{ transform: "translateY(70%)", opacity: 0 }, { transform: "translateY(0)", opacity: 1 }];
-    var opts = { duration: 220, easing: "ease-out" };
-    var out = ghost.animate(rise, opts);
+    var opts = { duration: 220, easing: "cubic-bezier(.16,.84,.24,1)" };
+    var out = ghost.animate([
+      { transform: "translateY(0)", opacity: 1 },
+      { transform: "translateY(-70%)", opacity: 0 },
+    ], opts);
     out.onfinish = out.oncancel = function () { ghost.remove(); };
-    target.animate(enter, opts);
+    target.animate([
+      { transform: "translateY(70%)", opacity: 0 },
+      { transform: "translateY(0)", opacity: 1 },
+    ], opts);
   }
 
   function humanDate(iso) {
@@ -438,13 +447,17 @@ var Site = (function () {
     var el = $("cart-count");
     if (!el) return;
     var n = cartCount();
-    el.textContent = n ? String(n) : "";
+    // Прежнее число берём из шапки: при первой отрисовке его нет — и движения нет.
+    var cur = el.querySelector(".num-v");
+    var old = el.hidden ? "" : (cur ? cur.textContent : el.textContent);
     el.hidden = !n;
+    if (n) tick(el, n, old);
+    else el.textContent = "";
   }
 
   return {
     $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
-    humanDate: humanDate, shotIcon: shotIcon,
+    humanDate: humanDate, icon: icon, shotIcon: shotIcon, shotAttr: shotAttr, tick: tick,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
     sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
@@ -495,7 +508,7 @@ document.addEventListener("DOMContentLoaded", function () {
     if (!shown.length) return;
     box.innerHTML = shown.map(function (a) {
       return '<details class="notice-item" open><summary><span class="notice-tag">Внимание</span>' +
-        '<span class="notice-title">' + Site.escapeHtml(a.title) + "</span></summary>" +
+        '<span class="notice-title">' + Site.escapeHtml(a.title) + "</span>" + Site.icon("chevron-down") + "</summary>" +
         '<div class="notice-body">' + (a.lines || []).map(function (line) {
           return "<p>" + Site.escapeHtml(line) + "</p>";
         }).join("") + "</div></details>";
@@ -511,6 +524,37 @@ document.addEventListener("DOMContentLoaded", function () {
         .then(function (data) { paint(data.items); });
     })
     .catch(function () { /* нет ни ответа, ни файла — объявлений просто нет */ });
+});
+
+// ВРЕМЕННО: переключатель темы — убрать, когда определимся с темой по умолчанию.
+// Сама тема выставляется ещё до отрисовки скриптом в <head> каждой страницы
+// (data-theme на <html>, выбор в localStorage `mifs_theme`); здесь только кнопка.
+// Без кнопки тема продолжает работать.
+document.addEventListener("DOMContentLoaded", function () {
+  var btn = Site.$("theme-toggle");
+  if (!btn) return;
+  var COLORS = { light: "#f4f3f0", dark: "#0d0d0f" };
+
+  function now() {
+    return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  }
+
+  // Показываем то, во что нажатие переключит: в тёмной — солнце, в светлой — луна.
+  function paint() {
+    var light = now() === "light";
+    btn.innerHTML = Site.icon(light ? "moon" : "sun");
+    btn.setAttribute("aria-label", light ? "Включить тёмную тему" : "Включить светлую тему");
+  }
+
+  btn.addEventListener("click", function () {
+    var next = now() === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", COLORS[next]);
+    try { localStorage.setItem("mifs_theme", next); } catch (e) { /* не сохранилось — до перезагрузки */ }
+    paint();
+  });
+  paint();
 });
 
 // Возврат кнопкой «назад» страницу заново не выполняет: браузер достаёт её из

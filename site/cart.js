@@ -33,16 +33,9 @@
   }
 
   // Два листа — общепринятый знак «скопировать», его узнают без подписи.
-  function copyIcon() {
-    return '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-      '<rect x="9" y="9" width="11" height="11" rx="1"/>' +
-      '<path d="M15 5H5a1 1 0 0 0-1 1v10"/></svg>';
-  }
+  function copyIcon() { return Site.icon("copy"); }
 
-  function doneIcon() {
-    return '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-      '<path d="M4 12l5 5L20 6"/></svg>';
-  }
+  function doneIcon() { return Site.icon("check"); }
 
   // Телефон. «+7» подставляется само, как только набрали цифру: набирать код
   // руками незачем, а без него разбор на складе не поймёт номер.
@@ -122,10 +115,10 @@
             esc(l.model.model_name) + "</a>" +
           '<span class="cap">' + esc(l.model.category_label) + "</span>" +
           '<div class="stepper">' +
-            '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
+            '<button type="button" data-act="minus" aria-label="Меньше">' + Site.icon("minus") + "</button>" +
             '<input type="number" class="cart-qty" value="' + l.qty +
               '" min="1" inputmode="numeric" />' +
-            '<button type="button" data-act="plus" aria-label="Больше">+</button>' +
+            '<button type="button" data-act="plus" aria-label="Больше">' + Site.icon("plus") + "</button>" +
           "</div>" +
           '<button class="link-danger" type="button" data-act="drop">Убрать</button>' +
           warnHtml(l) +
@@ -359,8 +352,12 @@
       if (btn.dataset.act === "drop") { Site.removeFromCart(key); render(); return; }
       var next = Number(input.value) + (btn.dataset.act === "plus" ? 1 : -1);
       if (next < 1) { Site.removeFromCart(key); render(); return; }
+      var was = input.value;
       Site.setQty(key, next);
       render();
+      // Список перерисован целиком — число «прокатываем» в новой строке,
+      // а прежнее берём из старой.
+      Site.tick(document.querySelector('.cart-line[data-key="' + key + '"] .cart-qty'), next, was);
     });
 
     $("cart").addEventListener("change", function (e) {

@@ -49,6 +49,14 @@
   --dim: #8a8a93;
   --accent: #e2231a;        /* заливка кнопок: белый на нём даёт 4.68 */
   --accent-text: #ff4b3e;   /* тот же смысл текстом: на фоне даёт 5.85 */
+  --on-accent: #fff;        /* текст на заливке акцента */
+  --shot: #0f0f12;          /* фон пустой карточки без картинки категории */
+
+  /* Приглушение картинок (баннер, фон пустых карточек): завеса цвета страницы
+     поверх снимка. В светлой теме она светлая — картинка там «выцветает», а
+     не темнеет. Тройка чисел, чтобы подставлять любую прозрачность. */
+  --veil-rgb: 13, 13, 15;
+  --img-filter: saturate(.55) brightness(.85);
 
   --pad: 16px;
   --cap: 11px;
@@ -56,6 +64,26 @@
   --font-body: "Golos Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                "Helvetica Neue", Arial, sans-serif;
   --font-display: Oswald, "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+}
+
+/* ВРЕМЕННО: переключатель темы — убрать, когда определимся с темой по умолчанию.
+   Светлая тема — только переопределение токенов; всё остальное берёт их из :root.
+   Контраст: ink на bg 16.4, dim на bg 5.69 (на panel 6.31), белый на accent 4.68,
+   accent-text на bg 4.87 (на panel 5.40). */
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f3f0;
+  --panel: #ffffff;
+  --line: #dcdad5;
+  --ink: #15151a;
+  --dim: #5f5f69;
+  --accent: #e2231a;
+  --accent-text: #d01f16;
+  --shot: #e9e7e2;
+
+  --veil-rgb: 244, 243, 240;
+  --img-filter: saturate(.45) brightness(1.05);
 }
 
 * { box-sizing: border-box; }
@@ -74,6 +102,14 @@ body {
 }
 
 img { display: block; }
+
+/* Значки Lucide (см. Site.icon в common.js): цвет — от текста, размер — от
+   места, где стоят. */
+.ico {
+  width: 1em; height: 1em; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 a { color: inherit; }
 
 .wrap { max-width: 1280px; margin: 0 auto; }
@@ -113,19 +149,14 @@ footer { flex: none; }
 .notice-tag {
   flex: none;
   padding: 3px 8px;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--on-accent);
   font-size: var(--cap); line-height: 14px; font-weight: 800;
   letter-spacing: .08em; text-transform: uppercase;
 }
 .notice-title { min-width: 0; }
 /* Стрелка справа — состояние раскрытия, а не украшение. */
-.notice summary::after {
-  content: ""; flex: none; margin-left: auto;
-  width: 8px; height: 8px;
-  border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
-  transform: rotate(45deg);
-}
-.notice details[open] > summary::after { transform: rotate(-135deg); }
+.notice summary .ico { margin-left: auto; width: 18px; height: 18px; color: var(--dim); }
+.notice details[open] > summary .ico { transform: rotate(180deg); }
 .notice-body { padding: 0 0 12px; max-width: 760px; font-size: 14px; line-height: 21px; color: var(--ink); }
 .notice-body p { margin: 0 0 8px; }
 .notice-body p:last-child { margin-bottom: 0; }
@@ -148,57 +179,127 @@ footer { flex: none; }
   padding: 0 var(--pad);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 4px;
 }
 
-.wordmark { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+/* Логотип: две строки одной ширины («MifsRent» и «Киноколледж») и справа от них
+   «40» во всю их высоту. Это демо — всё подбирается переменными ниже. Обе строки
+   набраны капителью Oswald; ширину второй выравнивает разрядка --lk-sub-track
+   (подобрана замером: правые края совпадают). Высота «40» — --lk-num-size,
+   поднимается --lk-num-up. */
+.wordmark {
+  --lk-name-size: 15px;   /* кегль «MifsRent» */
+  --lk-name-track: .14em; /* разрядка «MifsRent» */
+  --lk-sub-size: 10px;    /* кегль «Киноколледж» */
+  --lk-sub-track: .135em;  /* разрядка «Киноколледж»: подбирается до равной ширины */
+  --lk-gap: 3px;          /* просвет между строками */
+  --lk-num-size: 30px;    /* кегль «40»: цифры по высоте равны обеим строкам вместе */
+  --lk-num-up: -.5px;      /* подъём «40», если не лёг на базовые линии */
+  --lk-num-color: var(--dim);
+
+  display: flex; align-items: center; gap: 9px; text-decoration: none;
+  margin-right: auto; min-width: 0;
+}
 .logo-mark { width: 30px; height: 30px; color: var(--ink); flex: none; }
 .logo-mark path { fill: currentColor; }
-.wordmark-text { display: flex; flex-direction: column; }
+.wordmark-text { display: flex; flex-direction: column; gap: var(--lk-gap); }
 .wordmark-name {
-  font-size: 15px; line-height: 16px; font-weight: 800;
-  letter-spacing: .14em; margin-right: -.14em; text-transform: uppercase;
+  font-size: var(--lk-name-size); line-height: 1; font-weight: 700;
+  letter-spacing: var(--lk-name-track); margin-right: calc(-1 * var(--lk-name-track));
+  text-transform: uppercase;
 }
 .wordmark-sub {
-  font-size: 10px; line-height: 12px; color: var(--dim);
-  letter-spacing: .16em; margin-right: -.16em;
+  font-size: var(--lk-sub-size); line-height: 1; color: var(--dim);
+  letter-spacing: var(--lk-sub-track); margin-right: calc(-1 * var(--lk-sub-track));
   text-transform: uppercase; white-space: nowrap;
 }
+.wordmark-num {
+  font-size: var(--lk-num-size); line-height: 1; font-weight: 600;
+  color: var(--lk-num-color); position: relative; top: var(--lk-num-up);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ВРЕМЕННО: переключатель темы — убрать, когда определимся с темой по умолчанию.
+   Нажимаемая площадь 44 на 44, видимый квадрат 36 — как кнопка корзины. */
+.theme-btn {
+  position: relative; flex: none;
+  width: 44px; height: 44px; padding: 0;
+  background: none; border: 0; border-radius: 0;
+  color: var(--ink); cursor: pointer;
+  display: grid; place-items: center;
+}
+.theme-btn::before {
+  content: ""; position: absolute; inset: 4px;
+  border: 1px solid var(--line);
+}
+.theme-btn .ico { position: relative; width: 18px; height: 18px; }
+.theme-btn:hover::before { border-color: var(--accent); }
+.theme-btn:active::before { background: var(--accent); border-color: var(--accent); }
+.theme-btn:active { color: var(--on-accent); }
+.theme-btn:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
 
 .cart-link {
   display: flex; align-items: center; gap: 8px;
   height: 36px; padding: 0 12px;
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff; text-decoration: none;
-  font-size: var(--cap); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--on-accent); text-decoration: none;
+  font-size: var(--cap); line-height: 18px; letter-spacing: .08em; text-transform: uppercase;
   flex: none;
 }
-.cart-link svg {
-  width: 16px; height: 16px;
-  fill: none; stroke: currentColor; stroke-width: 1.6;
-  stroke-linecap: round; stroke-linejoin: round;
-}
+.cart-link:active { filter: brightness(.82); }
+.cart-link .ico { width: 16px; height: 16px; stroke-width: 1.8; }
+/* Число в шапке — тем же шрифтом, кеглем и высотой строки, что и подпись
+   «Корзина» рядом: цифры и буквы стоят на одной базовой линии. */
 .cart-count {
-  min-width: 18px; height: 18px; padding: 0 5px;
-  background: var(--accent); color: #fff;
-  font-size: 11px; line-height: 18px; font-weight: 700;
+  min-width: 14px; padding: 0;
+  font-size: var(--cap); line-height: inherit; font-weight: 600;
   text-align: center; font-variant-numeric: tabular-nums;
+}
+
+/* Бегущие цифры (Site.tick в common.js): старое число уезжает вверх и гаснет,
+   новое въезжает снизу. Призрак лежит поверх, ничего не сдвигая. */
+.num-v { display: inline-block; }
+.num-box { position: relative; overflow: hidden; }
+.num-ghost {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.stepper > .num-ghost {
+  inset: 0 40px;
+  font-size: 16px; color: var(--ink);
 }
 
 /* --- Афиша --- */
 
-.hero { padding: 40px var(--pad) 28px; }
+/* Баннер над каталогом: снимок съёмочной площадки, приглушённый завесой цвета
+   страницы и растворяющийся в фон. Узкому экрану — лёгкий hero-m.jpg. */
+.hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  min-height: 220px;
+  display: flex; align-items: flex-end;
+}
+.hero::before {
+  content: ""; position: absolute; inset: 0; z-index: -2;
+  background: url(img/hero-m.jpg) center 40% / cover no-repeat;
+  filter: var(--img-filter);
+}
+.hero::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background:
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .5) 0%, rgba(var(--veil-rgb), .72) 60%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .6), rgba(var(--veil-rgb), .1));
+}
+.hero-in { width: 100%; max-width: 1280px; margin: 0 auto; padding: 28px var(--pad) 22px; }
 .hero h1 {
-  margin: 0 0 10px;
-  font-size: clamp(32px, 7vw, 64px);
+  margin: 0 0 8px;
+  font-size: clamp(28px, 7vw, 56px);
   line-height: .98;
-  font-weight: 800;
-  letter-spacing: -.02em;
+  font-weight: 700;
+  letter-spacing: -.01em;
   text-transform: uppercase;
 }
-.hero p { margin: 0; color: var(--dim); max-width: 46ch; }
+.hero p { margin: 0; color: var(--ink); max-width: 46ch; }
 
 /* --- Управление --- */
 
@@ -222,6 +323,12 @@ footer { flex: none; }
 .controls .catalog > summary {
   height: 44px;
 }
+.searchbar { position: relative; }
+.searchbar .ico {
+  position: absolute; left: 13px; top: 50%; margin-top: -9px;
+  width: 18px; height: 18px; color: var(--dim); pointer-events: none;
+}
+.controls .searchbar input { padding-left: 40px; }
 .controls .catalog > summary { padding: 0 14px; }
 
 .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -246,6 +353,10 @@ input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="time"]::-webkit-calendar-picker-indicator {
   filter: invert(1) opacity(0.55);
   cursor: pointer;
+}
+html[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+html[data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: opacity(0.6);
 }
 
 input[type="date"], input[type="time"], input[type="search"],
@@ -287,15 +398,9 @@ input:focus-visible, textarea:focus-visible {
   font-weight: 700;
 }
 .catalog > summary::-webkit-details-marker { display: none; }
-.catalog > summary::after {
-  content: "";
-  width: 6px; height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
-}
+.catalog > summary .ico { width: 16px; height: 16px; }
 .catalog[open] > summary { background: var(--panel); }
-.catalog[open] > summary::after { transform: translateY(1px) rotate(225deg); }
+.catalog[open] > summary .ico { transform: rotate(180deg); }
 
 .catalog-list {
   position: absolute;
@@ -399,9 +504,9 @@ input:focus-visible, textarea:focus-visible {
 .card-add .stepper--wide {
   grid-template-columns: 1fr auto 1fr;
   position: relative; overflow: hidden;
-  border-color: var(--accent); color: #fff;
+  border-color: var(--accent); color: var(--on-accent);
 }
-.card-add .stepper--wide button { color: #fff; }
+.card-add .stepper--wide button { color: var(--on-accent); }
 .card-add .stepper--wide::before {
   content: ""; position: absolute; inset: 0; z-index: 0;
   background: var(--accent); transform: scaleY(1); transform-origin: bottom;
@@ -430,7 +535,7 @@ input:focus-visible, textarea:focus-visible {
 .card-add .add { max-width: 220px; }
 .card-add .stepper--wide button { height: 38px; }
 .stepper-num {
-  font-size: 15px; font-weight: 700; text-align: center;
+  font-size: 15px; line-height: 20px; font-weight: 600; text-align: center;
   font-variant-numeric: tabular-nums;
   min-width: 34px;
 }
@@ -444,15 +549,31 @@ input:focus-visible, textarea:focus-visible {
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #0f0f12;
+  background: var(--shot);
 }
 .shot img { width: 100%; height: 100%; object-fit: cover; }
-.shot-ico {
-  width: 30px; height: 30px;
-  fill: none; stroke: var(--dim); stroke-width: 1.4;
-  stroke-linejoin: round; opacity: .5;
-}
+.shot-ico { width: 34px; height: 34px; stroke-width: 1.5; color: var(--ink); opacity: .8; }
 .shot img + .shot-ico { display: none; }
+
+/* Позиция без своего снимка: за знаком категории стоит приглушённая картинка
+   этой категории (Site.shotAttr ставит data-cat только когда снимка нет).
+   Размеры карточки заданы заранее — подгрузка картинки ничего не двигает. */
+.shot, .item-shot { position: relative; isolation: isolate; }
+.shot[data-cat]::before, .item-shot[data-cat]::before {
+  content: ""; position: absolute; inset: 0; z-index: -2;
+  background: var(--cat-img) center / cover no-repeat;
+  filter: var(--img-filter);
+}
+.shot[data-cat]::after, .item-shot[data-cat]::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: rgba(var(--veil-rgb), .62);
+}
+[data-cat="CAM"] { --cat-img: url(img/cat-CAM.jpg); }
+[data-cat="LEN"] { --cat-img: url(img/cat-LEN.jpg); }
+[data-cat="LGT"] { --cat-img: url(img/cat-LGT.jpg); }
+[data-cat="AUD"] { --cat-img: url(img/cat-AUD.jpg); }
+[data-cat="GRP"] { --cat-img: url(img/cat-GRP.jpg); }
+[data-cat="OTH"] { --cat-img: url(img/cat-OTH.jpg); }
 
 .card-body { padding: 10px 12px 12px; display: grid; gap: 5px; }
 .card-name { font-size: 14px; line-height: 18px; font-weight: 600; }
@@ -472,7 +593,7 @@ input:focus-visible, textarea:focus-visible {
 
 /* Нажатие на строку каталога отзывается сразу, до перерисовки: палец ушёл —
    отклик уже был, и ждать ответа от разметки не приходится. */
-.catalog-item:active:not([disabled]) { background: var(--accent); color: #fff; }
+.catalog-item:active:not([disabled]) { background: var(--accent); color: var(--on-accent); }
 
 /* --- Страница позиции --- */
 
@@ -486,20 +607,21 @@ input:focus-visible, textarea:focus-visible {
    стоит дорого. Строка текста высотой 17 точек для пальца не цель: добавляем
    отступы внутрь ссылки, а не вокруг неё, чтобы росла область нажатия. */
 .crumbs a {
-  display: inline-block; padding: 11px 0;
+  display: inline-flex; align-items: center; gap: 6px; padding: 11px 0;
   color: var(--dim); text-decoration: none;
 }
+.crumbs .ico { width: 16px; height: 16px; }
 .crumbs a:active { color: var(--ink); }
 
 .item-shot {
   aspect-ratio: 4 / 3;
-  background: var(--panel);
+  background: var(--shot);
   border-bottom: 1px solid var(--line);
   display: grid; place-items: center;
   overflow: hidden;
 }
 .item-shot img { width: 100%; height: 100%; object-fit: contain; }
-.item-shot .shot-ico { width: 64px; height: 64px; }
+.item-shot .shot-ico { width: 64px; height: 64px; stroke-width: 1.3; }
 .item-shot img + .shot-ico { display: none; }
 
 .item-main { padding: 20px var(--pad) 0; }
@@ -522,7 +644,7 @@ input:focus-visible, textarea:focus-visible {
 .btn {
   font: inherit; font-size: 14px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase;
-  background: var(--accent); color: #fff;
+  background: var(--accent); color: var(--on-accent);
   border: 1px solid var(--accent); border-radius: 0;
   min-height: 46px; padding: 0 24px;
   cursor: pointer; text-decoration: none;
@@ -558,9 +680,12 @@ input:focus-visible, textarea:focus-visible {
 }
 .stepper button {
   font: inherit; font-size: 19px; line-height: 1;
-  background: none; border: 0; color: var(--ink);
+  background: none; border: 0; color: var(--ink); padding: 0;
   height: 44px; cursor: pointer;
+  display: grid; place-items: center;
 }
+.stepper button .ico { width: 18px; height: 18px; }
+.stepper button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -3px; }
 .stepper input {
   font: inherit; font-size: 16px; text-align: center;
   font-variant-numeric: tabular-nums;
@@ -673,11 +798,7 @@ input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity
   color: var(--dim); cursor: pointer;
   display: grid; place-items: center;
 }
-.copy-btn svg {
-  width: 17px; height: 17px;
-  fill: none; stroke: currentColor; stroke-width: 1.7;
-  stroke-linecap: round; stroke-linejoin: round;
-}
+.copy-btn .ico { width: 17px; height: 17px; stroke-width: 1.8; }
 .copy-btn:hover { color: var(--ink); border-color: var(--accent); }
 .copy-btn--done { color: var(--accent-text); border-color: var(--accent-text); }
 
@@ -744,13 +865,15 @@ footer a { color: var(--dim); }
   .catalog { grid-column: 1; grid-row: 1; }
   .searchbar { grid-column: 2; grid-row: 1; }
   .chips { grid-column: 1 / -1; }
-  .item-shot { aspect-ratio: 16 / 9; }
+  .hero { min-height: 320px; }
+  .hero::before { background-image: url(img/hero.jpg); }
+  .item-shot { aspect-ratio: 16 / 9; max-height: 380px; }
   .item-main { max-width: 640px; }
   .item-add .btn { flex: 0 0 auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
 /* --- Разделы витрины --- */
@@ -809,6 +932,14 @@ footer a { color: var(--dim); }
 .cap, .notice-tag, .wordmark-name, .wordmark-sub, .cart-link, .hero h1,
 .catalog > summary, .group-title, .add, .item-main h1, .btn, .page h1.title,
 .block h2, .link-danger, .section, .soon, .foot-name, .foot-h,
-.stepper--wide, .copy-btn {
+.stepper--wide, .copy-btn, .wordmark-num {
   font-family: var(--font-display);
+}
+/* Цифры — тем же шрифтом, что и подписи рядом с ними: в Golos они другой высоты
+   и садятся на другую базовую линию, рядом с Oswald это видно. Счётчик корзины,
+   числа в счётчиках, «свободно N», любой .num. */
+.cart-count, .stepper-num, .stepper input, .card-free b, .num, .num-v,
+.num-ghost, .stepper button {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
 }
