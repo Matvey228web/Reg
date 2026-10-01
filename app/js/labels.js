@@ -13,18 +13,17 @@ const LabelsScreen = (() => {
   const SIZE_KEY = "mifs_label_size";
   const DEFAULT_CAPTION = "Киноколледж №40";
 
-  // Вертикальная лента: название сверху, QR посередине, под ним категория,
-  // снизу номер плашкой; подпись колледжа бежит строкой по кругу вдоль рамки.
+  // Вертикальная лента: название сверху, QR посередине, снизу номер плашкой; подпись колледжа бежит строкой по кругу вдоль рамки.
   // Размеры — ходовые у Niimbot и Phomemo. Кегли заданы в миллиметрах:
   // этикетка печатается в физическом размере, и «пункты» здесь ничего не
-  // значат. org — кегль категории; подпись по рамке на пятую часть мельче, чтобы
-  // не спорить с названием, а на мелкой ленте ужимается сама, чтобы целиком
+  // значат. org — опорный кегль подписи по рамке (сама она ещё мельче, чтобы
+  // не спорить с названием), а на мелкой ленте ужимается сама, чтобы целиком
   // влезть на короткую сторону.
   const SIZES = {
-    v20x30: { label: "20×30", w: 20, h: 30, pad: 1.2, name: 1.9, num: 3.0, org: 1.7, caption: true, category: false },
-    v30x40: { label: "30×40", w: 30, h: 40, pad: 1.5, name: 2.5, num: 4.0, org: 2.0, caption: true, category: false },
-    v30x50: { label: "30×50", w: 30, h: 50, pad: 1.5, name: 2.8, num: 4.6, org: 2.2, caption: true, category: true },
-    v40x60: { label: "40×60", w: 40, h: 60, pad: 2.0, name: 3.4, num: 5.6, org: 2.6, caption: true, category: true },
+    v20x30: { label: "20×30", w: 20, h: 30, pad: 1.2, name: 1.9, num: 3.0, org: 1.7, caption: true },
+    v30x40: { label: "30×40", w: 30, h: 40, pad: 1.5, name: 2.5, num: 4.0, org: 2.0, caption: true },
+    v30x50: { label: "30×50", w: 30, h: 50, pad: 1.5, name: 2.8, num: 4.6, org: 2.2, caption: true },
+    v40x60: { label: "40×60", w: 40, h: 60, pad: 2.0, name: 3.4, num: 5.6, org: 2.6, caption: true },
   };
   const DEFAULT_SIZE = "v30x40";
 
@@ -109,8 +108,7 @@ const LabelsScreen = (() => {
         <input type="text" id="labels-caption" value="${escapeHtml(caption())}" />
       </div>
       </div>
-      <p class="hint">Бежит строкой по кругу вдоль рамки. На 30×50 и 40×60
-      под кодом помещается ещё и категория.</p>
+      <p class="hint">Бежит строкой по кругу вдоль рамки.</p>
       ${singleItemId ? "" : `
       <div class="searchbar">
         <input type="search" id="labels-search" placeholder="Поиск по названию или номеру"
@@ -462,7 +460,7 @@ const LabelsScreen = (() => {
     let nameLine = Math.round(fitted.px * 1.06);
     let nameHeight = fitted.rows.length * nameLine;
 
-    // 2. Низ: плашка с номером; над ней, сразу под кодом, — категория.
+    // 2. Низ: плашка с номером.
     //    Считаем заранее, чтобы знать, сколько высоты остаётся коду.
     // Лента по рамке забирает ширину, и номер в прежнем кегле вылезал за
     // плашку. Кегль номера ужимаем до ширины поля, плашку — вместе с ним.
@@ -472,9 +470,6 @@ const LabelsScreen = (() => {
     if (numW + numPx * 0.8 > inner) numPx = Math.floor(numPx * inner / (numW + numPx * 0.8));
     const chipPadY = Math.round(numPx * 0.22);
     const chipH = Math.round(numPx * 1.2) + chipPadY * 2;
-    const orgPx = mm(size.org, k);
-    const orgLine = Math.round(orgPx * 1.25);
-    let category = size.category ? categoryLabel(item.category) : "";
 
     // 3. Бюджет высоты. Код не может быть меньше четырёх точек на модуль —
     //    ниже этого края замываются и телефон читает через раз. Если всё сразу
@@ -484,13 +479,11 @@ const LabelsScreen = (() => {
     const minDot = 4 * k;
     const innerH = canvas.height - pad * 2;
     const ruleH = () => (fitted.rows.length ? Math.round(gap * 0.7) + stroke : 0);
-    const catH = () => (category ? orgLine : 0);
-    const fits = () => nameHeight + ruleH() + catH() + chipH + gap * 2 + modules * minDot <= innerH;
+    const fits = () => nameHeight + ruleH() + chipH + gap * 2 + modules * minDot <= innerH;
 
     // Порядок, в котором жертвуем местом, когда лента мелкая:
     //  0) третья строка длинного названия — с многоточием оно всё равно узнаётся;
-    //  1) категория — она и так закодирована первыми двумя цифрами номера;
-    //  2) вторая строка названия — модель узнают и по первой, а на приборе она
+    //  1) вторая строка названия — модель узнают и по первой, а на приборе она
     //     обычно написана и без нас.
     //  Подпись колледжа по рамке места у кода не отнимает и не убирается.
     const refit = (lines) => {
@@ -499,10 +492,9 @@ const LabelsScreen = (() => {
       nameHeight = fitted.rows.length * nameLine;
     };
     if (!fits() && fitted.rows.length > 2) refit(2);
-    if (!fits()) category = "";
     if (!fits() && fitted.rows.length > 1) refit(1);
 
-    const freeNow = () => innerH - nameHeight - ruleH() - catH() - chipH - gap * 2;
+    const freeNow = () => innerH - nameHeight - ruleH() - chipH - gap * 2;
     const dotNow = () => Math.max(1, Math.floor(Math.min(qrRoom, freeNow()) / modules));
     // Третья строка названия не стоит ни одной точки модуля: код — рабочий
     // инструмент, а название с многоточием всё равно узнаётся.
@@ -541,7 +533,7 @@ const LabelsScreen = (() => {
       y += stroke;
     }
 
-    // Остаток высоты делим поровну над и под кодом с категорией. Сам код уже
+    // Остаток высоты делим поровну над и под кодом. Сам код уже
     // взял из него всё, что мог (dot выше), так что делить остаётся считанные
     // точки.
     const spare = Math.max(0, free - qrSide);
@@ -549,12 +541,8 @@ const LabelsScreen = (() => {
     ctx.drawImage(qrCanvas, Math.round((canvas.width - qrSide) / 2), y, qrSide, qrSide);
     y += qrSide;
 
-    // Категория — сразу под кодом: белое поле кода уже отделяет её от модулей.
-    if (category) {
-      ctx.font = orgPx + "px " + FONT_SANS;
-      ctx.textAlign = "center";
-      ctx.fillText(category, canvas.width / 2, y, inner);
-    }
+    // Категории на этикетке нет: что это камера, видно и так, а в номере она
+    // всё равно закодирована первыми двумя цифрами. Её место отдано коду.
 
     // Плашку отсчитываем от нижнего края, а не накопленной суммой: округления
     // по дороге сдвигали бы её на пиксель-другой и на мелкой ленте её срезало
@@ -580,7 +568,6 @@ const LabelsScreen = (() => {
     // обратно из картинки.
     canvas.dataset.qrMm = (qrSide / (DOTS_PER_MM * k)).toFixed(2);
     canvas.dataset.dot = String(Math.round(dot / k));
-    canvas.dataset.category = category ? "1" : "0";
     canvas.dataset.ribbonPx = ribbon ? String(Math.round(ribbon.px / k)) : "0";
     return canvas;
   }
