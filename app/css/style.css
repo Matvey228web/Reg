@@ -1659,11 +1659,11 @@ select {
   color: var(--accent); font: inherit; font-size: 15px; cursor: pointer;
 }
 
-/* --- Быстрые действия в списке заказов --- */
-/* Акт, чат, звонок — то, что делают, глядя в список, а не открыв заказ.
-   Кнопки мелкие по площади, но не мелкие для пальца: высота 36, отступы
+/* --- Быстрые действия: акт в списке заказов, звонок и копирование номера
+   в карточке --- */
+/* Кнопки мелкие по площади, но не мелкие для пальца: высота 36, отступы
    внутрь, и между ними зазор — промах по соседней означал бы звонок вместо
-   открытия документа. */
+   копирования. Ссылка (tel:) выглядит так же, как кнопка. */
 .quick-row {
   display: flex;
   flex-wrap: wrap;
@@ -1671,7 +1671,10 @@ select {
   margin-top: 10px;
 }
 .chip-btn {
+  display: inline-flex;
+  align-items: center;
   min-height: 36px;
+  text-decoration: none;
   padding: 0 14px;
   border: 1px solid var(--hairline);
   border-radius: var(--r-lg);
@@ -1694,3 +1697,14 @@ select {
   text-decoration: none;
 }
 .tap-line:active { opacity: .6; }
+
+/* Номер в карточке заказа — обычный текст, который можно выделить и
+   скопировать пальцем: веб-вью Telegram иначе отдаёт долгое нажатие ссылке. */
+.contact-num {
+  margin-top: 6px;
+  font-size: 17px;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.contact-num + .quick-row { margin-top: 6px; }
