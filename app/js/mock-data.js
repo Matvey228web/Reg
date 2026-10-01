@@ -709,6 +709,14 @@ const MockAPI = {
             to = wanted;
           }
         }
+        // Вся модель с выданным: /model/move ниже откажет сам, но название к
+        // тому времени уже было бы переписано — проверяем до записи.
+        if (to && allModel && MockStore.equipment.some((r) => r.category === from &&
+            String(r.model_code) === code &&
+            (Number(r.qty_out || 0) > 0 || r.status === "Rented" || r.current_transaction_id))) {
+          fail(409, "Что-то из этой модели на руках — переносить её нельзя: номера сменятся, а " +
+            "принимать выданное будут по старым наклейкам. Сначала примите, потом переносите.");
+        }
         const sameModel = (r) => r.category === from && String(r.model_code) === code;
         const modelRow = MockStore.models.find(sameModel);
         if (allModel && (has("name") || to)) {
@@ -1145,6 +1153,19 @@ const MockAPI = {
         }
         const source = MockStore.models.find((m) => m.category === from && String(m.model_code) === code);
         if (!source) { const e = new Error("Модель не найдена в этой категории"); e.status = 404; throw e; }
+        // Пока что-то из модели на руках, не переносим — как assertModelNotOut
+        // в Code.gs: номера сменятся, а принимать будут по старым наклейкам.
+        const outN = MockStore.equipment
+          .filter((i) => i.category === from && String(i.model_code) === code)
+          .reduce((n, i) => n + (Number(i.qty_out || 0) ||
+            (i.status === "Rented" || i.current_transaction_id ? 1 : 0)), 0);
+        if (outN) {
+          const word = fromCat.by_qty ? "шт." : (outN % 10 === 1 && outN % 100 !== 11 ? "вещь" :
+            [2, 3, 4].includes(outN % 10) && ![12, 13, 14].includes(outN % 100) ? "вещи" : "вещей");
+          const e = new Error("На руках " + outN + " " + word + " этой модели — переносить её нельзя: " +
+            "номера сменятся, а принимать выданное будут по старым наклейкам. Сначала примите, потом переносите.");
+          e.status = 409; throw e;
+        }
 
         const merged = MockStore.models.some((m) => m.category === to && m.model_name === source.model_name);
         const target = MockStore.findOrCreateModel(to, source.model_name);
