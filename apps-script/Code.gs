@@ -243,6 +243,23 @@ function seedSheet(ss, name, rows) {
   sheet.getRange(2, 1, values.length, headers.length).setValues(values);
 }
 
+// Отпечаток схемы: меняется, когда в коде появилась вкладка или колонка.
+// Хэш свой, а не computeDigest: нужен лишь признак «схема другая», и он
+// считается на каждом открытии настроек.
+function schemaSignature() {
+  var text = JSON.stringify(SCHEMA);
+  var h = 5381;
+  for (var i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0;
+  return text.length + "-" + h.toString(16);
+}
+
+// Кнопка нужна, только пока таблица отстаёт от кода: после выкладки с новой
+// вкладкой или колонкой — до первого нажатия. Отметки нет (таблица заведена до
+// неё) — тоже показываем: одно безопасное нажатие ставит её.
+function schemaOutdated() {
+  return String(metaGet("schema_sig") || "") !== schemaSignature();
+}
+
 /**
  * Создаёт недостающие вкладки и проставляет заголовки колонок.
  * Запускать можно сколько угодно раз: существующие данные не трогаются,
@@ -365,6 +382,10 @@ function setupSheets() {
       ss.deleteSheet(s);
     }
   }
+
+  // Отметка «таблица догнала эту схему»: по ней настройки решают, показывать
+  // ли кнопку «Создать недостающие вкладки» (schemaOutdated).
+  metaSet("schema_sig", schemaSignature());
 
   var message = "Готово. Создано вкладок: " + created.length +
     (created.length ? " (" + created.join(", ") + ")" : "") +
@@ -4191,6 +4212,7 @@ function handleSettingsGet(payload, token) {
     maintenance: {
       journal_archived_at: metaGet("journal_archived_at") || "",
       journal_trimmed_at: metaGet("journal_trimmed_at") || "",
+      schema_outdated: schemaOutdated(),
     },
   };
 }

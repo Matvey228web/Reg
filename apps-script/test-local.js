@@ -1138,6 +1138,21 @@ check('настройки отдаются вошедшему', cfg.ok === true,
 check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
   cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
 check('категории приходят вместе с настройками', cfg.data.categories.length === 14);
+// Кнопка «Создать недостающие вкладки»: видна, только пока таблица отстаёт
+// от схемы в коде.
+check('после setupSheets таблица не отстаёт — кнопку не показываем',
+  cfg.data.maintenance.schema_outdated === false, cfg.data.maintenance);
+metaSet('schema_sig', '');
+check('отметки нет (таблица заведена до неё) — кнопку показываем',
+  call('/settings/get', {}, token).data.maintenance.schema_outdated === true);
+SCHEMA.__probe = ['x'];
+metaSet('schema_sig', schemaSignature());
+delete SCHEMA.__probe;
+check('в схеме появилась вкладка или колонка — кнопку показываем',
+  call('/settings/get', {}, token).data.maintenance.schema_outdated === true);
+check('/maintenance setup ставит отметку — кнопка уходит',
+  call('/maintenance', { action: 'setup' }, token).ok === true &&
+  call('/settings/get', {}, token).data.maintenance.schema_outdated === false);
 // Отдельная учётка: повторный вход аннулирует прежний токен, и войди мы здесь
 // под администратором — сломали бы сессию, которой пользуются проверки ниже.
 call('/staff/create', { full_name: 'Проба', login: 'probe', pin: '987698', role: 'Warehouse Staff' }, token);
