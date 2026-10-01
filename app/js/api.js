@@ -52,7 +52,29 @@ function sessionExpired(endpoint, token) {
 // её именно потому, что не верит показанному. Кэш в браузере мы и так обходим,
 // а этот флаг доезжает до Worker перед таблицей (worker/src/index.js), где
 // лежит общий кэш склада.
-async function apiPost(endpoint, body = {}, { fresh = false } = {}) {
+//
+// Пока хоть один запрос в пути, на body висит класс net-busy — по нему сверху
+// бежит тонкая полоска. Ответ таблицы идёт 6–12 секунд, и без неё после
+// «Обновить» или фоновой подгрузки не видно, что приложение вообще работает.
+// Счётчик, а не флажок: запросы идут и параллельно (каталог + заказы).
+let netPending = 0;
+function netBusy(delta) {
+  netPending = Math.max(0, netPending + delta);
+  if (typeof document !== "undefined" && document.body) {
+    document.body.classList.toggle("net-busy", netPending > 0);
+  }
+}
+
+async function apiPost(endpoint, body = {}, options = {}) {
+  netBusy(1);
+  try {
+    return await apiRequest(endpoint, body, options);
+  } finally {
+    netBusy(-1);
+  }
+}
+
+async function apiRequest(endpoint, body, { fresh = false } = {}) {
   const session = getStoredSession();
   const token = session ? session.token : null;
 

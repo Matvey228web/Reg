@@ -194,11 +194,12 @@ const ItemScreen = (() => {
   }
 
   function submitEdit(item) {
+    showBoxError("item-edit-error", "");
     const all = document.getElementById("item-edit-all").checked;
     const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
     const body = { item_id: item.item_id };
     const name = val("item-edit-name");
-    if (!name) { TG.showAlert("Название не может быть пустым"); return; }
+    if (!name) { showBoxError("item-edit-error", "Название не может быть пустым"); return; }
     if (name !== String(item.name || "")) body.name = name;
     const category = val("item-edit-category");
     if (category && category !== item.category) body.category = category;
@@ -216,7 +217,7 @@ const ItemScreen = (() => {
         const qty = Number(qtyRaw);
         const min = Math.max(1, Number(item.qty_out || 0));
         if (!Number.isInteger(qty) || qty < min) {
-          TG.showAlert(Number(item.qty_out || 0) > qty
+          showBoxError("item-edit-error", Number(item.qty_out || 0) > qty
             ? `На руках сейчас ${Number(item.qty_out)} шт. — меньше этого количество не поставить.`
             : "Количество — целое число от одного");
           return;
@@ -227,7 +228,7 @@ const ItemScreen = (() => {
     // Сверяем здесь же: запрос к таблице — это 5–8 секунд, и тратить их,
     // чтобы услышать «ничего не изменилось», незачем.
     if (Object.keys(body).filter((k) => k !== "item_id" && k !== "all_model").length === 0) {
-      TG.showAlert("Ничего не изменилось");
+      showBoxError("item-edit-error", "Ничего не изменилось");
       return;
     }
     if (!body.category) { sendEdit(item, body); return; }
@@ -239,8 +240,7 @@ const ItemScreen = (() => {
   }
 
   async function sendEdit(item, body) {
-    const btn = document.getElementById("item-edit-submit");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("item-edit-submit"));
     showBoxError("item-edit-error", "");
     try {
       const res = await apiPost("/item/update", body);
@@ -250,7 +250,8 @@ const ItemScreen = (() => {
       // номерам, и до следующего обновления он не должен врать.
       if (moved && res.all_model) {
         // Перенумерована вся модель — как после /model/move в models.js:
-        // правок слишком много, каталог сбрасываем целиком.
+        // правок слишком много. Каталог сбрасываем, а не помечаем устаревшим:
+        // в нём старые номера, и тап по такой строке дал бы «не найдено».
         Cache.clear("equipment");
       } else {
         // Перенос одной вещи — та же строка под новым номером: patch по
@@ -264,7 +265,7 @@ const ItemScreen = (() => {
       }
       // Справочник моделей: название модели сменилось, или вещь переехала в
       // другую категорию (там завелась модель, здесь могла опустеть).
-      if ((res.all_model && body.name) || body.category) Cache.clear("models");
+      if ((res.all_model && body.name) || body.category) Cache.stale("models");
 
       if (moved) {
         // Карточку открываем под новым номером: старого больше нет. Назад —
@@ -275,14 +276,15 @@ const ItemScreen = (() => {
           (yes) => { if (yes) Router.navigate("labels", { itemId: res.item_id }); });
         return;
       }
-      TG.showAlert(editResultText(res));
       render({ ...item, ...res.item });
+      // Что сохранилось — строкой над карточкой, а не окном, которое надо
+      // закрывать. Ошибка осталась в error-box формы: она там и видна.
+      showStatusLine("item-status", editResultText(res));
     } catch (err) {
       TG.hapticError();
       showBoxError("item-edit-error", err.message);
-      TG.showAlert(err.message);
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
@@ -355,6 +357,7 @@ const ItemScreen = (() => {
 
     content.innerHTML = `
       ${editForm(item)}
+      <div id="item-status"></div>
       <div class="card">
         <div class="card-title">${statusBadge(item.status)}</div>
         <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}</div>
@@ -373,9 +376,9 @@ const ItemScreen = (() => {
           <div class="qr-id">${escapeHtml(item.item_id)}</div>
         </div>
         <div class="btn-row btn-row--equal">
-          <button class="btn btn--secondary" id="item-qr-big">Этикетка крупно</button>
+          <button class="btn btn--secondary" id="item-qr-big">Крупно</button>
           <button class="btn btn--secondary" id="item-qr-download">Сохранить</button>
-          <button class="btn btn--secondary" id="item-qr-label">Этикетка</button>
+          <button class="btn btn--secondary" id="item-qr-label">Печать</button>
         </div>
         <p class="hint">Из Telegram скачать нельзя: «Сохранить» откроет лист
         «Поделиться», а если его нет — покажет картинку во весь экран (удерживайте, чтобы сохранить).</p>
@@ -409,8 +412,10 @@ const ItemScreen = (() => {
             </select>
           </div>
           </div>
+          <div id="item-defect-error"></div>
           <button class="btn" id="item-defect-submit">Сохранить дефект</button>
         </div>
+        <div id="item-defect-status"></div>
       </div>
     `;
 
@@ -452,9 +457,9 @@ const ItemScreen = (() => {
     });
     document.getElementById("item-defect-submit").addEventListener("click", async () => {
       const description = document.getElementById("item-defect-desc").value.trim();
-      if (!description) { TG.showAlert("Опишите дефект"); return; }
-      const btn = document.getElementById("item-defect-submit");
-      btn.disabled = true;
+      if (!description) { showBoxError("item-defect-error", "Опишите дефект"); return; }
+      const restore = busyButton(document.getElementById("item-defect-submit"));
+      showBoxError("item-defect-error", "");
       try {
         const severity = document.getElementById("item-defect-severity").value;
         const res = await apiPost("/defect/report", {
@@ -463,8 +468,6 @@ const ItemScreen = (() => {
           severity,
         });
         TG.hapticSuccess();
-        TG.showAlert("Дефект сохранён");
-        Cache.clear("defects");
         // Статус предмета бэкенд вернул в ответе — правим одну строку каталога
         // и карточку, а не сбрасываем весь каталог и не перечитываем предмет.
         const changes = ItemState.afterDefect(item, severity, res && res.status);
@@ -481,12 +484,23 @@ const ItemScreen = (() => {
           // История ещё в пути и может прийти без этого дефекта — просим заново.
           loadHistory(++historySeq);
         }
+        // Доска «Ремонт»: дописываем дефект в её кэш, не трогая возраст, —
+        // и помечаем устаревшим, чтобы она перечитала себя молча (названия,
+        // кто заявил — это знает только сервер).
+        const board = Cache.items("defects");
+        if (board && defect.defect_id) {
+          Cache.replace("defects", board.concat([{ ...defect,
+            reported_by_name: (Auth.getSession() || {}).full_name || "" }]));
+        }
+        Cache.stale("defects");
         render(next);
+        showStatusLine("item-defect-status", "Дефект сохранён" +
+          (changes.status === "In Repair" ? " — вещь снята с выдачи" : ""));
       } catch (err) {
         TG.hapticError();
-        TG.showAlert(err.message);
+        showBoxError("item-defect-error", err.message);
       } finally {
-        btn.disabled = false;
+        restore();
       }
     });
 

@@ -48,6 +48,7 @@
 | Разовый импорт | чужая выгрузка инвентаризации → каталог и справочник моделей | `importInventory`, `reimportInventory` |
 | Архив журнала | выгрузка выдач в файл и подрезка листа | `archiveJournal`, `trimJournal` |
 | Ночное обслуживание | копия таблицы на Диск и подрезка `Logs`; триггер ставится руками один раз | `dailyMaintenance`, `dailyBackup`, `trimLogs`, `setupTriggers` |
+| Уборка тестовых строк | запуск из редактора: просмотр, затем копия таблицы и удаление пробных заказов с выдачами, учеников, сотрудников | `cleanupTestDataPreview`, `cleanupTestData` |
 | Точка входа | приём POST, разбор токена, `case` на каждую ручку | `doPost`, `doGet` |
 | Хендлеры | по одной функции `handle*` на ручку | см. таблицу ручек ниже |
 | Заказы | разбор сообщения с сайта, студенты, состав заказа | `parseOrderMessage`, `normalizePhone` |
@@ -99,7 +100,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 |---|---|
 | Вход и сотрудники | `/auth/login`, `/staff/*` |
 | Каталог и вещи | `/item/*` (правка карточки — `/item/update`, номера — `/item/numbers`), `/equipment/list`, `/model*` |
-| Выдача и приём | `/transaction/checkout`, `/transaction/checkin` |
+| Выдача и приём | `/transaction/checkout`, `/transaction/checkin`, `/transaction/checkin-batch` (приём всего заказа одним запросом) |
 | Дефекты | `/defect/report`, `/defect/resolve`, `/defects/list` |
 | Заказы | `/order/*`, `/orders/list`, `/students/list`, `/student/history` |
 | Сайт | `/public/catalog`, `/public/order`, `/public/announcements` |

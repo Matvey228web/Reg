@@ -169,9 +169,10 @@ const CatalogScreen = (() => {
     try {
       // Каталог берём целиком один раз, фильтры применяем локально: спрашивать
       // сервер на каждое переключение фильтра значило бы ждать снова.
-      const items = await apiPost("/equipment/list", { category: "all", status: "all" }, { fresh: force });
+      // Через Cache.load: если каталог уже тянет главная (Cache.warm) или
+      // «Ремонт», ждём тот же ответ, а не заводим второй запрос.
+      const items = await Cache.load(CACHE, "/equipment/list", { category: "all", status: "all" }, { fresh: force });
       allItems = items;
-      Cache.set(CACHE, items);
       render();
     } catch (err) {
       if (!allItems.length) {
@@ -215,35 +216,72 @@ const CatalogScreen = (() => {
       showBoxError("catalog-add-error", "Укажите название новой модели");
       return;
     }
-    const btn = document.getElementById("new-item-submit");
-    btn.disabled = true;
-    btn.textContent = "Создаём…";
+    const bulk = categoryByQty(category);
+    const qty = bulk ? Math.floor(Number(document.getElementById("new-item-qty").value) || 1) : 1;
+    if (bulk && qty < 1) {
+      showBoxError("catalog-add-error", "Количество — целое число от одного");
+      return;
+    }
+    // Название модели нужно этикетке и строке каталога. У выбранной из
+    // справочника его нет в поле «Название» — берём из списка.
+    const modelSel = document.getElementById("new-item-model");
+    const modelName = modelChoice === "__new"
+      ? name
+      : (modelSel.selectedOptions[0] ? modelSel.selectedOptions[0].textContent.trim() : "");
+    const restore = busyButton(document.getElementById("new-item-submit"), "Создаём…");
     try {
       const payload = { category, serial_number, inventory_number, condition_notes };
       if (modelChoice === "__new") payload.model_name = name;
       else payload.model_code = Number(modelChoice);
-      if (categoryByQty(category)) {
-        payload.qty = Number(document.getElementById("new-item-qty").value) || 1;
-        if (payload.qty < 1) {
-          showBoxError("catalog-add-error", "Количество — целое число от одного");
-          btn.disabled = false;
-          btn.textContent = "Создать и получить QR";
-          return;
-        }
-      }
-      const { item_id } = await apiPost("/item/create", payload);
+      if (bulk) payload.qty = qty;
+      const res = await apiPost("/item/create", payload);
       TG.hapticSuccess();
-      renderQrResult(item_id, name, category);
+      rememberCreated(res, payload, modelName);
+      // Завели новую модель — справочник моделей устарел; список перечитается
+      // молча, когда его откроют.
+      if (modelChoice === "__new") Cache.stale("models");
+      renderQrResult(String(res.item_id), modelName, category);
       document.getElementById("catalog-add-form").style.display = "none";
-      loadModels();
-      loadList({ force: true });
+      allItems = Cache.items(CACHE) || allItems;
+      render();
     } catch (err) {
       TG.hapticError();
       showBoxError("catalog-add-error", err.message);
     } finally {
-      btn.disabled = false;
-      btn.textContent = "Создать и получить QR";
+      restore();
     }
+  }
+
+  // Новая строка каталога — из ответа /item/create, без перечитывания всех
+  // 600+ позиций (раньше здесь был loadList({ force: true }) на 6–9 секунд).
+  // Сделано как submitNew в inventory.js: сервер мог не завести новую
+  // позицию, а пополнить штучную — тогда правим её количество.
+  function rememberCreated(res, payload, modelName) {
+    const id = String(res.item_id);
+    const items = Cache.items(CACHE);
+    if (!items) return;   // каталога ещё нет — придёт целиком при открытии
+    if (items.some((i) => String(i.item_id) === id)) {
+      Cache.patch(CACHE, "item_id", id, (row) => {
+        const qty = Number(res.qty || row.qty || 1);
+        return { qty, qty_free: qty - Number(row.qty_out || 0) };
+      });
+      return;
+    }
+    // Номер собран как XXYYZZ, средняя пара — код модели; сервер его не
+    // возвращает, а этикеткам и группировке он нужен.
+    Cache.replace(CACHE, items.concat([{
+      item_id: id,
+      name: modelName || id,
+      category: payload.category,
+      model_code: id.slice(2, 4),
+      serial_number: payload.serial_number || "",
+      inventory_number: payload.inventory_number || "",
+      condition_notes: payload.condition_notes || "",
+      status: "Available",
+      qty: Number(res.qty || 1),
+      qty_out: 0,
+      qty_free: Number(res.qty || 1),
+    }]));
   }
 
   // Категория нужна этикетке: на размерах 30×50 и 40×60 она печатается

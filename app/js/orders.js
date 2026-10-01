@@ -144,8 +144,9 @@ const OrdersScreen = (() => {
     busy = true;
     drawRefreshRow();
     try {
-      const orders = await apiPost("/orders/list", { status: "all" }, { fresh: force });
-      Cache.set(CACHE, orders);
+      // Через Cache.load: если список уже тянет главная (Cache.warm), ждём
+      // тот же ответ, а не заводим второй запрос.
+      const orders = await Cache.load(CACHE, "/orders/list", { status: "all" }, { fresh: force });
       render(orders);
     } catch (err) {
       if (!cached || !cached.length) {
@@ -306,17 +307,17 @@ const OrdersScreen = (() => {
       showBoxError("orders-add-error", "Вставьте сообщение о заказе");
       return;
     }
-    const btn = document.getElementById("orders-parse-btn");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("orders-parse-btn"), "Разбираем…");
     showBoxError("orders-add-error", "");
     try {
       const data = await apiPost("/order/parse", { text });
       draft = data;
       showAdd(confirmHtml(data));
     } catch (err) {
+      TG.hapticError();
       showBoxError("orders-add-error", err.message);
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
@@ -327,13 +328,14 @@ const OrdersScreen = (() => {
   // order_id, student_id, student_created, act_url), — в той же форме, что
   // отдаёт /orders/list.
   //
-  // Кладём только в свежий кэш: Cache.set обновляет возраст, и дописанный
-  // в старый список заказ выдал бы весь старый список за только что
-  // полученный. Старый кэш не трогаем — список перечитается при возврате,
-  // как и без этой правки.
+  // Кладём через Cache.replace: он не трогает возраст, поэтому дописанный в
+  // старый список заказ не выдаёт весь старый список за только что
+  // полученный, — и дописывать можно в любой кэш, а не только в свежий:
+  // старый всё равно перечитается молча при возврате, но новый заказ
+  // виден в нём сразу.
   function rememberCreated(payload, created) {
     const cached = Cache.items(CACHE);
-    if (!cached || !Cache.isFresh(CACHE)) return;
+    if (!cached) return;
     const row = {
       order_id: created.order_id,
       order_no: String(payload.order_no || "").trim(),
@@ -360,7 +362,7 @@ const OrdersScreen = (() => {
       archived_at: "",
       act_url: String(created.act_url || ""),
     };
-    Cache.set(CACHE, [row].concat(cached));
+    Cache.replace(CACHE, [row].concat(cached));
   }
 
   // Открываем карточку так же, как нажатие на строку списка (bindList).
@@ -381,8 +383,7 @@ const OrdersScreen = (() => {
       if (line) { line.category = category; line.model_code = modelCode; }
     });
 
-    const btn = document.getElementById("orders-confirm-btn");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("orders-confirm-btn"), "Создаём…");
     try {
       const payload = Object.assign({}, draft.order, { items: draft.items });
       const created = await apiPost("/order/create", payload);
@@ -390,7 +391,7 @@ const OrdersScreen = (() => {
     } catch (err) {
       TG.hapticError();
       showBoxError("orders-add-error", err.message);
-      btn.disabled = false;
+      restore();
     }
   }
 
@@ -400,8 +401,7 @@ const OrdersScreen = (() => {
     if (!value("mo-name")) { showBoxError("orders-add-error", "Укажите ФИО арендатора"); return; }
     const minor = document.getElementById("mo-minor").checked;
 
-    const btn = document.getElementById("orders-manual-submit");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("orders-manual-submit"), "Создаём…");
     try {
       const payload = {
         order_no: value("mo-no"),
@@ -421,7 +421,7 @@ const OrdersScreen = (() => {
     } catch (err) {
       TG.hapticError();
       showBoxError("orders-add-error", err.message);
-      btn.disabled = false;
+      restore();
     }
   }
 

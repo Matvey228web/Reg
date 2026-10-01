@@ -65,5 +65,11 @@
   AnnouncementsScreen.init();
 
   const session = Auth.requireAuth();
-  if (session) Router.reset("home");
+  if (session) {
+    Router.reset("home");
+    // Каталог и заказы — подтянуть, пока человек смотрит на главную
+    // (Cache.warm в cache.js): к тому моменту, как он их откроет, ответ
+    // таблицы уже будет.
+    Cache.warm();
+  }
 })();

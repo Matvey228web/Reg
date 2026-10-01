@@ -41,14 +41,40 @@ const Cache = (() => {
     set(name, [value]);
   }
 
-  // savedAt передаёт только patch: поправленная запись не делает свежим весь
-  // список, и «обновлено N минут назад» должно остаться честным.
-  function set(name, list, savedAt) {
+  function write(name, entry) {
     try {
-      localStorage.setItem(key(name), JSON.stringify({ items: list, saved_at: savedAt || Date.now() }));
+      localStorage.setItem(key(name), JSON.stringify(entry));
     } catch {
       // переполнение хранилища не должно ломать экран
     }
+  }
+
+  // Новый список целиком — с сервера. Он и свежий, и не устаревший.
+  // savedAt передают только правки (см. replace): поправленная запись не
+  // делает свежим весь список, и «обновлено N минут назад» должно остаться
+  // честным.
+  function set(name, list, savedAt) {
+    write(name, { items: list, saved_at: savedAt || Date.now() });
+  }
+
+  // Список поменяли своими руками (дописали строку, поправили цену) — кладём
+  // его на место, не трогая ни возраст, ни отметку «устарел». Cache.set здесь
+  // не годится: он объявил бы свежим весь список, хотя свежей стала одна строка.
+  function replace(name, list) {
+    const entry = get(name);
+    if (!entry) return false;
+    write(name, { ...entry, items: list });
+    return true;
+  }
+
+  // «Устарел, но не выбрасывай». После своей записи, когда новое состояние
+  // целиком не известно (заказ закрылся возвратом, появился дефект), раньше
+  // звали Cache.clear — и следующий экран снова встречал человека скелетом на
+  // 6–9 секунд. Теперь список остаётся: экран показывает его сразу, а свежий
+  // тянет молча, потому что isFresh отвечает «нет».
+  function stale(name) {
+    const entry = get(name);
+    if (entry) write(name, { ...entry, stale: true });
   }
 
   function age(name) {
@@ -58,7 +84,9 @@ const Cache = (() => {
 
   function isFresh(name) {
     const ms = age(name);
-    return ms !== null && ms < FRESH_MS;
+    if (ms === null || ms >= FRESH_MS) return false;
+    const entry = get(name);
+    return !(entry && entry.stale);
   }
 
   // Точечная правка: после своей же выдачи или приёма незачем перезапрашивать
@@ -75,7 +103,7 @@ const Cache = (() => {
     const row = entry.items[idx];
     const changes = typeof patchObject === "function" ? patchObject(row) : patchObject;
     entry.items[idx] = { ...row, ...changes };
-    set(name, entry.items, entry.saved_at);
+    write(name, entry);   // возраст и отметка «устарел» — как были
     return true;
   }
 
@@ -96,12 +124,39 @@ const Cache = (() => {
   function ensure(name, endpoint, body) {
     const cached = items(name);
     if (cached) return Promise.resolve(cached);
-    if (!inflight[name]) {
-      inflight[name] = apiPost(endpoint, body || {})
-        .then((list) => { set(name, list); return list; })
-        .finally(() => { delete inflight[name]; });
-    }
-    return inflight[name];
+    return load(name, endpoint, body);
+  }
+
+  // Сходить за списком и положить его в кэш. Запрос, который уже в пути,
+  // не дублируем: открыл каталог, пока его подтягивала главная (warm), — ждём
+  // тот же ответ, а не заводим второй на 6–9 секунд. fresh («Обновить»)
+  // в чужой запрос не встаёт: человек жмёт кнопку именно потому, что не верит
+  // тому, что уже грузится или лежит.
+  function load(name, endpoint, body, { fresh = false } = {}) {
+    if (inflight[name] && !fresh) return inflight[name];
+    const request = apiPost(endpoint, body || {}, { fresh })
+      .then((list) => { set(name, list); return list; })
+      .finally(() => { if (inflight[name] === request) delete inflight[name]; });
+    inflight[name] = request;
+    return request;
+  }
+
+  // Подтянуть главные списки, пока человек смотрит на главную: к тому
+  // моменту, как он откроет каталог или заказы, ответ уже будет. Через
+  // setTimeout, а не requestIdleCallback — в WKWebView на iOS его нет.
+  // Ошибки глотаем: это догадка наперёд, а не действие человека, и свою
+  // ошибку экран покажет сам, когда его откроют.
+  const WARM = [
+    ["equipment", "/equipment/list", { category: "all", status: "all" }],
+    ["orders", "/orders/list", { status: "all" }],
+  ];
+  function warm() {
+    if (CONFIG.MOCK_MODE) return;
+    setTimeout(() => {
+      WARM.forEach(([name, endpoint, body]) => {
+        if (!isFresh(name)) load(name, endpoint, body).catch(() => {});
+      });
+    }, 300);
   }
 
   function clear(name) {
@@ -126,7 +181,8 @@ const Cache = (() => {
     return `обновлено ${hours} часов назад`;
   }
 
-  return { items, one, get, set, setOne, age, ageText, isFresh, patch, ensure, clear, FRESH_MS };
+  return { items, one, get, set, setOne, replace, stale, age, ageText, isFresh, patch,
+           ensure, load, warm, clear, FRESH_MS };
 })();
 
 // Как своя запись меняет строку каталога. Повторяет правила Code.gs

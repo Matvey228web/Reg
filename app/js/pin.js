@@ -15,8 +15,8 @@ const PinScreen = (() => {
     const repeat = document.getElementById("pin-repeat").value.trim();
     showBoxError("pin-change-error", "");
 
-    if (!/^\d{4,6}$/.test(pin)) {
-      showBoxError("pin-change-error", "Новый PIN — от 4 до 6 цифр");
+    if (!/^\d{6}$/.test(pin)) {
+      showBoxError("pin-change-error", "Новый PIN — ровно 6 цифр");
       return;
     }
     if (pin !== repeat) {
