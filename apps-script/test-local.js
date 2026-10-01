@@ -3285,5 +3285,112 @@ check('logs_24h считает только последние сутки',
 check('logs_24h отдаётся вместе с настройками',
   call('/settings/get', {}, logToken).data.summary.logs_24h === logs24Before + 1);
 
+console.log('\n== уборка тестовых строк ==');
+// Свои строки с номерами 9xxx — рядом с тем, что накопили проверки выше.
+const sh = (n) => getSheet(n);
+const rowsOf = (n) => readRows(sh(n));
+const hasRow = (n, col, v) => rowsOf(n).some(r => String(r[col]) === String(v));
+appendRow(sh('Students'), { student_id: 9001, full_name: 'Тест Ученик', created_at: '2026-09-01' });
+appendRow(sh('Students'), { student_id: 9002, full_name: 'Тестова Анна', created_at: '2026-09-01' });
+appendRow(sh('Students'), { student_id: 9003, full_name: 'Тест Смешанный', created_at: '2026-09-01' });
+appendRow(sh('Orders'), { order_id: 9101, order_no: '9101', student_id: 9001, student_name: 'Тест Ученик',
+                          created_at: '2026-09-02', act_url: 'https://docs.google.com/document/d/act9101' });
+appendRow(sh('Orders'), { order_id: 9102, order_no: '9102', student_id: 9002, student_name: 'Тестова Анна', created_at: '2026-09-02' });
+appendRow(sh('Orders'), { order_id: 9103, order_no: '9103', student_id: 9002, student_name: '[тест] на руках', created_at: '2026-09-02' });
+appendRow(sh('Orders'), { order_id: 9104, order_no: 'TEST-1', student_id: 9003, student_name: 'Смешанный', created_at: '2026-09-02' });
+appendRow(sh('Orders'), { order_id: 9105, order_no: '9105', student_id: 9003, student_name: 'Смешанный', created_at: '2026-09-02' });
+[[9101, 1], [9101, 2], [9102, 1], [9103, 1], [9104, 1]].forEach(([o, l]) =>
+  appendRow(sh('OrderItems'), { order_id: o, line_no: l, raw_name: 'Позиция ' + o + '/' + l, qty: 1 }));
+appendRow(sh('Transactions'), { transaction_id: 9201, item_id: '010101', order_id: 9101, status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9202, item_id: '010101', order_id: 9102, status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9203, item_id: '010102', order_id: 9103, status: 'Open', checked_out_at: '2026-09-03' });
+appendRow(sh('Defects'), { defect_id: 9301, item_id: '010101', related_transaction_id: 9201, status: 'Resolved', description: 'тест' });
+appendRow(sh('Defects'), { defect_id: 9302, item_id: '010101', related_transaction_id: 9202, status: 'Open', description: 'настоящий' });
+const owner = findRowByValue(sh('Staff'), 'staff_id', ownerId());
+const ownerName = owner.full_name;
+updateRow(sh('Staff'), owner.__row, { full_name: 'Тест Владелец' });
+appendRow(sh('Staff'), { staff_id: 9401, full_name: 'Сотрудник Проба', login: 'test1', role: 'Staff', active: true });
+appendRow(sh('Staff'), { staff_id: 9402, full_name: 'Тест Админ', login: 'tadm', role: 'Admin', active: true });
+appendRow(sh('Staff'), { staff_id: 9403, full_name: 'Тестеров Иван', login: 'tester', role: 'Staff', active: true });
+
+check('isTestName: слово «Тест», пометка, но не фамилия',
+  isTestName(' тест ') && isTestName('Test-1') && isTestName('Иванов [TEST]') &&
+  !isTestName('Тестова Анна') && !isTestName('Testov') && !isTestName(''));
+
+const equipBefore = JSON.stringify(dumpSheet('Equipment'));
+const sizes = () => ['Orders', 'OrderItems', 'Transactions', 'Defects', 'Students', 'Staff']
+  .map(n => rowsOf(n).length).join();
+const sizesBefore = sizes();
+
+const preview = cleanupTestDataPreview();
+const plan = cleanupTestPlan();
+const planIds = (list, col) => list.map(r => String(r[col]));
+check('просмотр ничего не удаляет', sizes() === sizesBefore, [sizes(), sizesBefore]);
+check('просмотр: тестовый заказ и заказ TEST-1 в списке, настоящий нет',
+  planIds(plan.orders, 'order_id').includes('9101') && planIds(plan.orders, 'order_id').includes('9104') &&
+  !planIds(plan.orders, 'order_id').includes('9102'), planIds(plan.orders, 'order_id'));
+check('просмотр: заказ с техникой на руках отказан с причиной',
+  plan.refused.some(x => x.order_id === '9103' && /010102/.test(x.reason)) && /на руках/.test(preview), plan.refused);
+check('просмотр: в отчёте ссылка на акт и счётчики',
+  /act9101/.test(preview) && /Orders — \d+/.test(preview) && /Тест Ученик/.test(preview), preview);
+check('просмотр: ученик с настоящим заказом оставлен',
+  plan.keptStudents.some(x => String(x.row.student_id) === '9003'));
+check('просмотр: главный администратор оставлен',
+  plan.keptStaff.some(x => String(x.row.staff_id) === String(owner.staff_id) && /главный/.test(x.reason)));
+
+// Последний действующий администратор: гасим всех остальных — тестовый
+// администратор остаётся. Лист Staff потом возвращаем как был.
+const staffSnapshot = sh('Staff').data.map(r => r.slice());
+rowsOf('Staff').forEach(r => {
+  if (r.role === 'Admin' && String(r.staff_id) !== '9402') updateRow(sh('Staff'), r.__row, { active: false });
+});
+const lonely = cleanupTestPlan();
+check('последний действующий администратор не удаляется',
+  lonely.keptStaff.some(x => String(x.row.staff_id) === '9402' && /последний/.test(x.reason)) &&
+  !planIds(lonely.staff, 'staff_id').includes('9402'), lonely.keptStaff.map(x => x.row.staff_id));
+sh('Staff').data = staffSnapshot;
+
+// Копия не получилась — не удаляется ничего.
+logBefore = logRows().length;
+global.__driveFail = 'Диск недоступен';
+r = cleanupTestData();
+global.__driveFail = null;
+check('без копии уборка отменена', /отменена/.test(r) && sizes() === sizesBefore, r);
+check('отказ уборки записан в Logs',
+  logRows().slice(logBefore).some(l => l.kind === 'cleanup' && l.reason === 'backup_failed'));
+
+const copiesBefore = backupFiles.length;
+logBefore = logRows().length;
+r = cleanupTestData();
+const cleanupLogs = logRows().slice(logBefore).filter(l => l.kind === 'cleanup');
+check('перед уборкой сделана копия таблицы', backupFiles.length === copiesBefore + 1, r);
+check('удалены тестовый заказ, его позиции, выдача и дефект',
+  !hasRow('Orders', 'order_id', 9101) && !hasRow('Orders', 'order_id', 9104) &&
+  !hasRow('OrderItems', 'order_id', 9101) && !hasRow('OrderItems', 'order_id', 9104) &&
+  !hasRow('Transactions', 'transaction_id', 9201) && !hasRow('Defects', 'defect_id', 9301));
+check('удалён тестовый ученик', !hasRow('Students', 'student_id', 9001));
+check('настоящий заказ, его состав, выдача, дефект и ученица на месте',
+  hasRow('Orders', 'order_id', 9102) && hasRow('OrderItems', 'order_id', 9102) &&
+  hasRow('Transactions', 'transaction_id', 9202) && hasRow('Defects', 'defect_id', 9302) &&
+  hasRow('Students', 'student_id', 9002));
+check('ученик с настоящим заказом оставлен', hasRow('Students', 'student_id', 9003) && hasRow('Orders', 'order_id', 9105));
+check('заказ с техникой на руках не тронут',
+  hasRow('Orders', 'order_id', 9103) && hasRow('OrderItems', 'order_id', 9103) && hasRow('Transactions', 'transaction_id', 9203));
+check('Equipment не тронут', JSON.stringify(dumpSheet('Equipment')) === equipBefore);
+check('тестовые сотрудники удалены, «Тестеров» и главный на месте',
+  !hasRow('Staff', 'staff_id', 9401) && !hasRow('Staff', 'staff_id', 9402) &&
+  hasRow('Staff', 'staff_id', 9403) && hasRow('Staff', 'staff_id', owner.staff_id));
+check('в Logs одна строка уборки со счётчиками',
+  cleanupLogs.length === 1 && /заказов \d+/.test(cleanupLogs[0].message) && /act9101/.test(cleanupLogs[0].context),
+  cleanupLogs);
+
+const sizesAfter = sizes();
+const again = cleanupTestPlan();
+r = cleanupTestData();
+check('повторный запуск ничего не удаляет',
+  sizes() === sizesAfter && again.orders.length === 0 && again.items.length === 0 &&
+  again.transactions.length === 0 && again.students.length === 0 && again.staff.length === 0, r);
+updateRow(sh('Staff'), findRowByValue(sh('Staff'), 'staff_id', owner.staff_id).__row, { full_name: ownerName });
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

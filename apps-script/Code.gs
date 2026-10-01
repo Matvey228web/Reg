@@ -805,6 +805,9 @@ var BACKUP_FOLDER_NAME = "Mifs Rent — копии";
 var BACKUP_KEEP = 14;          // сколько последних копий держать в папке
 var LOGS_KEEP_DAYS = 90;       // сколько дней держать строки журнала Logs
 var MAINTENANCE_HOUR = 3;      // час запуска, по часовому поясу скрипта
+// Начало ответа dailyBackup при неудаче: по нему cleanupTestData понимает,
+// что копии нет и удалять нельзя (dailyBackup наружу не бросает).
+var BACKUP_FAILED = "Копия таблицы не сделана: ";
 
 // Точка входа для триггера. Каждый шаг в своём try: сломанная копия не должна
 // отменять подрезку журнала, и наоборот. Наружу не бросаем — иначе Google
@@ -850,8 +853,8 @@ function dailyBackup() {
   } catch (e) {
     var err = e && e.message ? e.message : String(e);
     logEvent("backup", "dailyBackup", "failed", err, { folder: BACKUP_FOLDER_NAME });
-    Logger.log("Копия таблицы не сделана: " + err);
-    return "Копия таблицы не сделана: " + err;
+    Logger.log(BACKUP_FAILED + err);
+    return BACKUP_FAILED + err;
   }
 }
 
@@ -891,6 +894,260 @@ function setupTriggers() {
   Logger.log(message);
   try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
   return message;
+}
+
+// ---------------------------------------------------------------------
+// Уборка тестовых строк — запускать руками из редактора Apps Script
+// ---------------------------------------------------------------------
+// Перед запуском склада в таблице остаются пробные заказы, ученики и
+// сотрудники. Удалять их руками с телефона неудобно и опасно: строку
+// заказа легко убрать, а её выдачи и состав забыть. Поэтому так же, как
+// setupTriggers, — функция для кнопки «Run», без ручки и без doPost.
+//
+// Порядок: cleanupTestDataPreview() — только смотрит и пишет список;
+// cleanupTestData() — делает копию таблицы (dailyBackup) и удаляет ровно то,
+// что показал просмотр. Повторный запуск ничего не находит и ничего не удаляет.
+//
+// Тестовой считается строка, где имя начинается словом «Тест»/«Test» (регистр
+// не важен) или содержит пометку «[тест]»/«[test]». Именно словом: «Тестова
+// Анна» — настоящая фамилия, и удалять такую ученицу нельзя. У заказа ещё
+// номер или код заявки, начинающийся с «TEST»/«ТЕСТ». У сотрудника — логин
+// «test», «test1», «test_admin».
+//
+// Не удаляется никогда: техника (Equipment) — ни строк, ни статусов; заказ, по
+// которому техника ещё на руках или висит неустранённый дефект (иначе вещь
+// осталась бы «выдана» или «в ремонте» без записи, которая это объясняет);
+// ученик, у которого есть хоть один не удаляемый заказ; главный
+// администратор и последний действующий администратор. Свою строку сотрудника
+// редактор не опознать: в Staff нет почты Google, — её защищают два последних
+// правила. Документы актов не удаляются — ссылки на них в отчёте.
+//
+// Кэш: ответы Worker живут в KV пять минут и сбрасываются только записью через
+// Worker, отсюда их не достать. Приложение увидит уборку не позже чем через
+// пять минут — как и после правки таблицы руками.
+
+var CLEANUP_SHOW = 20; // сколько строк каждого листа показывать в отчёте
+
+/**
+ * Показывает, что удалит cleanupTestData(), и ничего не меняет.
+ */
+function cleanupTestDataPreview() {
+  var plan = cleanupTestPlan();
+  var message = cleanupReport(plan, "Просмотр: будет удалено");
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(cleanupHeadline(plan), "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
+/**
+ * Удаляет тестовые строки. Сначала копия всей таблицы (dailyBackup): не
+ * получилась копия — не удаляется ничего.
+ */
+function cleanupTestData() {
+  var backup = dailyBackup();
+  if (String(backup).indexOf(BACKUP_FAILED) === 0) {
+    var refuse = "Уборка отменена, ничего не удалено: " + backup;
+    logEvent("cleanup", "cleanupTestData", "backup_failed", refuse);
+    Logger.log(refuse);
+    try { SpreadsheetApp.getActiveSpreadsheet().toast(refuse, "Mifs Rent", 15); } catch (ignored) {}
+    return refuse;
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  var plan, removed;
+  try {
+    // План заново под замком: между просмотром и запуском могла пройти выдача.
+    plan = cleanupTestPlan();
+    var ids = function (list, col) {
+      var set = {};
+      list.forEach(function (r) { set[String(r[col])] = true; });
+      return set;
+    };
+    var orderIds = ids(plan.orders, "order_id");
+    var txIds = ids(plan.transactions, "transaction_id");
+    var defectIds = ids(plan.defects, "defect_id");
+    var studentIds = ids(plan.students, "student_id");
+    var staffIds = ids(plan.staff, "staff_id");
+    // Сначала зависимые листы, потом то, на что они ссылаются: оборвись
+    // уборка посередине — останется заказ без выдач, а не выдачи без заказа.
+    removed = {
+      Defects: trimSheetRows(getSheet(SHEETS.DEFECTS), function (r) { return !!defectIds[String(r.defect_id)]; }),
+      Transactions: trimSheetRows(getSheet(SHEETS.TRANSACTIONS), function (r) { return !!txIds[String(r.transaction_id)]; }),
+      OrderItems: trimSheetRows(getSheet(SHEETS.ORDER_ITEMS), function (r) { return !!orderIds[String(r.order_id)]; }),
+      Orders: trimSheetRows(getSheet(SHEETS.ORDERS), function (r) { return !!orderIds[String(r.order_id)]; }),
+      Students: trimSheetRows(getSheet(SHEETS.STUDENTS), function (r) { return !!studentIds[String(r.student_id)]; }),
+      Staff: trimSheetRows(getSheet(SHEETS.STAFF), function (r) { return !!staffIds[String(r.staff_id)]; }),
+    };
+  } finally {
+    lock.releaseLock();
+  }
+
+  logEvent("cleanup", "cleanupTestData", "done", cleanupHeadline(plan), {
+    removed: removed,
+    refused: plan.refused.map(function (x) { return x.order_id; }),
+    acts: plan.acts,
+  });
+  var message = cleanupReport(plan, "Удалено") + "\n" + backup;
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(cleanupHeadline(plan), "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
+// Имя помечено как тестовое: первое слово «тест»/«test» (за ним не буква —
+// «Тест Иванов», «Test-1», «тест»), либо пометка «[тест]»/«[test]» где угодно.
+function isTestName(value) {
+  var s = String(value === null || value === undefined ? "" : value).trim().toLowerCase();
+  if (!s) return false;
+  if (/^(тест|test)(?![a-zа-яё])/.test(s)) return true;
+  return s.indexOf("[тест]") !== -1 || s.indexOf("[test]") !== -1;
+}
+
+// Номер заказа или код заявки: настоящие — цифры, тестовые начинаются с TEST/ТЕСТ.
+function isTestCode(value) {
+  return /^(test|тест)/i.test(String(value === null || value === undefined ? "" : value).trim());
+}
+
+// Что удалить и что оставить. Только читает таблицу.
+function cleanupTestPlan() {
+  var orders = readRows(getSheet(SHEETS.ORDERS));
+  var items = readRows(getSheet(SHEETS.ORDER_ITEMS));
+  var txs = readRows(getSheet(SHEETS.TRANSACTIONS));
+  var defects = readRows(getSheet(SHEETS.DEFECTS));
+  var students = readRows(getSheet(SHEETS.STUDENTS));
+  var staff = readRows(getSheet(SHEETS.STAFF));
+
+  var plan = { orders: [], items: [], transactions: [], defects: [], students: [], staff: [],
+               refused: [], keptStudents: [], keptStaff: [], acts: [] };
+
+  var deletedOrder = {};
+  orders.forEach(function (o) {
+    var test = isTestName(o.student_name) || isTestName(o.guardian_name) ||
+      isTestCode(o.order_no) || isTestCode(o.request_code);
+    if (!test) return;
+    var id = String(o.order_id);
+    var myTx = txs.filter(function (t) { return String(t.order_id || "") === id; });
+    var txSet = {};
+    myTx.forEach(function (t) { txSet[String(t.transaction_id)] = true; });
+    var myDefects = defects.filter(function (d) { return !!txSet[String(d.related_transaction_id)]; });
+
+    var open = myTx.filter(function (t) { return t.status === "Open"; });
+    var unresolved = myDefects.filter(function (d) { return d.status !== "Resolved"; });
+    if (open.length || unresolved.length) {
+      var why = [];
+      if (open.length) {
+        why.push("техника на руках: " + open.map(function (t) { return t.item_id; }).join(", ") +
+          " — сначала принять в приложении");
+      }
+      if (unresolved.length) {
+        why.push("неустранённый дефект № " + unresolved.map(function (d) { return d.defect_id; }).join(", ") +
+          " — сначала закрыть в приложении");
+      }
+      plan.refused.push({ order_id: id, row: o, reason: why.join("; ") });
+      return;
+    }
+    deletedOrder[id] = true;
+    plan.orders.push(o);
+    Array.prototype.push.apply(plan.transactions, myTx);
+    Array.prototype.push.apply(plan.defects, myDefects);
+    if (o.act_url) plan.acts.push(String(o.act_url));
+  });
+  plan.items = items.filter(function (i) { return !!deletedOrder[String(i.order_id)]; });
+
+  students.forEach(function (s) {
+    if (!isTestName(s.full_name)) return;
+    var left = orders.filter(function (o) {
+      return String(o.student_id) === String(s.student_id) && !deletedOrder[String(o.order_id)];
+    });
+    if (left.length) {
+      plan.keptStudents.push({ row: s, reason: "остаются заказы " +
+        left.map(function (o) { return o.order_no || o.order_id; }).join(", ") });
+    } else {
+      plan.students.push(s);
+    }
+  });
+
+  var isTestStaff = function (r) {
+    return isTestName(r.full_name) || /^test(?![a-z])/i.test(String(r.login || "").trim());
+  };
+  var isActiveAdmin = function (r) { return r.role === "Admin" && isTruthyCell(r.active); };
+  // Сколько действующих администраторов останется наверняка: не тестовые и
+  // главный (его не удаляем, даже если он назван тестовым).
+  var adminsLeft = staff.filter(function (r) {
+    return isActiveAdmin(r) && (!isTestStaff(r) || isOwnerId(r.staff_id));
+  }).length;
+  staff.filter(isTestStaff)
+    .sort(function (a, b) { return Number(a.staff_id) - Number(b.staff_id); })
+    .forEach(function (r) {
+      if (isOwnerId(r.staff_id)) {
+        plan.keptStaff.push({ row: r, reason: "главный администратор" });
+      } else if (isActiveAdmin(r) && adminsLeft === 0) {
+        adminsLeft += 1;
+        plan.keptStaff.push({ row: r, reason: "последний действующий администратор" });
+      } else {
+        plan.staff.push(r);
+      }
+    });
+  return plan;
+}
+
+function cleanupHeadline(plan) {
+  return "Тестовые строки: заказов " + plan.orders.length + ", позиций " + plan.items.length +
+    ", выдач " + plan.transactions.length + ", дефектов " + plan.defects.length +
+    ", учеников " + plan.students.length + ", сотрудников " + plan.staff.length +
+    (plan.refused.length ? "; не тронуто заказов: " + plan.refused.length : "") + ".";
+}
+
+function cleanupDate(value) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value || "").slice(0, 10);
+}
+
+// Отчёт: сколько по каждому листу и первые CLEANUP_SHOW строк (номер, имя, дата).
+function cleanupReport(plan, title) {
+  var out = [title + ". " + cleanupHeadline(plan)];
+  var section = function (name, list, line) {
+    if (!list.length) return;
+    out.push(name + " — " + list.length + ":");
+    list.slice(0, CLEANUP_SHOW).forEach(function (r) { out.push("  " + line(r)); });
+    if (list.length > CLEANUP_SHOW) out.push("  …и ещё " + (list.length - CLEANUP_SHOW));
+  };
+  section("Orders", plan.orders, function (o) {
+    return "№ " + o.order_id + " (" + (o.order_no || o.request_code || "без номера") + ") " +
+      o.student_name + ", " + cleanupDate(o.created_at);
+  });
+  section("OrderItems", plan.items, function (i) {
+    return "заказ " + i.order_id + ", строка " + i.line_no + ": " + i.raw_name;
+  });
+  section("Transactions", plan.transactions, function (t) {
+    return "№ " + t.transaction_id + ", вещь " + t.item_id + ", " + cleanupDate(t.checked_out_at);
+  });
+  section("Defects", plan.defects, function (d) {
+    return "№ " + d.defect_id + ", вещь " + d.item_id + ": " + d.description + ", " + cleanupDate(d.reported_at);
+  });
+  section("Students", plan.students, function (s) {
+    return "№ " + s.student_id + " " + s.full_name + ", " + cleanupDate(s.created_at);
+  });
+  section("Staff", plan.staff, function (s) {
+    return "№ " + s.staff_id + " " + s.full_name + " (" + s.login + ", " + s.role + ")";
+  });
+  if (plan.refused.length) {
+    out.push("Не тронуты заказы — " + plan.refused.length + ":");
+    plan.refused.forEach(function (x) {
+      out.push("  № " + x.order_id + " " + x.row.student_name + ": " + x.reason);
+    });
+  }
+  plan.keptStudents.forEach(function (x) {
+    out.push("Ученик № " + x.row.student_id + " " + x.row.full_name + " оставлен: " + x.reason);
+  });
+  plan.keptStaff.forEach(function (x) {
+    out.push("Сотрудник № " + x.row.staff_id + " " + x.row.full_name + " оставлен: " + x.reason);
+  });
+  if (plan.acts.length) {
+    out.push("Акты этих заказов на Диске не удаляются, при желании уберите руками:");
+    plan.acts.forEach(function (u) { out.push("  " + u); });
+  }
+  return out.join("\n");
 }
 
 function importTrim(v) {
