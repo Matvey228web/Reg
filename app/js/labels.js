@@ -408,18 +408,7 @@ const LabelsScreen = (() => {
     // Отступ рамки от края щедрый: термопринтер тянет ленту с погрешностью в
     // полмиллиметра, и линия впритык к краю уехала бы на одном боку.
     const edge = mm(Math.max(0.8, size.pad * 0.55), k);
-    const radius = mm(1.4, k);
     const stroke = Math.max(1, Math.round(mm(0.25, k)));
-    roundRect(ctx, edge + stroke / 2, edge + stroke / 2,
-              canvas.width - (edge + stroke / 2) * 2, canvas.height - (edge + stroke / 2) * 2,
-              radius);
-    ctx.lineWidth = stroke;
-    ctx.strokeStyle = "#000000";
-    ctx.stroke();
-    // Всё дальнейшее режется по той же рамке: ни одна подпись не вылезет за неё
-    // даже на самой мелкой ленте.
-    ctx.save();
-    ctx.clip();
 
     // Подпись колледжа — лентой по кругу вдоль рамки. Раньше она стояла
     // строкой под номером (а на снимке владельца — столбиками по бокам кода) и
@@ -431,6 +420,23 @@ const LabelsScreen = (() => {
     const ribbonText = size.caption && captionText ? String(captionText).trim().toUpperCase() : "";
     const ribbon = ribbonText ? fitRibbon(ctx, ribbonText, box, mm(size.org * 0.8, k), k) : null;
     const band = ribbon ? ribbon.band : 0;
+
+    // Скругление рамки — под ленту: средняя линия ленты идёт параллельно рамке,
+    // и её дуга в углу должна быть не круче высоты буквы, иначе буквы на
+    // повороте налезают друг на друга. Без ленты — прежние 1,4 мм.
+    const lift = stroke / 2 + band / 2;   // от линии рамки до середины ленты
+    const radius = ribbon ? Math.max(mm(1.4, k), lift + band * 0.8) : mm(1.4, k);
+    if (ribbon) ribbon.r = radius - lift;
+    roundRect(ctx, edge + stroke / 2, edge + stroke / 2,
+              canvas.width - (edge + stroke / 2) * 2, canvas.height - (edge + stroke / 2) * 2,
+              radius);
+    ctx.lineWidth = stroke;
+    ctx.strokeStyle = "#000000";
+    ctx.stroke();
+    // Всё дальнейшее режется по той же рамке: ни одна подпись не вылезет за неё
+    // даже на самой мелкой ленте.
+    ctx.save();
+    ctx.clip();
 
     // Поля внутри ленты небольшие: у кода своё белое поле в четыре модуля,
     // и оно же отделяет его от ленты. Без ленты — прежние поля.
@@ -591,17 +597,17 @@ const LabelsScreen = (() => {
 
   // --- Подпись по рамке ---
   //
-  // Текст идёт по часовой стрелке, верхом наружу, как надпись по краю монеты:
-  // сверху читается как обычно, справа — сверху вниз, снизу — вверх ногами,
-  // слева — снизу вверх. По дугам углов буквы не гнём: на скруглении в
-  // полтора миллиметра они налезали бы друг на друга. Углы служат
-  // разделителями — в каждом точка, такая же, как между повторами на
-  // сторонах, — и строка читается непрерывной.
+  // Одна непрерывная строка по контуру рамки, по часовой стрелке, верхом
+  // наружу — как надпись по краю монеты: сверху читается как обычно, справа —
+  // сверху вниз, снизу — вверх ногами, слева — снизу вверх. На скруглениях
+  // буквы поворачиваются вместе с рамкой, поэтому строка нигде не рвётся.
+  // Между повторами — точка; повторов целое число, и лишняя длина контура
+  // раздаётся поровну в разрядку, так что стык нигде не виден.
   //
-  // Кегль один на все четыре стороны: подбираем его так, чтобы подпись
-  // целиком влезла хотя бы раз на короткую сторону. Жирный — у обычного
-  // начертания на мелком кегле штрихи тоньше полутора точек, и термопринтер
-  // их теряет.
+  // Кегль подбираем так, чтобы подпись целиком влезла хотя бы на короткую
+  // сторону. Жирный — у обычного начертания на мелком кегле штрихи тоньше
+  // полутора точек, и термопринтер их теряет. Буквы ставим по одной: свойства
+  // letterSpacing у холста в старом Safari нет.
   function ribbonFont(px) {
     return "bold " + px + "px " + FONT_SANS;
   }
@@ -618,8 +624,44 @@ const LabelsScreen = (() => {
     }
   }
 
+  // Средняя линия ленты — скруглённый прямоугольник; точка на нём по длине
+  // пути s (от левого конца верхней прямой) и направление касательной.
+  function ribbonPath(box, half, r) {
+    const x0 = box.x + half, y0 = box.y + half;
+    const w = box.w - half * 2, h = box.h - half * 2;
+    const sw = w - r * 2, sh = h - r * 2, arc = Math.PI * r / 2;
+    // Прямые и дуги по часовой стрелке. У дуги — центр и начальный угол.
+    const segs = [
+      { len: sw, x: x0 + r, y: y0, a: 0 },
+      { len: arc, cx: x0 + w - r, cy: y0 + r, a0: -Math.PI / 2 },
+      { len: sh, x: x0 + w, y: y0 + r, a: Math.PI / 2 },
+      { len: arc, cx: x0 + w - r, cy: y0 + h - r, a0: 0 },
+      { len: sw, x: x0 + w - r, y: y0 + h, a: Math.PI },
+      { len: arc, cx: x0 + r, cy: y0 + h - r, a0: Math.PI / 2 },
+      { len: sh, x: x0, y: y0 + h - r, a: -Math.PI / 2 },
+      { len: arc, cx: x0 + r, cy: y0 + r, a0: Math.PI },
+    ];
+    const total = segs.reduce((t, g) => t + g.len, 0);
+    const at = (s) => {
+      s = ((s % total) + total) % total;
+      for (const g of segs) {
+        if (s <= g.len || g === segs[segs.length - 1]) {
+          if (g.cx === undefined) {
+            return { x: g.x + Math.cos(g.a) * s, y: g.y + Math.sin(g.a) * s, a: g.a };
+          }
+          const t = g.a0 + (r ? s / r : 0);
+          return { x: g.cx + Math.cos(t) * r, y: g.cy + Math.sin(t) * r, a: t + Math.PI / 2 };
+        }
+        s -= g.len;
+      }
+      return { x: x0, y: y0, a: 0 };
+    };
+    return { total, at, topMid: sw / 2 };
+  }
+
   function drawRibbon(ctx, text, box, ribbon, k) {
     const { px, band } = ribbon;
+    const r = Math.max(0, ribbon.r || 0);
     ctx.save();
     ctx.font = ribbonFont(px);
     ctx.textAlign = "left";
@@ -632,54 +674,39 @@ const LabelsScreen = (() => {
     const capH = m.actualBoundingBoxAscent || px * 0.72;
     // Точка-разделитель: не тоньше двух точек принтера, иначе пропадает.
     const dotR = Math.max(k, px * 0.11);
-    const dotAt = (x, y) => { ctx.beginPath(); ctx.arc(x, y, dotR, 0, Math.PI * 2); ctx.fill(); };
 
-    const half = band / 2;
-    // Начало прямого участка на средней линии полосы, направление и длина.
-    const sides = [
-      { x: box.x + band, y: box.y + half, a: 0, len: box.w - band * 2 },
-      { x: box.x + box.w - half, y: box.y + band, a: Math.PI / 2, len: box.h - band * 2 },
-      { x: box.x + box.w - band, y: box.y + box.h - half, a: Math.PI, len: box.w - band * 2 },
-      { x: box.x + half, y: box.y + box.h - band, a: -Math.PI / 2, len: box.h - band * 2 },
-    ];
-    // Ритм: просвет между повторами равен ширине угла, где тоже стоит точка.
-    // Лишнюю длину стороны раздаём поровну — немного в разрядку, остальное в
-    // просветы (в средние вдвое больше, чем у угла: к угловому просвету
-    // прибавляются концы двух сторон).
+    const path = ribbonPath(box, band / 2, r);
+    // Повтор = буквы + просвет с точкой. Просвет естественный — в высоту
+    // полосы; разрядка не больше четверти кегля, остальное уходит в просвет.
     const gapNat = band;
-    sides.forEach((side) => {
-      const n = Math.max(1, Math.floor((side.len + gapNat) / (unitW + gapNat)));
-      const slots = n * (glyphs.length - 1);
-      const left = side.len - n * unitW - (n - 1) * gapNat;
-      let track = 0;
-      let w = 0;
-      if (left < 0) {
-        track = slots ? left / slots : 0;
-      } else {
-        track = Math.min(px * 0.12, left / (slots + 2 * n));
-        w = (left - slots * track) / (2 * n);
-      }
-      ctx.save();
-      ctx.translate(side.x, side.y);
-      ctx.rotate(side.a);
-      let x = w;
-      for (let u = 0; u < n; u++) {
-        glyphs.forEach((g, i) => {
-          ctx.fillText(g, x, capH / 2);
-          x += adv[i] + (i < glyphs.length - 1 ? track : 0);
-        });
-        if (u < n - 1) {
-          dotAt(x + w + gapNat / 2, 0);
-          x += gapNat + w * 2;
-        }
-      }
-      ctx.restore();
-    });
-    // Точки в углах.
-    dotAt(box.x + half, box.y + half);
-    dotAt(box.x + box.w - half, box.y + half);
-    dotAt(box.x + box.w - half, box.y + box.h - half);
-    dotAt(box.x + half, box.y + box.h - half);
+    // Повторов — сколько влезает без сжатия: тесная подпись на мелком кегле
+    // слипается при печати, а лишняя длина уйдёт в разрядку.
+    const n = Math.max(1, Math.floor(path.total / (unitW + gapNat)));
+    const slot = path.total / n;
+    const inner = glyphs.length - 1;
+    let track = inner ? (slot - unitW - gapNat) / inner : 0;
+    track = Math.max(-px * 0.05, Math.min(px * 0.25, track));
+    const runW = unitW + track * inner;
+    const gapW = slot - runW;
+
+    // Первый повтор — посередине верхней стороны: её читают первой.
+    let s = path.topMid - runW / 2;
+    for (let u = 0; u < n; u++) {
+      glyphs.forEach((g, i) => {
+        const p = path.at(s + adv[i] / 2);
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.a);
+        ctx.fillText(g, -adv[i] / 2, capH / 2);
+        ctx.restore();
+        s += adv[i] + (i < inner ? track : 0);
+      });
+      const d = path.at(s + gapW / 2);
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, dotR, 0, Math.PI * 2);
+      ctx.fill();
+      s += gapW;
+    }
     ctx.restore();
   }
 
