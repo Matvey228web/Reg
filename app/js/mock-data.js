@@ -1696,6 +1696,7 @@ const MockAPI = {
       case "/maintenance": {
         MockStore.requireAdmin(token);
         if (body.action === "archive") return { message: "Журнал выгружен (демо-режим)." };
+        if (body.action === "setup") return { message: "Готово. Создано вкладок: 0 (демо-режим)." };
         if (body.action === "trim") {
           return { message: "Подрезка отменена: журнал ни разу не выгружался." };
         }

@@ -1242,6 +1242,11 @@ check('неизвестное действие отклонено',
 r = call('/maintenance', { action: 'trim' }, token);
 check('подрезка через эндпоинт так же требует выгрузки',
   r.ok === true && /отменена/.test(r.data.message), r);
+r = call('/maintenance', { action: 'setup' }, token);
+check('создание недостающих вкладок через эндпоинт безопасно при повторе',
+  r.ok === true && /Готово/.test(r.data.message) && spreadsheet.getSheets().length === 16, r);
+check('сотрудник склада вкладки не заводит',
+  call('/maintenance', { action: 'setup' }, ivanToken).status === 401);
 r = call('/maintenance', { action: 'archive' }, token);
 check('выгрузка через эндпоинт работает', r.ok === true && /выгружен|пуст/.test(r.data.message), r);
 

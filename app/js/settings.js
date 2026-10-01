@@ -353,6 +353,9 @@ const SettingsScreen = (() => {
         <div id="settings-maintenance-result"></div>
         <button class="btn btn--secondary" id="settings-archive">Выгрузить журнал в файл</button>
         <button class="btn btn--secondary" id="settings-trim" style="margin-top:8px;">Подрезать таблицу</button>
+        <button class="btn btn--secondary" id="settings-setup" style="margin-top:8px;">Создать недостающие вкладки</button>
+        <p class="hint">После обновления склада: заводит новые вкладки и колонки таблицы. Данные не трогает,
+          повторный запуск безопасен.</p>
         <p class="hint">Перезаливка каталога осталась в редакторе Apps Script: она слишком долгая
           для запроса по сети.</p>
       </div>
@@ -874,6 +877,8 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => maintenance("archive", "settings-archive"));
     document.getElementById("settings-trim")
       .addEventListener("click", () => maintenance("trim", "settings-trim"));
+    document.getElementById("settings-setup")
+      .addEventListener("click", () => maintenance("setup", "settings-setup"));
   }
 
   function init() {
