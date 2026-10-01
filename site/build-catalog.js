@@ -38,10 +38,13 @@ async function ask(endpoint, payload) {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ endpoint, payload }),
   });
+  // Без перенаправления ответ уже в первом запросе. Повторить его по тому же
+  // адресу нельзя: второй запрос — GET, и отвечает doGet, а не doPost.
+  // Так же сделано в verify() в apps-script/deploy.js.
   const location = first.headers.get("location");
-  const res = await fetch(location || backendUrl(), {
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
+  const res = location
+    ? await fetch(location, { headers: { "User-Agent": "Mozilla/5.0" } })
+    : first;
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch {
