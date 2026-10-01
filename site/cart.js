@@ -340,7 +340,22 @@
     input.focus();
   }
 
+  // Слушатели на #cart делегированные и вешаются один раз: сам контейнер при
+  // перерисовке не заменяется, заменяется только его содержимое. Раньше они
+  // вешались заново при каждом render(), и после n нажатий «+» одно нажатие
+  // запускало n перерисовок подряд, а быстрые нажатия подвешивали страницу.
+  var delegated = false;
+
   function bind() {
+    if (!delegated) {
+      delegated = true;
+      bindDelegated();
+    }
+    // Эти кнопки лежат внутри перерисованного — их слушатели нужны заново.
+    bindControls();
+  }
+
+  function bindDelegated() {
     $("cart").addEventListener("click", function (e) {
       var pick = e.target.closest(".picker");
       if (pick) { openPicker(pick.querySelector("input")); return; }
@@ -395,6 +410,9 @@
       }
     });
 
+  }
+
+  function bindControls() {
     $("send").addEventListener("click", send);
 
     $("forget").addEventListener("click", function () {
