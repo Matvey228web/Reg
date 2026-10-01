@@ -119,8 +119,9 @@ const OrderScreen = (() => {
   // путь, который работает везде: номер в буфер, а если и буфер закрыт —
   // окно с номером, чтобы его прочитать и набрать.
   //
-  // Ник — обработчиком: ссылка t.me открылась бы браузером на странице
-  // «Open in Telegram», и до чата осталось бы ещё два нажатия.
+  // Ник — так же: текстом, а под ним кнопка «Написать в Telegram» того же
+  // вида, что «Позвонить». Кнопка, а не ссылка t.me: та открылась бы браузером
+  // на странице «Open in Telegram», и до чата осталось бы ещё два нажатия.
   function dialNumber(phone) {
     let num = String(phone || "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
     if (/^8\d{10}$/.test(num)) num = "+7" + num.slice(1);
@@ -129,7 +130,7 @@ const OrderScreen = (() => {
   }
 
   function contactRow(phone, tg) {
-    const nick = String(tg || "").replace(/^@/, "");
+    const nick = String(tg || "").trim().replace(/^@/, "");
     const num = dialNumber(phone);
     return (num
       ? `<div class="contact-num">${escapeHtml(phone)}</div>
@@ -138,8 +139,10 @@ const OrderScreen = (() => {
            <button class="chip-btn" type="button" data-copy="${escapeHtml(num)}">Копировать</button>
          </div>`
       : "") + (nick
-      ? `<div class="card-sub"><a class="tap-line" href="https://t.me/${escapeHtml(nick)}"
-             data-tg="${escapeHtml(nick)}">@${escapeHtml(nick)}</a></div>`
+      ? `<div class="contact-num">@${escapeHtml(nick)}</div>
+         <div class="quick-row">
+           <button class="chip-btn" type="button" data-tg="${escapeHtml(nick)}">Написать в Telegram</button>
+         </div>`
       : "");
   }
 
@@ -475,7 +478,7 @@ const OrderScreen = (() => {
       const chat = e.target.closest("[data-tg]");
       if (!chat) return;
       e.preventDefault();
-      TG.openTelegramLink("https://t.me/" + chat.dataset.tg);
+      TG.openTelegramLink("https://t.me/" + encodeURIComponent(chat.dataset.tg));
     });
     Router.register("order", { onShow });
   }
