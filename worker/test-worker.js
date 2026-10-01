@@ -347,6 +347,20 @@ r = await call("/public/catalog", { from: "2026-10-01", to: "2026-10-02" });
 ok("второй — из кэша, хотя токена нет", r.cache === "hit" && upstream.calls.length === 1,
    { cache: r.cache, calls: upstream.calls });
 
+console.log("== объявления для сайта: кэш без токена и сброс на записи ==");
+upstream.reply = { ok: true, data: { items: [{ id: "a1", title: "График", lines: ["строка"] }] }, error: null, status: 200 };
+upstream.calls = [];
+r = await call("/public/announcements", {});
+ok("первый запрос идёт в таблицу", r.cache === "miss", r.cache);
+r = await call("/public/announcements", {});
+ok("второй — из кэша, хотя токена нет", r.cache === "hit" && upstream.calls.length === 1,
+   { cache: r.cache, calls: upstream.calls });
+upstream.reply = { ok: true, data: { announcement_id: "2", changed: true }, error: null, status: 200 };
+await call("/announcement/remove", { announcement_id: "1" }, "tok-1");
+upstream.reply = { ok: true, data: { items: [] }, error: null, status: 200 };
+r = await call("/public/announcements", {});
+ok("после снятия объявления кэш сброшен: сайт видит сразу", r.cache === "miss", r.cache);
+
 console.log("\n== нажатия, которые не должны выбрасывать кэш ==");
 // Поиск чата, проверка связи и пачка этикеток ничего в складе не меняют.
 // Раньше они считались записью, и одно нажатие «Найти чат склада» стоило
