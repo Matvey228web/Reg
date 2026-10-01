@@ -79,6 +79,18 @@ function mockItemQty(item) {
   const n = Number(item.qty);
   return n > 0 ? n : 1;
 }
+// Строка каталога — как equipmentListRow в Code.gs: её отдают и
+// /equipment/list, и /item/update.
+function mockListRow(i) {
+  const total = mockItemQty(i);
+  const out = Number(i.qty_out || 0);
+  return {
+    item_id: i.item_id, name: i.name, category: i.category, status: i.status,
+    serial_number: i.serial_number, inventory_number: i.inventory_number,
+    model_code: i.model_code, qty: total, qty_out: out, qty_free: total - out,
+    condition_notes: i.condition_notes || "",
+  };
+}
 function mockCategories() { return mockCats; }
 
 // --- Заказы в демо-режиме ---
@@ -620,6 +632,142 @@ const MockAPI = {
         };
       }
 
+      // Правка карточки вещи. Настоящая версия — handleItemUpdate в Code.gs,
+      // там же объяснение правил; здесь те же отказы и тот же ответ, чтобы
+      // карточка в демо вела себя как на живой таблице. Перенос всей модели —
+      // через ветку /model/move ниже, как и в бэкенде (moveModel).
+      case "/item/update": {
+        MockStore.requireAdmin(token);
+        const fail = (status, msg) => { const e = new Error(msg); e.status = status; throw e; };
+        const id = String(body.item_id || "").trim();
+        if (!id) fail(400, "Не сказано, какую вещь править");
+        const item = MockStore.findItem(id);
+        if (!item) fail(404, "Предмет не найден");
+        const allModel = body.all_model === true;
+        const bulk = mockByQty(item.category);
+        const from = item.category;
+        const code = String(item.model_code || "");
+        const has = (f) => Object.prototype.hasOwnProperty.call(next, f);
+        const next = {};
+        ["name", "serial_number", "inventory_number", "condition_notes", "qty", "category"].forEach((f) => {
+          if (!Object.prototype.hasOwnProperty.call(body, f)) return;
+          next[f] = String(body[f] == null ? "" : body[f]).trim();
+        });
+        if (!Object.keys(next).length) fail(400, "Нечего править: ни одного поля не прислано");
+        if (allModel && ["serial_number", "inventory_number", "condition_notes", "qty"].some(has)) {
+          fail(400, "Номера, состояние и количество у каждой вещи свои — для всей модели их не задать. " +
+            "Снимите галочку «ко всем вещам модели» и правьте эту вещь.");
+        }
+        if (has("name") && !next.name) fail(400, "Название не может быть пустым");
+        const labels = { serial_number: "заводской", inventory_number: "инвентарный" };
+        Object.keys(labels).forEach((f) => {
+          if (!has(f)) return;
+          if (bulk) {
+            if (!next[f]) { delete next[f]; return; }
+            fail(409, "Это позиция с учётом количеством — одна строка на всю полку. " +
+              "Личных номеров у неё нет, вписывать их некуда.");
+          }
+          if (!next[f]) return;
+          const taken = MockStore.equipment.find((r) => String(r.item_id) !== id &&
+            String(r[f] || "").trim().toLowerCase() === next[f].toLowerCase());
+          if (taken) {
+            fail(409, "Такой " + labels[f] + " номер уже стоит у вещи " + taken.item_id +
+              " («" + (taken.name || "") + "»). Два одинаковых номера — это потерянная вещь.");
+          }
+        });
+        if (has("qty")) {
+          if (!bulk) fail(400, "Это поштучная вещь — количество у неё всегда одно");
+          const qty = Number(next.qty);
+          if (!next.qty || !Number.isInteger(qty) || qty < 1) fail(400, "Количество — целое число от одного");
+          const out = Number(item.qty_out || 0);
+          if (qty < out) {
+            fail(409, "На руках сейчас " + out + " шт. — меньше этого количество не поставить. " +
+              "Сначала примите выданное.");
+          }
+          next.qty = qty;
+        }
+        let to = null;
+        if (has("category")) {
+          const wanted = next.category.toUpperCase();
+          delete next.category;
+          if (wanted && wanted !== from) {
+            MockStore.requireOwner(token);
+            const toCat = mockCategories().find((c) => c.code === wanted);
+            if (!toCat) fail(404, "Категория, в которую переносим, не найдена");
+            if (!!toCat.by_qty !== bulk) {
+              fail(409, "У категорий разный способ учёта: одна считается количеством, " +
+                "другая — поштучно. Перенос превратил бы поштучные записи в количество или наоборот.");
+            }
+            if (!allModel && bulk) {
+              fail(409, "У позиции с учётом количеством одна строка на модель — переносится " +
+                "вся модель. Включите «Применить ко всем вещам этой модели».");
+            }
+            if (!allModel && (item.status === "Rented" || item.current_transaction_id)) {
+              fail(409, "Вещь сейчас выдана — номер ей менять нельзя: принимать её будут по " +
+                "старой наклейке. Сначала примите, потом переносите.");
+            }
+            to = wanted;
+          }
+        }
+        const sameModel = (r) => r.category === from && String(r.model_code) === code;
+        const modelRow = MockStore.models.find(sameModel);
+        if (allModel && (has("name") || to)) {
+          if (!modelRow) fail(409, "У вещи нет строки в справочнике моделей — править всю модель нечем.");
+          if (has("name")) {
+            const needle = MockStore.normalizeModelName(next.name);
+            const clash = MockStore.models.find((m) => m !== modelRow && m.category === from &&
+              MockStore.normalizeModelName(m.model_name) === needle);
+            if (clash) fail(409, "В этой категории уже есть модель «" + clash.model_name + "».");
+          }
+        }
+
+        const changed = {};
+        let renamed = 0;
+        if (allModel && has("name")) {
+          const modelRenamed = modelRow.model_name !== next.name;
+          modelRow.model_name = next.name;
+          MockStore.equipment.filter(sameModel).forEach((r) => {
+            if (r.name === next.name) return;
+            r.name = next.name;
+            renamed++;
+          });
+          if (modelRenamed || renamed) changed.name = { was: item.name, now: next.name };
+          delete next.name;
+        }
+        Object.keys(next).forEach((f) => {
+          const was = String(item[f] == null ? "" : item[f]);
+          if (was !== String(next[f])) { changed[f] = { was, now: String(next[f]) }; item[f] = next[f]; }
+        });
+
+        let moved = null;
+        if (to && allModel) {
+          moved = await MockAPI.handle("/model/move", { category: from, model_code: code, to_category: to }, token);
+          changed.category = { was: from, now: to };
+        } else if (to) {
+          const target = MockStore.findOrCreateModel(to, item.name);
+          const fresh = MockStore.nextItemId(to, target.model_code);
+          let journalRows = 0;
+          [MockStore.transactions, MockStore.defects, MockStore.inventories].forEach((rows) => {
+            (rows || []).forEach((row) => {
+              if (String(row.item_id) === id) { row.item_id = fresh; journalRows++; }
+            });
+          });
+          item.item_id = fresh;
+          item.category = to;
+          item.model_code = target.model_code;
+          let removed = false;
+          if (modelRow && !MockStore.equipment.some(sameModel)) {
+            MockStore.models.splice(MockStore.models.indexOf(modelRow), 1);
+            removed = true;
+          }
+          moved = { old: id, fresh, journal_rows: journalRows, model_removed: removed,
+                    model_code: target.model_code };
+          changed.category = { was: from, now: to };
+        }
+        return { item: mockListRow(item), old_item_id: id, item_id: item.item_id,
+                 all_model: allModel, renamed, moved, changed };
+      }
+
       case "/transaction/checkout": {
         const staff_id = MockStore.requireToken(token);
         const item = MockStore.findItem(body.item_id);
@@ -814,16 +962,7 @@ const MockAPI = {
         let list = MockStore.equipment;
         if (body && body.status && body.status !== "all") list = list.filter((i) => i.status === body.status);
         if (body && body.category && body.category !== "all") list = list.filter((i) => i.category === body.category);
-        return list.map((i) => {
-          const total = mockItemQty(i);
-          const out = Number(i.qty_out || 0);
-          return {
-            item_id: i.item_id, name: i.name, category: i.category, status: i.status,
-            serial_number: i.serial_number, inventory_number: i.inventory_number,
-            model_code: i.model_code, qty: total, qty_out: out, qty_free: total - out,
-            condition_notes: i.condition_notes || "",
-          };
-        });
+        return list.map(mockListRow);
       }
 
       case "/models/list": {

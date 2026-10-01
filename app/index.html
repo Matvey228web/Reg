@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20260930g" />
+<link rel="stylesheet" href="css/style.css?v=20261001b" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20260930g"></script>
+<script src="js/vendor/qrcode-generator.js?v=20261001b"></script>
 </head>
 <body>
 <div id="app">
@@ -210,7 +210,14 @@
 
   <!-- Экран: карточка предмета -->
   <div class="screen" id="screen-item">
-    <h1 id="item-title">Оборудование</h1>
+    <!-- Карандаш — правка карточки, только администратору: item.js показывает
+         его сам. Справа от заголовка, как действие этого экрана. -->
+    <div class="screen-head">
+      <h1 id="item-title">Оборудование</h1>
+      <button class="icon-btn" id="item-edit-toggle" type="button" aria-label="Изменить" title="Изменить" style="display:none;">
+        <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/></svg>
+      </button>
+    </div>
     <div id="item-content"></div>
   </div>
 
@@ -366,38 +373,38 @@
 
 </div>
 
-<script src="js/config.js?v=20260930g"></script>
-<script src="js/util.js?v=20260930g"></script>
-<script src="js/suggest.js?v=20260930g"></script>
-<script src="js/cache.js?v=20260930g"></script>
+<script src="js/config.js?v=20261001b"></script>
+<script src="js/util.js?v=20261001b"></script>
+<script src="js/suggest.js?v=20261001b"></script>
+<script src="js/cache.js?v=20261001b"></script>
 <!-- Демо-данные весят 67 КБ и нужны только в демо-режиме. На рабочем
      складе MOCK_MODE выключен, и грузить их каждому открывшему незачем. -->
 <script>
   // CONFIG объявлен через const и в window не попадает — проверяем сам
   // идентификатор, а не свойство объекта окна.
   if (typeof CONFIG !== "undefined" && CONFIG.MOCK_MODE) {
-    document.write('<script src="js/mock-data.js?v=20260930g"><\/script>');
+    document.write('<script src="js/mock-data.js?v=20261001b"><\/script>');
   }
 </script>
-<script src="js/api.js?v=20260930g"></script>
-<script src="js/telegram.js?v=20260930g"></script>
-<script src="js/router.js?v=20260930g"></script>
-<script src="js/fab.js?v=20260930g"></script>
-<script src="js/qr.js?v=20260930g"></script>
-<script src="js/pull.js?v=20260930g"></script>
-<script src="js/auth.js?v=20260930g"></script>
-<script src="js/catalog.js?v=20260930g"></script>
-<script src="js/scan.js?v=20260930g"></script>
-<script src="js/item.js?v=20260930g"></script>
-<script src="js/order.js?v=20260930g"></script>
-<script src="js/repair.js?v=20260930g"></script>
-<script src="js/orders.js?v=20260930g"></script>
-<script src="js/staff.js?v=20260930g"></script>
-<script src="js/models.js?v=20260930g"></script>
-<script src="js/settings.js?v=20260930g"></script>
-<script src="js/labels.js?v=20260930g"></script>
-<script src="js/inventory.js?v=20260930g"></script>
-<script src="js/pin.js?v=20260930g"></script>
-<script src="js/app.js?v=20260930g"></script>
+<script src="js/api.js?v=20261001b"></script>
+<script src="js/telegram.js?v=20261001b"></script>
+<script src="js/router.js?v=20261001b"></script>
+<script src="js/fab.js?v=20261001b"></script>
+<script src="js/qr.js?v=20261001b"></script>
+<script src="js/pull.js?v=20261001b"></script>
+<script src="js/auth.js?v=20261001b"></script>
+<script src="js/catalog.js?v=20261001b"></script>
+<script src="js/scan.js?v=20261001b"></script>
+<script src="js/item.js?v=20261001b"></script>
+<script src="js/order.js?v=20261001b"></script>
+<script src="js/repair.js?v=20261001b"></script>
+<script src="js/orders.js?v=20261001b"></script>
+<script src="js/staff.js?v=20261001b"></script>
+<script src="js/models.js?v=20261001b"></script>
+<script src="js/settings.js?v=20261001b"></script>
+<script src="js/labels.js?v=20261001b"></script>
+<script src="js/inventory.js?v=20261001b"></script>
+<script src="js/pin.js?v=20261001b"></script>
+<script src="js/app.js?v=20261001b"></script>
 </body>
 </html>

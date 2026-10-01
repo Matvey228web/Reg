@@ -304,6 +304,12 @@ html, body {
 .icon-btn::after { content: ""; position: absolute; inset: -4px; }
 .icon-btn:active { background: var(--surface-strong); }
 
+/* Заголовок экрана с действием справа (карандаш на карточке вещи). Отступы
+   заголовка — у самого h1, строка только ставит кнопку на его высоту. */
+.screen-head { display: flex; align-items: flex-start; gap: var(--s3); }
+.screen-head h1 { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.screen-head .icon-btn { margin-top: calc(var(--s1) + 3px); }
+
 .screen { display: none; padding: var(--s3) var(--gutter) 0; }
 .screen--active { display: block; animation: screen-in 0.18s ease-out; }
 
@@ -1659,11 +1665,9 @@ select {
   color: var(--accent); font: inherit; font-size: 15px; cursor: pointer;
 }
 
-/* --- Быстрые действия: акт и чат в списке заказов; звонок, копирование
-   номера и «Написать в Telegram» в карточке --- */
+/* --- Быстрые действия: акт и чат в строке списка заказов --- */
 /* Кнопки мелкие по площади, но не мелкие для пальца: высота 36, отступы
-   внутрь, и между ними зазор — промах по соседней означал бы звонок вместо
-   копирования. Ссылка (tel:) выглядит так же, как кнопка. */
+   внутрь, и между ними зазор, чтобы не промахнуться по соседней. */
 .quick-row {
   display: flex;
   flex-wrap: wrap;
@@ -1687,13 +1691,20 @@ select {
 }
 .chip-btn:active { background: var(--surface-strong); }
 
-/* Номер и ник в карточке заказа — обычный текст, который можно выделить и
-   скопировать пальцем: веб-вью Telegram иначе отдаёт долгое нажатие ссылке. */
-.contact-num {
+/* Номер и ник в карточке заказа — сам текст и есть кнопка: нажатие на номер
+   копирует его, на ник — открывает переписку. Цвет ссылки подсказывает, что
+   текст нажимается. */
+.contact-link {
+  display: block;
   margin-top: 6px;
+  padding: 4px 0;
+  min-height: 32px;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
   font-size: 17px;
-  -webkit-user-select: text;
-  user-select: text;
-  -webkit-touch-callout: default;
+  text-align: left;
+  cursor: pointer;
 }
-.contact-num + .quick-row { margin-top: 6px; }
+.contact-link:active { opacity: .6; }

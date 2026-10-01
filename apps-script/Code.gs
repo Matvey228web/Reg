@@ -1083,6 +1083,7 @@ function doPost(e) {
       case "/item/lookup": data = handleItemLookup(payload, token); break;
       case "/item/create": data = handleItemCreate(payload, token); break;
       case "/item/numbers": data = handleItemNumbers(payload, token); break;
+      case "/item/update": data = handleItemUpdate(payload, token); break;
       case "/transaction/checkout": data = handleTransactionCheckout(payload, token); break;
       case "/transaction/checkin": data = handleTransactionCheckin(payload, token); break;
       case "/defect/report": data = handleDefectReport(payload, token); break;
@@ -1340,6 +1341,247 @@ function handleItemNumbers(payload, token) {
   }
 }
 
+// Правка карточки вещи администратором: название, номера, состояние,
+// количество у полки и категория. Сделано как handleItemNumbers — тот же
+// разбор «прислано / не прислано», те же проверки дубля номеров; та ручка
+// остаётся как есть (на неё смотрят проверки и deploy.js).
+//
+// all_model — галочка «Применить ко всем вещам этой модели». С ней правится
+// то, что принадлежит модели: название (строка Models и все вещи модели) и
+// категория (перенос всей модели — moveModel, то же, что /model/move).
+// Номера, состояние и количество у каждой вещи свои, и с галочкой их не
+// принимаем: молча пропустить — значит дать думать, что они сохранились.
+//
+// Категорию меняет только главный администратор: смена категории меняет
+// номер вещи, а с ним — напечатанную наклейку. Без галочки переезжает одна
+// вещь: новая модель в целевой категории, новый номер, ссылки в журналах
+// переписаны так же, как при переносе модели.
+//
+// Статус здесь не правится: его ведут выдача, приём и дефекты.
+function handleItemUpdate(payload, token) {
+  requireAdmin(token);
+  var itemId = String(payload.item_id || "").trim();
+  if (!itemId) throw apiError(400, "Не сказано, какую вещь править");
+  var allModel = payload.all_model === true || isTruthyCell(payload.all_model);
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.EQUIPMENT);
+    var rows = readRows(sheet);
+    var item = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].item_id) === itemId) { item = rows[i]; break; }
+    }
+    if (!item) throw apiError(404, "Предмет не найден");
+    var byQty = categoryByQty(item.category);
+    var from = String(item.category || "");
+    var code = item.model_code === "" ? "" : pad2(Number(item.model_code));
+
+    // Только то, что прислали: отсутствие поля — «не трогать», пустая строка у
+    // номеров и состояния — «стереть».
+    var next = {};
+    ["name", "serial_number", "inventory_number", "condition_notes", "qty", "category"].forEach(function (field) {
+      if (!Object.prototype.hasOwnProperty.call(payload, field)) return;
+      next[field] = String(payload[field] == null ? "" : payload[field]).trim();
+    });
+    if (!Object.keys(next).length) throw apiError(400, "Нечего править: ни одного поля не прислано");
+
+    if (allModel) {
+      var own = ["serial_number", "inventory_number", "condition_notes", "qty"].filter(function (f) {
+        return Object.prototype.hasOwnProperty.call(next, f);
+      });
+      if (own.length) {
+        throw apiError(400, "Номера, состояние и количество у каждой вещи свои — для всей " +
+          "модели их не задать. Снимите галочку «ко всем вещам модели» и правьте эту вещь.");
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(next, "name") && !next.name) {
+      throw apiError(400, "Название не может быть пустым");
+    }
+
+    // Номера — как в handleItemNumbers: у полки их нет, дубль не принимаем.
+    var LABELS = { serial_number: "заводской", inventory_number: "инвентарный" };
+    for (var field in LABELS) {
+      if (!Object.prototype.hasOwnProperty.call(next, field)) continue;
+      if (byQty) {
+        if (!next[field]) { delete next[field]; continue; }
+        throw apiError(409, "Это позиция с учётом количеством — одна строка на всю " +
+          "полку. Личных номеров у неё нет, вписывать их некуда.");
+      }
+      if (!next[field]) continue;
+      var taken = rows.filter(function (r) {
+        return String(r.item_id) !== itemId &&
+               String(r[field] || "").trim().toLowerCase() === next[field].toLowerCase();
+      })[0];
+      if (taken) {
+        throw apiError(409, "Такой " + LABELS[field] + " номер уже стоит у вещи " +
+          String(taken.item_id) + " («" + String(taken.name || "") + "»). Два одинаковых " +
+          "номера — это потерянная вещь: по ним ищут технику, и повторный импорт " +
+          "считает их одной и той же.");
+      }
+    }
+
+    // Количество — только у полки, целое, не меньше одного и не меньше того,
+    // что сейчас на руках: иначе свободных стало бы меньше нуля.
+    if (Object.prototype.hasOwnProperty.call(next, "qty")) {
+      if (!byQty) throw apiError(400, "Это поштучная вещь — количество у неё всегда одно");
+      var qty = Number(next.qty);
+      if (!next.qty || !isFinite(qty) || Math.floor(qty) !== qty || qty < 1) {
+        throw apiError(400, "Количество — целое число от одного");
+      }
+      var out = Number(item.qty_out || 0);
+      if (qty < out) {
+        throw apiError(409, "На руках сейчас " + out + " шт. — меньше этого количество " +
+          "не поставить. Сначала примите выданное.");
+      }
+      next.qty = qty;
+    }
+
+    // Категория: проверяем всё до первой записи, чтобы отказ не оставил
+    // половину правки в таблице.
+    var to = null;
+    if (Object.prototype.hasOwnProperty.call(next, "category")) {
+      var wanted = next.category.toUpperCase();
+      delete next.category;
+      if (wanted && wanted !== from) {
+        requireOwner(token);
+        var fromCat = null, toCat = null;
+        categories().forEach(function (c) {
+          if (c.code === from) fromCat = c;
+          if (c.code === wanted) toCat = c;
+        });
+        if (!toCat) throw apiError(404, "Категория, в которую переносим, не найдена");
+        // То же правило, что в moveModel: способ учёта должен совпадать.
+        if (fromCat && isTruthyCell(fromCat.by_qty) !== isTruthyCell(toCat.by_qty)) {
+          throw apiError(409, "У категорий разный способ учёта: одна считается " +
+            "количеством, другая — поштучно. Перенос превратил бы поштучные записи " +
+            "в количество или наоборот, и разобрать это обратно было бы нечем.");
+        }
+        if (!allModel) {
+          if (byQty) {
+            throw apiError(409, "У позиции с учётом количеством одна строка на модель — " +
+              "переносится вся модель. Включите «Применить ко всем вещам этой модели».");
+          }
+          // Выданная вещь числится в открытой выдаче под старым номером, и
+          // принимать её будут, сканируя старую наклейку.
+          if (item.status === "Rented" || String(item.current_transaction_id || "")) {
+            throw apiError(409, "Вещь сейчас выдана — номер ей менять нельзя: принимать её " +
+              "будут по старой наклейке. Сначала примите, потом переносите.");
+          }
+        }
+        to = wanted;
+      }
+    }
+
+    var modelsSheet = getSheet(SHEETS.MODELS);
+    var modelRow = null;
+    if (allModel && (Object.prototype.hasOwnProperty.call(next, "name") || to)) {
+      readRows(modelsSheet).forEach(function (r) {
+        if (r.category === from && pad2(Number(r.model_code)) === code) modelRow = r;
+      });
+      if (!modelRow) {
+        throw apiError(409, "У вещи нет строки в справочнике моделей — править всю модель " +
+          "нечем. Снимите галочку и правьте эту вещь.");
+      }
+      if (Object.prototype.hasOwnProperty.call(next, "name")) {
+        var needle = normalizeModelName(next.name);
+        var clash = readRows(modelsSheet).filter(function (r) {
+          return r.category === from && r.__row !== modelRow.__row &&
+                 normalizeModelName(r.model_name) === needle;
+        })[0];
+        if (clash) {
+          throw apiError(409, "В этой категории уже есть модель «" + String(clash.model_name) +
+            "». Две модели с одним названием — это две нумерации одной вещи.");
+        }
+      }
+    }
+
+    // --- Запись ---
+    var changed = {};
+    var renamed = 0;
+    if (allModel && Object.prototype.hasOwnProperty.call(next, "name")) {
+      var modelRenamed = String(modelRow.model_name || "") !== next.name;
+      if (modelRenamed) updateRow(modelsSheet, modelRow.__row, { model_name: next.name });
+      rows.forEach(function (r) {
+        if (r.category !== from || pad2(Number(r.model_code)) !== code) return;
+        if (String(r.name || "") === next.name) return;
+        updateRow(sheet, r.__row, { name: next.name });
+        renamed += 1;
+      });
+      if (modelRenamed || renamed) changed.name = { was: String(item.name || ""), now: next.name };
+      item.name = next.name;
+      delete next.name;
+    }
+
+    var patch = {};
+    for (var f in next) {
+      if (String(item[f] === undefined || item[f] === null ? "" : item[f]) !== String(next[f])) {
+        changed[f] = { was: String(item[f] === undefined || item[f] === null ? "" : item[f]), now: String(next[f]) };
+        patch[f] = next[f];
+      }
+    }
+    if (Object.keys(patch).length) {
+      updateRow(sheet, item.__row, patch);
+      for (var k in patch) item[k] = patch[k];
+    }
+
+    var finalId = itemId;
+    var moved = null;
+    if (to && allModel) {
+      // Вся модель — ровно тем же путём, что /model/move.
+      moved = moveModel(from, to, code);
+      moved.renames.forEach(function (r) { if (r.old === itemId) finalId = r.fresh; });
+      changed.category = { was: from, now: to };
+    } else if (to) {
+      // Одна вещь: своя модель в целевой категории (найдётся по названию или
+      // заведётся), новый номер, ссылки журналов переписаны картой из одной
+      // строки — как в moveModel.
+      var target = findOrCreateModel(to, item.name);
+      var fresh = buildItemId(to, target.model_code, nextUnitNumber(to, target.model_code));
+      updateRow(sheet, item.__row, {
+        item_id: fresh, category: to, model_code: pad2(Number(target.model_code)),
+      });
+      var map = {};
+      map[itemId] = fresh;
+      var touched = 0;
+      [SHEETS.TRANSACTIONS, SHEETS.DEFECTS, SHEETS.INVENTORY].forEach(function (name) {
+        touched += remapItemIds(getSheet(name), map);
+      });
+      // Вещь была последней в своей модели — пустой строке в справочнике
+      // быть незачем, как и после переноса всей модели.
+      var left = readRows(sheet).some(function (r) {
+        return r.category === from && pad2(Number(r.model_code)) === code;
+      });
+      var removed = false;
+      if (!left && code !== "") {
+        var old = readRows(modelsSheet).filter(function (r) {
+          return r.category === from && pad2(Number(r.model_code)) === code;
+        })[0];
+        if (old) { modelsSheet.deleteRow(old.__row); removed = true; }
+      }
+      finalId = fresh;
+      moved = { old: itemId, fresh: fresh, journal_rows: touched, model_removed: removed,
+                model_code: pad2(Number(target.model_code)) };
+      changed.category = { was: from, now: to };
+    }
+
+    var row = findRowByValue(sheet, "item_id", finalId);
+    return {
+      item: equipmentListRow(row),
+      old_item_id: itemId,
+      item_id: finalId,
+      all_model: allModel,
+      renamed: renamed,
+      moved: moved,
+      changed: changed,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 var SECTIONS = ["CINE", "PHOTO"];
 
 // Раздел хранится строкой через запятую. Наружу и внутрь ходит тот же вид:
@@ -1485,10 +1727,21 @@ function handleModelsList(payload, token) {
 // переписываем тоже, иначе у вещи отвяжется вся история.
 function handleModelMove(payload, token) {
   requireAdmin(token);
-  var from = String(payload.category || "").trim().toUpperCase();
-  var to = String(payload.to_category || "").trim().toUpperCase();
-  var code = payload.model_code;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    return moveModel(String(payload.category || "").trim().toUpperCase(),
+                     String(payload.to_category || "").trim().toUpperCase(),
+                     payload.model_code);
+  } finally {
+    lock.releaseLock();
+  }
+}
 
+// Сам перенос, без проверки прав и без блокировки: его зовут и /model/move, и
+// /item/update (галочка «ко всем вещам модели»), а блокировку каждый держит
+// свою — вложенный waitLock на той же блокировке не нужен и не гарантирован.
+function moveModel(from, to, code) {
   if (!from || !to) throw apiError(400, "Укажите, какую модель и куда переносим");
   if (from === to) throw apiError(400, "Модель уже в этой категории");
 
@@ -1511,75 +1764,69 @@ function handleModelMove(payload, token) {
       "в количество или наоборот, и разобрать это обратно было бы нечем.");
   }
 
-  var lock = LockService.getScriptLock();
-  lock.waitLock(LOCK_TIMEOUT_MS);
-  try {
-    var modelsSheet = getSheet(SHEETS.MODELS);
-    var modelRows = readRows(modelsSheet);
-    var source = null;
-    for (var i = 0; i < modelRows.length; i++) {
-      if (modelRows[i].category === from && pad2(Number(modelRows[i].model_code)) === pad2(Number(code))) {
-        source = modelRows[i];
-        break;
-      }
+  var modelsSheet = getSheet(SHEETS.MODELS);
+  var modelRows = readRows(modelsSheet);
+  var source = null;
+  for (var i = 0; i < modelRows.length; i++) {
+    if (modelRows[i].category === from && pad2(Number(modelRows[i].model_code)) === pad2(Number(code))) {
+      source = modelRows[i];
+      break;
     }
-    if (!source) throw apiError(404, "Модель не найдена в этой категории");
-
-    // Была ли такая модель в целевой категории ДО переноса — смотрим заранее:
-    // findOrCreateModel её либо найдёт, либо создаст, и после вызова эти два
-    // случая уже не различить, а человеку разница важна — слияние это не то же
-    // самое, что переезд.
-    var needle = normalizeModelName(source.model_name);
-    var merged = modelRows.some(function (r) {
-      return r.category === to && normalizeModelName(r.model_name) === needle;
-    });
-    // findOrCreateModel заодно СЛИВАЕТ дубли: если такая модель в целевой
-    // категории уже есть, вернётся её код, и второй записи не появится.
-    var target = findOrCreateModel(to, source.model_name);
-
-    var eqSheet = getSheet(SHEETS.EQUIPMENT);
-    var items = readRows(eqSheet).filter(function (r) {
-      return r.category === from && pad2(Number(r.model_code)) === pad2(Number(code));
-    });
-
-    var renames = [];
-    items.forEach(function (item) {
-      var unit = nextUnitNumber(to, target.model_code);
-      var newId = buildItemId(to, target.model_code, unit);
-      renames.push({ old: String(item.item_id), fresh: newId });
-      updateRow(eqSheet, item.__row, {
-        item_id: newId,
-        category: to,
-        model_code: pad2(Number(target.model_code)),
-      });
-    });
-
-    // Ссылки в журналах — колонкой целиком: updateRow читает и пишет диапазон
-    // на каждую строку, и на сорока позициях это сотня обращений к листу.
-    var map = {};
-    renames.forEach(function (r) { map[r.old] = r.fresh; });
-    var touched = 0;
-    [SHEETS.TRANSACTIONS, SHEETS.DEFECTS, SHEETS.INVENTORY].forEach(function (name) {
-      touched += remapItemIds(getSheet(name), map);
-    });
-
-    // Строка модели переехала или слилась — старой в справочнике быть не должно.
-    modelsSheet.deleteRow(source.__row);
-
-    return {
-      ok: true,
-      model_name: source.model_name,
-      from: from,
-      to: to,
-      model_code: pad2(Number(target.model_code)),
-      merged: merged,
-      moved: renames.length,
-      journal_rows: touched,
-      renames: renames,
-    };
-  } finally {
-    lock.releaseLock();
   }
+  if (!source) throw apiError(404, "Модель не найдена в этой категории");
+
+  // Была ли такая модель в целевой категории ДО переноса — смотрим заранее:
+  // findOrCreateModel её либо найдёт, либо создаст, и после вызова эти два
+  // случая уже не различить, а человеку разница важна — слияние это не то же
+  // самое, что переезд.
+  var needle = normalizeModelName(source.model_name);
+  var merged = modelRows.some(function (r) {
+    return r.category === to && normalizeModelName(r.model_name) === needle;
+  });
+  // findOrCreateModel заодно СЛИВАЕТ дубли: если такая модель в целевой
+  // категории уже есть, вернётся её код, и второй записи не появится.
+  var target = findOrCreateModel(to, source.model_name);
+
+  var eqSheet = getSheet(SHEETS.EQUIPMENT);
+  var items = readRows(eqSheet).filter(function (r) {
+    return r.category === from && pad2(Number(r.model_code)) === pad2(Number(code));
+  });
+
+  var renames = [];
+  items.forEach(function (item) {
+    var unit = nextUnitNumber(to, target.model_code);
+    var newId = buildItemId(to, target.model_code, unit);
+    renames.push({ old: String(item.item_id), fresh: newId });
+    updateRow(eqSheet, item.__row, {
+      item_id: newId,
+      category: to,
+      model_code: pad2(Number(target.model_code)),
+    });
+  });
+
+  // Ссылки в журналах — колонкой целиком: updateRow читает и пишет диапазон
+  // на каждую строку, и на сорока позициях это сотня обращений к листу.
+  var map = {};
+  renames.forEach(function (r) { map[r.old] = r.fresh; });
+  var touched = 0;
+  [SHEETS.TRANSACTIONS, SHEETS.DEFECTS, SHEETS.INVENTORY].forEach(function (name) {
+    touched += remapItemIds(getSheet(name), map);
+  });
+
+  // Строка модели переехала или слилась — старой в справочнике быть не должно.
+  modelsSheet.deleteRow(source.__row);
+
+  return {
+    ok: true,
+    model_name: source.model_name,
+    from: from,
+    to: to,
+    model_code: pad2(Number(target.model_code)),
+    merged: merged,
+    moved: renames.length,
+    journal_rows: touched,
+    renames: renames,
+  };
 }
 
 // Подменяет номера вещей в колонке item_id по карте «старый → новый».
@@ -2050,19 +2297,24 @@ function handleEquipmentList(payload, token) {
   if (payload.status && payload.status !== "all") {
     rows = rows.filter(function (r) { return r.status === payload.status; });
   }
-  return rows.map(function (r) {
-    var total = itemQty(r);
-    var out = Number(r.qty_out || 0);
-    return {
-      item_id: r.item_id, name: r.name, category: r.category, status: r.status,
-      serial_number: r.serial_number, inventory_number: r.inventory_number,
-      model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
-      qty: total, qty_out: out, qty_free: total - out,
-      // Карточка вещи рисуется из этого списка без отдельного lookup —
-      // без заметок о состоянии она потеряла бы строку «Состояние».
-      condition_notes: String(r.condition_notes || ""),
-    };
-  });
+  return rows.map(equipmentListRow);
+}
+
+// Строка каталога в том виде, в каком её отдаёт /equipment/list. Отдельно —
+// потому что ту же строку возвращает /item/update: приложение кладёт её в кэш
+// каталога, и разойдись формы — карточка из кэша рисовалась бы иначе.
+function equipmentListRow(r) {
+  var total = itemQty(r);
+  var out = Number(r.qty_out || 0);
+  return {
+    item_id: r.item_id, name: r.name, category: r.category, status: r.status,
+    serial_number: r.serial_number, inventory_number: r.inventory_number,
+    model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
+    qty: total, qty_out: out, qty_free: total - out,
+    // Карточка вещи рисуется из этого списка без отдельного lookup —
+    // без заметок о состоянии она потеряла бы строку «Состояние».
+    condition_notes: String(r.condition_notes || ""),
+  };
 }
 
 function handleClientsList(payload, token) {

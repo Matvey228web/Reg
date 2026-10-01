@@ -97,7 +97,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Группа | Ручки |
 |---|---|
 | Вход и сотрудники | `/auth/login`, `/staff/*` |
-| Каталог и вещи | `/item/*`, `/equipment/list`, `/model*` |
+| Каталог и вещи | `/item/*` (правка карточки — `/item/update`, номера — `/item/numbers`), `/equipment/list`, `/model*` |
 | Выдача и приём | `/transaction/checkout`, `/transaction/checkin` |
 | Дефекты | `/defect/report`, `/defect/resolve`, `/defects/list` |
 | Заказы | `/order/*`, `/orders/list`, `/students/list`, `/student/history` |
