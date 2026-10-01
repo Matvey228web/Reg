@@ -1068,13 +1068,19 @@ const MockAPI = {
         return { category: cat, model_code: code, price };
       }
 
-      // Выдача по заявке без сканирования. В моке важно воспроизвести именно
-      // выбор предмета и списание со строки: иначе экран выглядит работающим,
-      // а на живой таблице выдача уйдёт не с той строки.
+      // Выдача по заявке без сканирования — как handleOrderIssue в Code.gs:
+      // выбор свободных предметов здесь, а сама выдача — тем же
+      // /transaction/checkout, что и со «Скана». Раньше мок писал журнал сам и
+      // ставил предмету статус «Issued», которого в каталоге нет: в демо
+      // выданное оставалось «как бы свободным», а у штучных позиций выдача не
+      // считалась вовсе.
       case "/order/issue": {
-        const staff_id = MockStore.requireToken(token);
+        MockStore.requireToken(token);
         const order = MockStore.orders.find((o) => String(o.order_id) === String(body.order_id));
         if (!order) { const e = new Error("Заказ не найден"); e.status = 404; throw e; }
+        if (order.status === "Cancelled") {
+          const e = new Error("Заказ отменён, выдавать по нему нельзя"); e.status = 409; throw e;
+        }
         const line = MockStore.orderItems.find((i) =>
           String(i.order_id) === String(order.order_id) &&
           Number(i.line_no) === Number(body.line_no));
@@ -1085,38 +1091,42 @@ const MockAPI = {
         const left = Number(line.qty || 1) - Number(line.issued_qty || 0);
         if (left < 1) { const e = new Error("По этой строке уже всё выдано"); e.status = 409; throw e; }
         const asked = body.qty === undefined || body.qty === null || body.qty === "";
+        let want = asked ? left : Math.floor(Number(body.qty));
+        if (!want || want < 1) { const e = new Error("Количество — целое число от одного"); e.status = 400; throw e; }
+        if (want > left) { const e = new Error("По этой строке осталось выдать " + left); e.status = 409; throw e; }
+        const byQty = mockByQty(line.category);
+        const model = String(line.model_code).padStart(2, "0");
         const free = MockStore.equipment.filter((e2) =>
           e2.category === line.category &&
-          String(e2.model_code).padStart(2, "0") === String(line.model_code).padStart(2, "0") &&
-          e2.status === "Available");
+          String(e2.model_code).padStart(2, "0") === model &&
+          (byQty ? mockItemQty(e2) - Number(e2.qty_out || 0) > 0 : e2.status === "Available"))
+          .sort((x, y) => (String(x.item_id) < String(y.item_id) ? -1 : 1));
         if (!free.length) {
-          const e = new Error("Свободных на складе нет — ни одной"); e.status = 409; throw e;
-        }
-        // Не задано — выдаём сколько свободно, но не больше остатка по строке.
-        let want = asked ? Math.min(left, free.length) : Math.floor(Number(body.qty));
-        if (!want || want < 1) { const e = new Error("Количество — целое от одного"); e.status = 400; throw e; }
-        if (free.length < want) {
-          const e = new Error("Свободно только " + free.length + " из " + want);
+          const e = new Error("Свободных «" + (line.raw_name || model) + "» на складе нет — ни одной");
           e.status = 409; throw e;
         }
         const issued = [];
-        for (let i = 0; i < want; i++) {
-          const it = free[i];
-          it.status = "Issued";
-          MockStore.transactions.push({
-            transaction_id: MockStore.transactions.length + 1,
-            item_id: it.item_id, client_id: "", order_id: order.order_id,
-            order_line: line.line_no, staff_out: staff_id,
-            staff_out_name: (MockStore.findStaffById(staff_id) || {}).full_name || "",
-            checked_out_at: new Date().toISOString(),
-            expected_return_at: order.return_date || "", status: "Open",
-            notes: "Выдано по заявке без сканирования", qty: 1, qty_in: 0,
-          });
-          line.issued_qty = Number(line.issued_qty || 0) + 1;
-          issued.push({ item_id: it.item_id, qty: 1 });
+        const checkout = (itemId, qty) => MockAPI.handle("/transaction/checkout", {
+          item_id: itemId, order_id: order.order_id, qty,
+          notes: "Выдано по заявке без сканирования",
+        }, token);
+        if (byQty) {
+          const spare = mockItemQty(free[0]) - Number(free[0].qty_out || 0);
+          if (asked) want = Math.min(want, spare);
+          if (spare < want) { const e = new Error("Свободно только " + spare + " из " + want); e.status = 409; throw e; }
+          await checkout(free[0].item_id, want);
+          issued.push({ item_id: free[0].item_id, qty: want });
+        } else {
+          if (asked) want = Math.min(want, free.length);
+          if (free.length < want) {
+            const e = new Error("Свободно только " + free.length + " из " + want); e.status = 409; throw e;
+          }
+          for (let i = 0; i < want; i++) {
+            await checkout(free[i].item_id, 1);
+            issued.push({ item_id: free[i].item_id, qty: 1 });
+          }
         }
-        order.status = "Issued";
-        return { order_id: order.order_id, line_no: line.line_no, issued, left: left - want };
+        return { order_id: Number(order.order_id), line_no: Number(line.line_no), issued, left: left - want };
       }
 
       // Архив заказа. Не удаление: запись о договорённости остаётся целой.

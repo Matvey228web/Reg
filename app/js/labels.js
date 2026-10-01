@@ -11,12 +11,15 @@
 const LabelsScreen = (() => {
   const CAPTION_KEY = "mifs_label_caption";
   const SIZE_KEY = "mifs_label_size";
-  const DEFAULT_CAPTION = "Киноколледж #40";
+  const DEFAULT_CAPTION = "Киноколледж №40";
 
-  // Вертикальная лента: название сверху, QR посередине, снизу номер плашкой и
-  // подпись колледжа. Размеры — ходовые у Niimbot и Phomemo. Кегли заданы в
-  // миллиметрах: этикетка печатается в физическом размере, и «пункты» здесь
-  // ничего не значат.
+  // Вертикальная лента: название сверху, QR посередине, под ним категория,
+  // снизу номер плашкой; подпись колледжа бежит строкой по кругу вдоль рамки.
+  // Размеры — ходовые у Niimbot и Phomemo. Кегли заданы в миллиметрах:
+  // этикетка печатается в физическом размере, и «пункты» здесь ничего не
+  // значат. org — кегль категории; подпись по рамке на пятую часть мельче, чтобы
+  // не спорить с названием, а на мелкой ленте ужимается сама, чтобы целиком
+  // влезть на короткую сторону.
   const SIZES = {
     v20x30: { label: "20×30", w: 20, h: 30, pad: 1.2, name: 1.9, num: 3.0, org: 1.7, caption: true, category: false },
     v30x40: { label: "30×40", w: 30, h: 40, pad: 1.5, name: 2.5, num: 4.0, org: 2.0, caption: true, category: false },
@@ -106,8 +109,8 @@ const LabelsScreen = (() => {
         <input type="text" id="labels-caption" value="${escapeHtml(caption())}" />
       </div>
       </div>
-      <p class="hint">Печатается мелкой строкой под номером. На 30×50 и 40×60
-      рядом помещается ещё и категория.</p>
+      <p class="hint">Бежит строкой по кругу вдоль рамки. На 30×50 и 40×60
+      под кодом помещается ещё и категория.</p>
       ${singleItemId ? "" : `
       <div class="searchbar">
         <input type="search" id="labels-search" placeholder="Поиск по названию или номеру"
@@ -117,7 +120,7 @@ const LabelsScreen = (() => {
           <select id="labels-filter-status"></select>
         </div>
       </div>`}
-      <div id="labels-count" class="hint"></div>
+      <p id="labels-count" class="hint"></p>
       <button class="btn" id="labels-print">Печать</button>
       <button class="btn btn--secondary" id="labels-save">Сохранить картинками</button>
       <p class="hint">При печати ставьте масштаб 100%, иначе размеры уедут.
@@ -361,7 +364,8 @@ const LabelsScreen = (() => {
 
   // Подбираем кегль так, чтобы название влезло в отведённые строки целиком.
   // Обрезать его многоточием хуже: у моделей одной серии различается как раз
-  // хвост — «SIRIUS 100CM» и «SIRIUS 60CM».
+  // хвост — «SIRIUS 100CM» и «SIRIUS 60CM». Поэтому многоточие — только когда
+  // не помогло и ужатие кегля.
   function fitText(ctx, text, maxWidth, startPx, maxLines, weight) {
     let px = startPx;
     while (px > startPx * 0.6) {
@@ -371,7 +375,16 @@ const LabelsScreen = (() => {
       px -= Math.max(1, startPx * 0.06);
     }
     ctx.font = weight + " " + Math.round(px) + "px " + FONT_SANS;
-    return { px: Math.round(px), rows: wrapText(ctx, text, maxWidth).slice(0, maxLines) };
+    // Не влезло и в самом мелком кегле. Молча отрезать хвост нельзя — на
+    // этикетке оставалось «…KIT WITH», и казалось, что так модель и зовётся.
+    // Ставим многоточие: видно, что название длиннее.
+    const all = wrapText(ctx, text, maxWidth);
+    if (all.length <= maxLines) return { px: Math.round(px), rows: all };
+    const rows = all.slice(0, maxLines);
+    let last = rows[rows.length - 1] + "…";
+    while (last.length > 1 && ctx.measureText(last).width > maxWidth) last = last.slice(0, -2).trimEnd() + "…";
+    rows[rows.length - 1] = last;
+    return { px: Math.round(px), rows, cut: true };
   }
 
   const FONT_SANS = '"Helvetica Neue", Arial, sans-serif';
@@ -408,9 +421,26 @@ const LabelsScreen = (() => {
     ctx.save();
     ctx.clip();
 
-    const pad = edge + stroke + mm(Math.max(0.7, size.pad * 0.5), k);
+    // Подпись колледжа — лентой по кругу вдоль рамки. Раньше она стояла
+    // строкой под номером (а на снимке владельца — столбиками по бокам кода) и
+    // отнимала у кода то высоту, то ширину. По кругу она занимает полосу,
+    // которая и так уходила на поля, а потерять её с этикетки нельзя: по ней
+    // вещь возвращают, когда она уехала со съёмок в чужой сумке.
+    const frameIn = edge + stroke;
+    const box = { x: frameIn, y: frameIn, w: canvas.width - frameIn * 2, h: canvas.height - frameIn * 2 };
+    const ribbonText = size.caption && captionText ? String(captionText).trim().toUpperCase() : "";
+    const ribbon = ribbonText ? fitRibbon(ctx, ribbonText, box, mm(size.org * 0.8, k), k) : null;
+    const band = ribbon ? ribbon.band : 0;
+
+    // Поля внутри ленты небольшие: у кода своё белое поле в четыре модуля,
+    // и оно же отделяет его от ленты. Без ленты — прежние поля.
+    const pad = ribbon
+      ? frameIn + band + mm(Math.max(0.4, size.pad * 0.3), k)
+      : frameIn + mm(Math.max(0.7, size.pad * 0.5), k);
     const gap = mm(size.pad * 0.45, k);
     const inner = canvas.width - pad * 2;
+    // Код может встать вплотную к ленте: его белое поле и есть отступ.
+    const qrRoom = canvas.width - (frameIn + band) * 2;
 
     // 1. Название сверху. Две строки, если помещается; на самой мелкой ленте
     //    ужимается до одной — см. бюджет ниже.
@@ -418,54 +448,73 @@ const LabelsScreen = (() => {
     const fitName = (lines) => name
       ? fitText(ctx, name, inner, mm(size.name, k), lines, "bold")
       : { px: 0, rows: [] };
+    // Длинное название, которое в две строки влезает только с многоточием,
+    // пробуем в три: с лентой по рамке строка стала уже. Лишнюю строку бюджет
+    // ниже снимет первой.
     let fitted = fitName(2);
+    if (fitted.cut) fitted = fitName(3);
     let nameLine = Math.round(fitted.px * 1.06);
     let nameHeight = fitted.rows.length * nameLine;
 
-    // 2. Низ: плашка с номером и подписи под ней. Считаем заранее, чтобы знать,
-    //    сколько высоты остаётся коду.
-    const numPx = mm(size.num, k);
+    // 2. Низ: плашка с номером; над ней, сразу под кодом, — категория.
+    //    Считаем заранее, чтобы знать, сколько высоты остаётся коду.
+    // Лента по рамке забирает ширину, и номер в прежнем кегле вылезал за
+    // плашку. Кегль номера ужимаем до ширины поля, плашку — вместе с ним.
+    let numPx = mm(size.num, k);
+    ctx.font = "bold " + numPx + "px " + FONT_MONO;
+    const numW = ctx.measureText(groupedId(item.item_id)).width;
+    if (numW + numPx * 0.8 > inner) numPx = Math.floor(numPx * inner / (numW + numPx * 0.8));
     const chipPadY = Math.round(numPx * 0.22);
     const chipH = Math.round(numPx * 1.2) + chipPadY * 2;
     const orgPx = mm(size.org, k);
     const orgLine = Math.round(orgPx * 1.25);
-    const bottomLines = [];
-    if (size.category) bottomLines.push(categoryLabel(item.category));
-    if (size.caption && captionText) bottomLines.push(String(captionText));
+    let category = size.category ? categoryLabel(item.category) : "";
 
     // 3. Бюджет высоты. Код не может быть меньше четырёх точек на модуль —
     //    ниже этого края замываются и телефон читает через раз. Если всё сразу
-    //    не помещается, жертвуем подписями снизу, а не кодом: подпись читают
-    //    глазами и она одинакова на всех этикетках, а код — рабочий инструмент.
+    //    не помещается, жертвуем подписями, а не кодом: подпись читают
+    //    глазами, а код — рабочий инструмент.
     const modules = 21 + QUIET * 2;
     const minDot = 4 * k;
     const innerH = canvas.height - pad * 2;
     const ruleH = () => (fitted.rows.length ? Math.round(gap * 0.7) + stroke : 0);
-    const bottomH = () => chipH + bottomLines.length * orgLine + (bottomLines.length ? Math.round(gap * 0.5) : 0);
-    const fits = () => nameHeight + ruleH() + bottomH() + gap * 2 + modules * minDot <= innerH;
+    const catH = () => (category ? orgLine : 0);
+    const fits = () => nameHeight + ruleH() + catH() + chipH + gap * 2 + modules * minDot <= innerH;
 
     // Порядок, в котором жертвуем местом, когда лента мелкая:
+    //  0) третья строка длинного названия — с многоточием оно всё равно узнаётся;
     //  1) категория — она и так закодирована первыми двумя цифрами номера;
     //  2) вторая строка названия — модель узнают и по первой, а на приборе она
-    //     обычно написана и без нас;
-    //  3) и только в самом конце подпись колледжа. По ней вещь возвращают,
-    //     когда она уехала со съёмок в чужой сумке, — из номера она не
-    //     выводится ничем.
-    if (!fits() && bottomLines.length > 1) bottomLines.shift();
-    if (!fits() && fitted.rows.length > 1) {
-      fitted = fitName(1);
+    //     обычно написана и без нас.
+    //  Подпись колледжа по рамке места у кода не отнимает и не убирается.
+    const refit = (lines) => {
+      fitted = fitName(lines);
       nameLine = Math.round(fitted.px * 1.06);
       nameHeight = fitted.rows.length * nameLine;
-    }
-    while (!fits() && bottomLines.length) bottomLines.shift();
+    };
+    if (!fits() && fitted.rows.length > 2) refit(2);
+    if (!fits()) category = "";
+    if (!fits() && fitted.rows.length > 1) refit(1);
 
-    const free = innerH - nameHeight - ruleH() - bottomH() - gap * 2;
-    const dot = Math.max(1, Math.floor(Math.min(inner, free) / modules));
+    const freeNow = () => innerH - nameHeight - ruleH() - catH() - chipH - gap * 2;
+    const dotNow = () => Math.max(1, Math.floor(Math.min(qrRoom, freeNow()) / modules));
+    // Третья строка названия не стоит ни одной точки модуля: код — рабочий
+    // инструмент, а название с многоточием всё равно узнаётся.
+    if (fitted.rows.length > 2) {
+      const with3 = dotNow();
+      refit(2);
+      if (dotNow() <= with3) refit(3);
+    }
+
+    const free = freeNow();
+    const dot = dotNow();
     const qrSide = dot * modules;
 
     const qrCanvas = document.createElement("canvas");
     QR.render(qrCanvas, item.item_id, dot, QUIET);
     ctx.imageSmoothingEnabled = false;
+
+    if (ribbon) drawRibbon(ctx, ribbonText, box, ribbon, k);
 
     // Раскладываем сверху вниз, а свободный остаток отдаём воздуху вокруг кода.
     let y = pad;
@@ -486,15 +535,25 @@ const LabelsScreen = (() => {
       y += stroke;
     }
 
-    // Остаток высоты делим поровну над и под кодом. Сам код уже взял из него
-    // всё, что мог (dot выше), так что делить остаётся считанные точки.
+    // Остаток высоты делим поровну над и под кодом с категорией. Сам код уже
+    // взял из него всё, что мог (dot выше), так что делить остаётся считанные
+    // точки.
     const spare = Math.max(0, free - qrSide);
     y += gap + Math.round(spare / 2);
     ctx.drawImage(qrCanvas, Math.round((canvas.width - qrSide) / 2), y, qrSide, qrSide);
-    // Низ отсчитываем от нижнего края, а не накопленной суммой: округления по
-    // дороге сдвигали бы подпись на пиксель-другой и на мелкой ленте её
-    // срезало краем.
-    y = canvas.height - pad - bottomH();
+    y += qrSide;
+
+    // Категория — сразу под кодом: белое поле кода уже отделяет её от модулей.
+    if (category) {
+      ctx.font = orgPx + "px " + FONT_SANS;
+      ctx.textAlign = "center";
+      ctx.fillText(category, canvas.width / 2, y, inner);
+    }
+
+    // Плашку отсчитываем от нижнего края, а не накопленной суммой: округления
+    // по дороге сдвигали бы её на пиксель-другой и на мелкой ленте её срезало
+    // бы краем.
+    y = canvas.height - pad - chipH;
 
     // Плашка с номером: выворотка читается на полке быстрее всего.
     const text = groupedId(item.item_id);
@@ -508,24 +567,15 @@ const LabelsScreen = (() => {
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
     ctx.fillText(text, canvas.width / 2, y + chipPadY);
-    y += chipH;
-
     ctx.fillStyle = "#000000";
-    if (bottomLines.length) {
-      y += Math.round(gap * 0.5);
-      ctx.font = orgPx + "px " + FONT_SANS;
-      bottomLines.forEach((line) => {
-        ctx.fillText(line, canvas.width / 2, y);
-        y += Math.round(orgPx * 1.25);
-      });
-    }
     ctx.textAlign = "left";
     ctx.restore();
     // Отдаём измеренную геометрию: так о ней можно спросить, а не вычислять её
     // обратно из картинки.
     canvas.dataset.qrMm = (qrSide / (DOTS_PER_MM * k)).toFixed(2);
     canvas.dataset.dot = String(Math.round(dot / k));
-    canvas.dataset.bottomLines = String(bottomLines.length);
+    canvas.dataset.category = category ? "1" : "0";
+    canvas.dataset.ribbonPx = ribbon ? String(Math.round(ribbon.px / k)) : "0";
     return canvas;
   }
 
@@ -537,6 +587,100 @@ const LabelsScreen = (() => {
     ctx.arcTo(x, y + h, x, y, r);
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
+  }
+
+  // --- Подпись по рамке ---
+  //
+  // Текст идёт по часовой стрелке, верхом наружу, как надпись по краю монеты:
+  // сверху читается как обычно, справа — сверху вниз, снизу — вверх ногами,
+  // слева — снизу вверх. По дугам углов буквы не гнём: на скруглении в
+  // полтора миллиметра они налезали бы друг на друга. Углы служат
+  // разделителями — в каждом точка, такая же, как между повторами на
+  // сторонах, — и строка читается непрерывной.
+  //
+  // Кегль один на все четыре стороны: подбираем его так, чтобы подпись
+  // целиком влезла хотя бы раз на короткую сторону. Жирный — у обычного
+  // начертания на мелком кегле штрихи тоньше полутора точек, и термопринтер
+  // их теряет.
+  function ribbonFont(px) {
+    return "bold " + px + "px " + FONT_SANS;
+  }
+
+  function fitRibbon(ctx, text, box, startPx, k) {
+    const floor = mm(1.2, k);
+    let px = startPx;
+    for (;;) {
+      ctx.font = ribbonFont(px);
+      const band = Math.round(px * 1.25);
+      const run = Math.min(box.w, box.h) - band * 2;
+      if (ctx.measureText(text).width <= run || px <= floor) return { px, band };
+      px -= Math.max(1, Math.round(k / 2));
+    }
+  }
+
+  function drawRibbon(ctx, text, box, ribbon, k) {
+    const { px, band } = ribbon;
+    ctx.save();
+    ctx.font = ribbonFont(px);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#000000";
+    const glyphs = Array.from(text);
+    const adv = glyphs.map((g) => ctx.measureText(g).width);
+    const unitW = adv.reduce((a, b) => a + b, 0);
+    const m = ctx.measureText("КНЖ№");
+    const capH = m.actualBoundingBoxAscent || px * 0.72;
+    // Точка-разделитель: не тоньше двух точек принтера, иначе пропадает.
+    const dotR = Math.max(k, px * 0.11);
+    const dotAt = (x, y) => { ctx.beginPath(); ctx.arc(x, y, dotR, 0, Math.PI * 2); ctx.fill(); };
+
+    const half = band / 2;
+    // Начало прямого участка на средней линии полосы, направление и длина.
+    const sides = [
+      { x: box.x + band, y: box.y + half, a: 0, len: box.w - band * 2 },
+      { x: box.x + box.w - half, y: box.y + band, a: Math.PI / 2, len: box.h - band * 2 },
+      { x: box.x + box.w - band, y: box.y + box.h - half, a: Math.PI, len: box.w - band * 2 },
+      { x: box.x + half, y: box.y + box.h - band, a: -Math.PI / 2, len: box.h - band * 2 },
+    ];
+    // Ритм: просвет между повторами равен ширине угла, где тоже стоит точка.
+    // Лишнюю длину стороны раздаём поровну — немного в разрядку, остальное в
+    // просветы (в средние вдвое больше, чем у угла: к угловому просвету
+    // прибавляются концы двух сторон).
+    const gapNat = band;
+    sides.forEach((side) => {
+      const n = Math.max(1, Math.floor((side.len + gapNat) / (unitW + gapNat)));
+      const slots = n * (glyphs.length - 1);
+      const left = side.len - n * unitW - (n - 1) * gapNat;
+      let track = 0;
+      let w = 0;
+      if (left < 0) {
+        track = slots ? left / slots : 0;
+      } else {
+        track = Math.min(px * 0.12, left / (slots + 2 * n));
+        w = (left - slots * track) / (2 * n);
+      }
+      ctx.save();
+      ctx.translate(side.x, side.y);
+      ctx.rotate(side.a);
+      let x = w;
+      for (let u = 0; u < n; u++) {
+        glyphs.forEach((g, i) => {
+          ctx.fillText(g, x, capH / 2);
+          x += adv[i] + (i < glyphs.length - 1 ? track : 0);
+        });
+        if (u < n - 1) {
+          dotAt(x + w + gapNat / 2, 0);
+          x += gapNat + w * 2;
+        }
+      }
+      ctx.restore();
+    });
+    // Точки в углах.
+    dotAt(box.x + half, box.y + half);
+    dotAt(box.x + box.w - half, box.y + half);
+    dotAt(box.x + box.w - half, box.y + box.h - half);
+    dotAt(box.x + half, box.y + box.h - half);
+    ctx.restore();
   }
 
   function wrapText(ctx, text, maxWidth) {
