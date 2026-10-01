@@ -1772,6 +1772,18 @@ check('единица выдана', mv.ok === true, mv);
 mv = call('/defect/report', { item_id: mvId1, description: 'Тестовая царапина', severity: 'Minor' }, mvToken);
 check('дефект заведён', mv.ok === true, mv);
 
+// Пока единица на руках, модель не переносим: принимать её будут по старой
+// наклейке. Отказ — до первой записи: ни номеров, ни строки модели в LEN.
+const mvLenModelsBefore = readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length;
+mv = call('/model/move', { category: 'CAM', model_code: mvCode, to_category: 'LEN' }, mvToken);
+check('модель с выданной единицей не переносится — 409 с числом на руках',
+  mv.ok === false && mv.status === 409 && /На руках 1 вещь/.test(String(mv.error)), mv);
+check('после отказа номера и справочник не тронуты',
+  readRows(getSheet(SHEETS.EQUIPMENT)).some(r => String(r.item_id) === mvId1) &&
+  readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length === mvLenModelsBefore);
+mv = call('/transaction/checkin', { item_id: mvId1 }, mvToken);
+check('единица принята', mv.ok === true, mv);
+
 const mvTxBefore = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.item_id) === mvId1).length;
 const mvDfBefore = readRows(getSheet(SHEETS.DEFECTS)).filter(r => String(r.item_id) === mvId1).length;
 check('в журналах есть строки на эту вещь', mvTxBefore > 0 && mvDfBefore > 0, [mvTxBefore, mvDfBefore]);
@@ -2036,6 +2048,25 @@ check('с галочкой номера не принимаются', upd.ok ===
 upd = call('/item/update', { item_id: numId, name: 'Canon C70', all_model: true }, numToken);
 check('название другой модели этой категории — 409', upd.ok === false && upd.status === 409, upd);
 
+// Название проходит через MODEL_ALIASES, как при импорте. «Sony A7 IV» — это
+// «Sony ILCE-7M4», а она в CAM уже есть (aliasA): переименованием в синоним
+// получились бы две модели одного аппарата.
+check('модель Sony ILCE-7M4 по-прежнему в CAM',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Sony ILCE-7M4'));
+upd = call('/item/update', { item_id: numId, name: 'Sony A7 IV', all_model: true }, numToken);
+check('переименование в синоним другой модели — 409 с каноническим именем',
+  upd.ok === false && upd.status === 409 && /одна и та же модель/.test(upd.error) &&
+  /Sony ILCE-7M4/.test(upd.error), upd);
+check('после отказа название не тронуто',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0].name === 'Номерная Модель');
+// Синоним своей же модели: записывается каноническим именем, как при импорте.
+upd = call('/item/update', { item_id: aliasA, name: 'Sony Alpha 7 IV', all_model: true }, numToken);
+check('синоним своей модели принят и записан каноническим',
+  upd.ok === true && upd.data.stored_name === 'Sony ILCE-7M4' && upd.data.renamed === 0, upd);
+check('в справочнике и у вещей осталось каноническое имя',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Sony ILCE-7M4') &&
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === aliasB)[0].name === 'Sony ILCE-7M4');
+
 // Категория — только главному администратору.
 const updAdmin = call('/staff/create', {
   full_name: 'Админ Правки', login: 'updadmin', pin: '8888', role: 'Admin',
@@ -2095,6 +2126,14 @@ check('в новой категории заведена модель с тем 
 check('в старой модели осталась вторая вещь — её строка на месте', upd.ok && upd.data.moved.model_removed === false &&
   readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && pad2(Number(r.model_code)) === pad2(Number(updCamModel))));
 
+// Вся модель — тоже нет, пока вторая вещь на руках. И название из того же
+// запроса не записывается: проверка стоит до первой записи.
+upd = call('/item/update', { item_id: numOther, name: 'Не должно записаться', category: 'LEN', all_model: true }, numToken);
+check('модель с выданной вещью целиком не перенести — 409',
+  upd.ok === false && upd.status === 409 && /На руках 1 вещь этой модели/.test(upd.error), upd);
+check('и название модели из того же запроса не записалось',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Модель');
+
 call('/transaction/checkin', { item_id: numOther }, numToken);
 upd = call('/item/update', { item_id: numOther, category: 'LEN' }, numToken);
 check('после приёма вторая вещь переносится', upd.ok === true, upd);
@@ -2105,6 +2144,14 @@ check('опустевшая модель удалена из справочни�
 // Полка переносится только целиком — тем же путём, что /model/move.
 upd = call('/item/update', { item_id: numBulkId, category: 'GEL' }, numToken);
 check('полку по одной не перенести — 409', upd.ok === false && upd.status === 409, upd);
+// С полки что-то выдано — переносить нельзя ни ручкой модели, ни галочкой.
+updateRow(getSheet(SHEETS.EQUIPMENT), updBulkRow.__row, { qty_out: 2 });
+r = call('/model/move', { category: updBulkRow.category, model_code: pad2(Number(updBulkRow.model_code)), to_category: 'GEL' }, numToken);
+check('полку с выданным не перенести через /model/move — 409',
+  r.ok === false && r.status === 409 && /На руках 2 шт\./.test(String(r.error)), r);
+upd = call('/item/update', { item_id: numBulkId, category: 'GEL', all_model: true }, numToken);
+check('и галочкой тоже — 409', upd.ok === false && upd.status === 409 && /На руках 2 шт\./.test(upd.error), upd);
+updateRow(getSheet(SHEETS.EQUIPMENT), updBulkRow.__row, { qty_out: 0 });
 upd = call('/item/update', { item_id: numBulkId, category: 'GEL', all_model: true }, numToken);
 check('с галочкой полка переехала вместе с моделью', upd.ok === true && upd.data.item.category === 'GEL' &&
   upd.data.item_id !== numBulkId && upd.data.moved && upd.data.moved.moved === 1, upd);

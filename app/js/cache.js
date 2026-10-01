@@ -193,7 +193,7 @@ const ItemState = (() => {
     return item.status === "In Repair" && !otherBlocking ? { status: "Available" } : {};
   }
 
-  return { blocksRental, afterCheckout, afterCheckin, afterDefect, afterResolve };
+  return { blocksRental, byQty, afterCheckout, afterCheckin, afterDefect, afterResolve };
 })();
 
 // Строка над списком: когда данные получены и кнопка обновления.

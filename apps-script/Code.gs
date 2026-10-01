@@ -1459,6 +1459,9 @@ function handleItemUpdate(payload, token) {
             "количеством, другая — поштучно. Перенос превратил бы поштучные записи " +
             "в количество или наоборот, и разобрать это обратно было бы нечем.");
         }
+        // Вся модель: проверяем до первой записи — moveModel проверит и сам,
+        // но к тому времени название уже было бы переписано.
+        if (allModel && code !== "") assertModelNotOut(from, code);
         if (!allModel) {
           if (byQty) {
             throw apiError(409, "У позиции с учётом количеством одна строка на модель — " +
@@ -1486,11 +1489,24 @@ function handleItemUpdate(payload, token) {
           "нечем. Снимите галочку и правьте эту вещь.");
       }
       if (Object.prototype.hasOwnProperty.call(next, "name")) {
+        // Название — через MODEL_ALIASES, как при импорте (findOrCreateModel):
+        // «Sony A7 IV» записывается каноническим «Sony ILCE-7M4». Иначе
+        // переименованная модель не узнала бы себя при следующем импорте и
+        // разъехалась бы на два кода. Соседей сравниваем тоже по канону: у
+        // старой строки может стоять синоним, записанный до списка.
+        var typed = next.name;
+        next.name = canonicalModelName(typed);
         var needle = normalizeModelName(next.name);
         var clash = readRows(modelsSheet).filter(function (r) {
           return r.category === from && r.__row !== modelRow.__row &&
-                 normalizeModelName(r.model_name) === needle;
+                 normalizeModelName(canonicalModelName(r.model_name)) === needle;
         })[0];
+        if (clash && normalizeModelName(typed) !== normalizeModelName(clash.model_name)) {
+          throw apiError(409, "«" + typed + "» и «" + String(clash.model_name) + "» — одна и та " +
+            "же модель (в каталоге она «" + next.name + "»), и в этой категории она уже есть. " +
+            "Переименованием две модели не свести: вышли бы две нумерации одной вещи. " +
+            "Оставьте прежнее название или выберите другое.");
+        }
         if (clash) {
           throw apiError(409, "В этой категории уже есть модель «" + String(clash.model_name) +
             "». Две модели с одним названием — это две нумерации одной вещи.");
@@ -1501,7 +1517,9 @@ function handleItemUpdate(payload, token) {
     // --- Запись ---
     var changed = {};
     var renamed = 0;
+    var storedName = null;
     if (allModel && Object.prototype.hasOwnProperty.call(next, "name")) {
+      storedName = next.name;
       var modelRenamed = String(modelRow.model_name || "") !== next.name;
       if (modelRenamed) updateRow(modelsSheet, modelRow.__row, { model_name: next.name });
       rows.forEach(function (r) {
@@ -1574,6 +1592,9 @@ function handleItemUpdate(payload, token) {
       item_id: finalId,
       all_model: allModel,
       renamed: renamed,
+      // Под каким названием модель записана: синоним из MODEL_ALIASES
+      // сохраняется каноническим именем, и экран должен это сказать.
+      stored_name: storedName,
       moved: moved,
       changed: changed,
     };
@@ -1738,6 +1759,28 @@ function handleModelMove(payload, token) {
   }
 }
 
+// Переносить модель, пока что-то из неё на руках, нельзя — то же правило, что
+// для одной вещи в handleItemUpdate: перенос меняет номера, а выданное будут
+// принимать, сканируя старую наклейку. Считаем и поштучные вещи (Rented или
+// открытая выдача), и полку (qty_out), чтобы назвать человеку число.
+// Зовут moveModel и handleItemUpdate — второй до первой записи, иначе отказ
+// из moveModel оставил бы в таблице половину правки (переименование).
+function assertModelNotOut(category, code) {
+  var bulk = categoryByQty(category);
+  var out = 0;
+  readRows(getSheet(SHEETS.EQUIPMENT)).forEach(function (r) {
+    if (r.category !== category || pad2(Number(r.model_code)) !== pad2(Number(code))) return;
+    var q = Number(r.qty_out || 0);
+    if (q > 0) out += q;
+    else if (r.status === "Rented" || String(r.current_transaction_id || "")) out += 1;
+  });
+  if (!out) return;
+  throw apiError(409, "На руках " + out + " " +
+    (bulk ? "шт." : pluralRu(out, "вещь", "вещи", "вещей")) + " этой модели — переносить " +
+    "её нельзя: номера сменятся, а принимать выданное будут по старым наклейкам. " +
+    "Сначала примите, потом переносите.");
+}
+
 // Сам перенос, без проверки прав и без блокировки: его зовут и /model/move, и
 // /item/update (галочка «ко всем вещам модели»), а блокировку каждый держит
 // свою — вложенный waitLock на той же блокировке не нужен и не гарантирован.
@@ -1774,6 +1817,8 @@ function moveModel(from, to, code) {
     }
   }
   if (!source) throw apiError(404, "Модель не найдена в этой категории");
+  // До первой записи: findOrCreateModel ниже уже может завести строку модели.
+  assertModelNotOut(from, code);
 
   // Была ли такая модель в целевой категории ДО переноса — смотрим заранее:
   // findOrCreateModel её либо найдёт, либо создаст, и после вызова эти два
