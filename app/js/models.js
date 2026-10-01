@@ -179,7 +179,8 @@ const ModelsScreen = (() => {
         category: parts[0], model_code: parts[1], price: String(value).trim(),
       });
       model.price = res.price;
-      Cache.set(CACHE, models);
+      // replace, а не set: поправленная цена не делает свежим весь справочник.
+      Cache.replace(CACHE, models);
       TG.hapticSuccess();
     } catch (err) {
       TG.hapticError();
@@ -203,7 +204,7 @@ const ModelsScreen = (() => {
         models: [{ category: parts[0], model_code: parts[1], section: value }],
       });
       model.section = value;
-      Cache.set(CACHE, models);
+      Cache.replace(CACHE, models);
       TG.hapticSuccess();
     } catch (err) {
       TG.hapticError();
@@ -245,10 +246,13 @@ const ModelsScreen = (() => {
       TG.hapticSuccess();
       // Номера вещей изменились — кэш каталога устарел целиком, а список
       // моделей поедет за свежим: load() ниже уже не увидит прежний.
-      // Каталог сбрасываем, а не правим: у каждой перенесённой вещи меняются
+      // Каталог не правим построчно: у каждой перенесённой вещи меняются
       // номер, категория и код модели, а при слиянии и название — повторять
       // здесь всё это ради редкой правки администратора незачем. Позиций у
       // модели не было — в каталоге не поменялось ничего, и сбрасывать нечего.
+      // Каталог сбрасываем: в нём старые номера, и тап по такой строке дал
+      // бы «не найдено». Справочник моделей — тоже: load() ниже должен
+      // нарисовать уже перенесённую модель.
       if (res.moved) Cache.clear("equipment");
       Cache.clear(CACHE);
       TG.showAlert(resultText(res));

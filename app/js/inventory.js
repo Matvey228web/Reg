@@ -664,11 +664,17 @@ const InventoryScreen = (() => {
       const known = items.some((i) => String(i.item_id) === id);
       if (known) {
         // Штучную позицию сервер пополнил, а не завёл заново.
-        Cache.patch("equipment", "item_id", id, { qty: Number(res.qty || qty) });
+        // Свободных стало больше на столько же: на руках не прибавилось.
+        Cache.patch("equipment", "item_id", id, (row) => {
+          const total = Number(res.qty || qty);
+          return { qty: total, qty_free: total - Number(row.qty_out || 0) };
+        });
       } else {
         // Номер собран как XXYYZZ, средняя пара — код модели; сервер его не
         // возвращает, а этикеткам и группировке он нужен.
-        Cache.set("equipment", items.concat([{
+        // Cache.replace, а не set: дописанная строка не делает свежим весь
+        // каталог, и «обновлено N минут назад» на нём должно остаться честным.
+        Cache.replace("equipment", items.concat([{
           item_id: id,
           name: name || id,
           category: form.category,
@@ -681,6 +687,8 @@ const InventoryScreen = (() => {
           qty_free: Number(res.qty || 1),
         }]));
       }
+      // Новая модель — справочник моделей устарел, перечитается молча.
+      if (payload.model_name) Cache.stale("models");
       refreshExpected();
       // Вещь в руках — значит найдена. Иначе она попадёт в «не найдено» тем же
       // вечером, когда её и завели.
@@ -750,8 +758,8 @@ const InventoryScreen = (() => {
     lastMessage = `Записываем ${rows} ${plural(rows, "строку", "строки", "строк")} в журнал — ` +
       "таблица отвечает 5–8 секунд, на полной сверке дольше. Не закрывайте экран.";
     renderSession(document.getElementById("inventory-content"));
-    document.getElementById("inventory-finish").disabled = true;
-    document.getElementById("inventory-finish").textContent = "Сохраняем…";
+    // Кнопку перерисовали — занятой делаем уже новую (busyButton из util.js).
+    busyButton(document.getElementById("inventory-finish"), "Сохраняем…");
     try {
       await apiPost("/inventory/save", {
         scope: session.scope,
@@ -763,12 +771,13 @@ const InventoryScreen = (() => {
       });
       TG.hapticSuccess();
       lastMessage = "";
-      TG.showAlert(`Сверка записана в журнал. Найдено ${s.found} из ${s.total}, ` +
-        `не найдено ${s.missing.length}.`);
       session = null;
       resetTransient();
       save();
       render();
+      // Строкой над экраном, а не окном: окно пришлось бы закрывать.
+      showStatusLine("inventory-status", `Сверка записана в журнал. Найдено ${s.found} из ${s.total}, ` +
+        `не найдено ${s.missing.length}.`, { before: "inventory-content" });
     } catch (err) {
       TG.hapticError();
       // Отчёт уже собран и никуда не денется — сессия остаётся на месте, чтобы
@@ -782,7 +791,12 @@ const InventoryScreen = (() => {
       }
     } finally {
       const again = document.getElementById("inventory-finish");
-      if (again) { again.disabled = false; again.textContent = "Завершить"; }
+      if (again) {
+        again.disabled = false;
+        again.textContent = "Завершить";
+        again.classList.remove("btn--busy");
+        again.removeAttribute("aria-busy");
+      }
     }
   }
 

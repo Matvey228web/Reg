@@ -7,50 +7,89 @@ const StaffScreen = (() => {
   }
 
   let iAmOwner = false;
+  let people = [];   // список, как он показан сейчас
+  const CACHE = "staff";
+  let edits = 0;     // сколько своих правок было — см. loadList
 
-  async function loadList() {
+  // Список живёт в кэше, как каталог и заказы (catalog.js loadList): экран
+  // рисуется сразу из прошлого раза, свежий список приходит молча.
+  async function loadList({ force = false } = {}) {
     const list = document.getElementById("staff-list");
-    list.innerHTML = skeleton(3);
+    const cached = Cache.items(CACHE);
+    if (cached) render(cached);
+    if (!force && cached && Cache.isFresh(CACHE)) return;
+    if (!cached) list.innerHTML = skeleton(3);
+    const seq = edits;
     try {
-      const staffList = await apiPost("/staff/list", {});
-      if (!staffList.length) {
-        list.innerHTML = `<p class="empty">Сотрудников пока нет</p>`;
-        return;
-      }
-      const me = mySession();
-      // Кто главный, решает сервер. Старый бэкенд этого поля не отдаёт — тогда
-      // считаем, что главных нет, и лишних кнопок не рисуем.
-      iAmOwner = staffList.some((s) => s.is_owner && String(s.staff_id) === String(me.staff_id));
-      document.getElementById("staff-add-toggle").style.display = iAmOwner ? "" : "none";
-      document.getElementById("staff-owner-hint").innerHTML = iAmOwner
-        ? `<p class="hint">Только вы заводите и удаляете сотрудников. Эту роль нельзя удалить —
-  только передать.</p>`
-        : `<p class="hint">Заводить и удалять сотрудников может только главный
-           администратор.</p>`;
-
-      list.innerHTML = "";
-      staffList.forEach((s) => {
-        list.insertAdjacentHTML("beforeend", cardHtml(s, me));
-      });
-
-      list.querySelectorAll("[data-toggle-active]").forEach((btn) => {
-        btn.addEventListener("click", () => toggleActive(btn.dataset.toggleActive, btn.dataset.active !== "true"));
-      });
-      list.querySelectorAll("[data-reset-pin]").forEach((btn) => {
-        btn.addEventListener("click", () => resetPin(btn.dataset.resetPin, btn.dataset.name));
-      });
-      list.querySelectorAll("[data-delete]").forEach((btn) => {
-        btn.addEventListener("click", () => confirmDelete(JSON.parse(btn.dataset.person)));
-      });
-      list.querySelectorAll("[data-set-role]").forEach((btn) => {
-        btn.addEventListener("click", () => setRole(JSON.parse(btn.dataset.person), btn.dataset.setRole));
-      });
-      list.querySelectorAll("[data-transfer]").forEach((btn) => {
-        btn.addEventListener("click", () => confirmTransfer(JSON.parse(btn.dataset.person)));
-      });
+      const fresh = await Cache.load(CACHE, "/staff/list", {}, { fresh: force });
+      // Пока список шёл, здесь же что-то поменяли: ответ это изменение не
+      // видел и вернул бы старое. Оставляем то, что на экране.
+      if (seq !== edits) { Cache.replace(CACHE, people); return; }
+      // Открыта форма сброса PIN или набирается новый сотрудник — не мешаем.
+      if (!isTyping("#screen-staff")) render(fresh);
     } catch (err) {
-      list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      if (!cached) list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      else showError("Не удалось обновить список: " + err.message);
     }
+  }
+
+  // Правка своими руками: и экран, и кэш — без нового запроса на 6–9 секунд.
+  // Возраст кэша не трогаем: остальные строки свежее не стали.
+  function commit(next) {
+    edits++;
+    if (!Cache.replace(CACHE, next)) Cache.set(CACHE, next);
+    render(next);
+  }
+
+  function patchPerson(staffId, changes) {
+    return people.map((p) => String(p.staff_id) === String(staffId) ? { ...p, ...changes } : p);
+  }
+
+  function showError(message) {
+    const slot = ensureSlot("staff-error", "staff-list");
+    if (slot) slot.innerHTML = message ? `<div class="error-box">${escapeHtml(message)}</div>` : "";
+  }
+
+  function showDone(text) {
+    showError("");
+    showStatusLine("staff-status", text, { before: "staff-list" });
+  }
+
+  function render(staffList) {
+    const list = document.getElementById("staff-list");
+    people = staffList;
+    if (!staffList.length) {
+      list.innerHTML = `<p class="empty">Сотрудников пока нет</p>`;
+      return;
+    }
+    const me = mySession();
+    // Кто главный, решает сервер. Старый бэкенд этого поля не отдаёт — тогда
+    // считаем, что главных нет, и лишних кнопок не рисуем.
+    iAmOwner = staffList.some((s) => s.is_owner && String(s.staff_id) === String(me.staff_id));
+    document.getElementById("staff-add-toggle").style.display = iAmOwner ? "" : "none";
+    document.getElementById("staff-owner-hint").innerHTML = iAmOwner
+      ? `<p class="hint">Только вы заводите и удаляете сотрудников. Эту роль нельзя удалить —
+  только передать.</p>`
+      : `<p class="hint">Заводить и удалять сотрудников может только главный
+         администратор.</p>`;
+
+    list.innerHTML = staffList.map((s) => cardHtml(s, me)).join("");
+
+    list.querySelectorAll("[data-toggle-active]").forEach((btn) => {
+      btn.addEventListener("click", () => toggleActive(btn.dataset.toggleActive, btn.dataset.active !== "true", btn));
+    });
+    list.querySelectorAll("[data-reset-pin]").forEach((btn) => {
+      btn.addEventListener("click", () => resetPin(btn.dataset.resetPin, btn.dataset.name));
+    });
+    list.querySelectorAll("[data-delete]").forEach((btn) => {
+      btn.addEventListener("click", () => confirmDelete(JSON.parse(btn.dataset.person), btn));
+    });
+    list.querySelectorAll("[data-set-role]").forEach((btn) => {
+      btn.addEventListener("click", () => setRole(JSON.parse(btn.dataset.person), btn.dataset.setRole, btn));
+    });
+    list.querySelectorAll("[data-transfer]").forEach((btn) => {
+      btn.addEventListener("click", () => confirmTransfer(JSON.parse(btn.dataset.person), btn));
+    });
   }
 
   // Удаление — обычная кнопка, а не свайп. Свайп на складе не находят: жест
@@ -94,7 +133,9 @@ const StaffScreen = (() => {
 
   // Удаление необратимо, поэтому спрашиваем. История при этом не пострадает:
   // в журнале рядом с номером сотрудника хранится его имя.
-  function confirmDelete(person) {
+  // Не оптимистично: удалённого не вернуть, и показывать «удалён» раньше,
+  // чем таблица согласилась, значит обещать то, чего ещё нет.
+  function confirmDelete(person, btn) {
     TG.confirmDestructive(
       `Удалить ${person.full_name}?`,
       "Войти он больше не сможет. Записи в журнале выдач останутся — там " +
@@ -102,62 +143,80 @@ const StaffScreen = (() => {
       "Удалить",
       async (yes) => {
         if (!yes) return;
+        const restore = busyButton(btn, "Удаляем…");
         try {
           const res = await apiPost("/staff/delete", { staff_id: Number(person.staff_id) });
           TG.hapticSuccess();
+          commit(people.filter((p) => String(p.staff_id) !== String(person.staff_id)));
           // Называем того, кого удалили, по имени: это единственный способ
           // заметить, если удалился не тот.
-          TG.showAlert("Удалён: " + ((res && res.full_name) || person.full_name));
-          loadList();
+          showDone("Удалён: " + ((res && res.full_name) || person.full_name));
         } catch (err) {
           TG.hapticError();
-          TG.showAlert(err.message);
+          restore();
+          showError(err.message);
         }
       });
   }
 
-  async function setRole(person, role) {
+  // Роль и активность — оптимистично, как setSection в models.js: карточка
+  // меняется сразу, а откажет таблица — возвращаем, как было, и пишем почему.
+  async function optimistic(staffId, changes, btn, busyText, endpoint, body, doneText) {
+    const before = people;
+    const restore = busyButton(btn, busyText);
+    commit(patchPerson(staffId, changes));
+    TG.hapticSuccess();
     try {
-      await apiPost("/staff/set-role", { staff_id: Number(person.staff_id), role });
-      TG.hapticSuccess();
-      loadList();
+      await apiPost(endpoint, body);
+      showDone(doneText);
     } catch (err) {
       TG.hapticError();
-      TG.showAlert(err.message);
+      restore();
+      commit(before);
+      showError(err.message);
     }
+  }
+
+  function setRole(person, role, btn) {
+    optimistic(person.staff_id, { role }, btn, "Меняем…", "/staff/set-role",
+      { staff_id: Number(person.staff_id), role },
+      `${person.full_name}: ${role === "Admin" ? "теперь администратор" : "теперь сотрудник склада"}`);
   }
 
   // Передача главных прав — единственный способ перестать быть главным, и
   // отменить её сможет только тот, кому передали. Поэтому спрашиваем прямо.
-  function confirmTransfer(person) {
+  function confirmTransfer(person, btn) {
     TG.showConfirm(
       `Передать главные права: ${person.full_name}? После этого заводить и ` +
       `удалять сотрудников будет он, а не вы. Вернуть права сможет только он.`,
       async (yes) => {
         if (!yes) return;
+        const restore = busyButton(btn, "Передаём…");
         try {
           await apiPost("/staff/transfer-owner", { staff_id: Number(person.staff_id) });
           TG.hapticSuccess();
-          TG.showAlert("Главный администратор теперь " + person.full_name);
           const session = Auth.getSession();
           if (session) Auth.setSession({ ...session, is_owner: false });
-          loadList();
+          // Как в handleStaffTransferOwner: новый главный — администратор,
+          // прежний главным быть перестал.
+          commit(people.map((p) => String(p.staff_id) === String(person.staff_id)
+            ? { ...p, is_owner: true, role: "Admin" }
+            : { ...p, is_owner: false }));
+          resetAddForm();
+          showDone("Главный администратор теперь " + person.full_name);
         } catch (err) {
           TG.hapticError();
-          TG.showAlert(err.message);
+          restore();
+          showError(err.message);
         }
       });
   }
 
-  async function toggleActive(staffId, nextActive) {
-    try {
-      await apiPost("/staff/set-active", { staff_id: Number(staffId), active: nextActive });
-      TG.hapticSuccess();
-      loadList();
-    } catch (err) {
-      TG.hapticError();
-      TG.showAlert(err.message);
-    }
+  function toggleActive(staffId, nextActive, btn) {
+    const person = people.find((p) => String(p.staff_id) === String(staffId)) || {};
+    optimistic(staffId, { active: nextActive }, btn, nextActive ? "Включаем…" : "Отключаем…",
+      "/staff/set-active", { staff_id: Number(staffId), active: nextActive },
+      `${person.full_name || "Сотрудник"}: ${nextActive ? "включён" : "отключён"}`);
   }
 
   // Сброс PIN сотруднику. Нативного запроса ввода в Telegram нет (есть только
@@ -172,10 +231,10 @@ const StaffScreen = (() => {
       <div class="form-group form-group--inset">
         <div class="field">
           <label>Новый PIN</label>
-          <input type="password" inputmode="numeric" pattern="[0-9]*" class="pin-reset-input" />
+          <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" class="pin-reset-input" />
         </div>
       </div>
-      <p class="hint">Для ${escapeHtml(name)}, 4–6 цифр.</p>
+      <p class="hint">Для ${escapeHtml(name)}, 6 цифр.</p>
       <button class="btn pin-reset-save" style="width:auto;">Сохранить</button>
       <button class="btn btn--secondary pin-reset-cancel" style="width:auto;">Отмена</button>
       <div class="pin-reset-error"></div>`;
@@ -188,22 +247,20 @@ const StaffScreen = (() => {
     box.querySelector(".pin-reset-save").addEventListener("click", async () => {
       const pin = input.value.trim();
       err.innerHTML = "";
-      if (!/^\d{4,6}$/.test(pin)) {
-        err.innerHTML = `<div class="error-box">PIN — от 4 до 6 цифр</div>`;
+      if (!/^\d{6}$/.test(pin)) {
+        err.innerHTML = `<div class="error-box">PIN — ровно 6 цифр</div>`;
         return;
       }
-      const save = box.querySelector(".pin-reset-save");
-      save.disabled = true;
+      const restore = busyButton(box.querySelector(".pin-reset-save"));
       try {
         await apiPost("/staff/set-pin", { staff_id: Number(staffId), pin });
         TG.hapticSuccess();
         box.remove();
-        TG.showAlert(`PIN изменён. Передайте его ${name} — войти надо будет заново.`);
+        showDone(`PIN изменён. Передайте его ${name} — войти надо будет заново.`);
       } catch (e) {
         TG.hapticError();
+        restore();
         err.innerHTML = `<div class="error-box">${escapeHtml(e.message)}</div>`;
-      } finally {
-        save.disabled = false;
       }
     });
   }
@@ -227,23 +284,32 @@ const StaffScreen = (() => {
       showBoxError("staff-add-error", "Заполните имя, логин и PIN");
       return;
     }
-    const btn = document.getElementById("new-staff-submit");
-    btn.disabled = true;
+    if (!/^\d{6}$/.test(pin)) {
+      showBoxError("staff-add-error", "PIN — ровно 6 цифр");
+      return;
+    }
+    const restore = busyButton(document.getElementById("new-staff-submit"), "Заводим…");
     try {
-      await apiPost("/staff/create", { full_name, login, pin, role });
+      const res = await apiPost("/staff/create", { full_name, login, pin, role });
       TG.hapticSuccess();
       resetAddForm();
-      loadList();
+      // Сервер вернул номер, остальное мы и так знаем (handleStaffCreate).
+      commit(people.concat([{
+        staff_id: res && res.staff_id, full_name, login, role, active: true, is_owner: false,
+      }]));
+      showDone("Заведён: " + full_name);
     } catch (err) {
       TG.hapticError();
       showBoxError("staff-add-error", err.message);
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
   function onShow() {
     resetAddForm();
+    showError("");
+    showStatusLine("staff-status", "");
     loadList();
   }
 
@@ -253,6 +319,7 @@ const StaffScreen = (() => {
       form.style.display = form.style.display === "none" ? "block" : "none";
     });
     document.getElementById("new-staff-submit").addEventListener("click", submitNewStaff);
+    Pull.register("staff", () => loadList({ force: true }));
     Router.register("staff", { onShow });
   }
 

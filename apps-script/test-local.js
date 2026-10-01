@@ -606,43 +606,48 @@ check('данные Clients не затёрты', dumpSheet('Clients').length ==
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
 console.log('\n== bootstrap первого администратора ==');
+// PIN короче шести цифр не принимается и при самозагрузке — и попытка не
+// должна «израсходовать» её: отметка bootstrap_done ставится только при успехе.
 let r = call('/staff/create', { full_name: 'Матвей', login: 'Matvey', pin: '4321' });
+check('bootstrap с 4-значным PIN отклонён', r.status === 400, r);
+check('...и самозагрузка не израсходована', !metaGet('bootstrap_done') && dumpSheet('Staff').length === 1);
+r = call('/staff/create', { full_name: 'Матвей', login: 'Matvey', pin: '432143' });
 check('создан без токена', r.ok === true, r);
 check('staff_id = 1', r.data && r.data.staff_id === 1, r.data);
 const staffRow = dumpSheet('Staff')[1];
 check('роль принудительно Admin', staffRow[SCHEMA.Staff.indexOf('role')] === 'Admin', staffRow);
 const storedPin = staffRow[SCHEMA.Staff.indexOf('pin_hash')];
-check('PIN сохранён не в открытом виде', storedPin !== '4321' && !/4321/.test(storedPin), storedPin);
+check('PIN сохранён не в открытом виде', storedPin !== '432143' && !/432143/.test(storedPin), storedPin);
 // Голый SHA-256 от четырёх цифр подбирается перебором десяти тысяч вариантов
 // за секунды, поэтому в таблице его быть не должно.
 check('PIN не голый SHA-256',
-  storedPin !== crypto.createHash('sha256').update('4321').digest('hex'), storedPin);
+  storedPin !== crypto.createHash('sha256').update('432143').digest('hex'), storedPin);
 check('у PIN есть соль и число повторов',
   /^v2\$\d+\$[0-9a-f]{32}\$[0-9a-f]{64}$/.test(storedPin), storedPin);
 
 console.log('\n== bootstrap закрывается после первой записи ==');
-r = call('/staff/create', { full_name: 'Чужой', login: 'hacker', pin: '0000' });
+r = call('/staff/create', { full_name: 'Чужой', login: 'hacker', pin: '000000' });
 check('второй bootstrap без токена отклонён', r.ok === false && r.status === 403, r);
 
 console.log('\n== вход ==');
-r = call('/auth/login', { login: 'matvey', pin: '4321' });   // намеренно строчными
+r = call('/auth/login', { login: 'matvey', pin: '432143' });   // намеренно строчными
 check('логин регистронезависимый', r.ok === true, r);
 const token = r.ok ? r.data.token : null;
 check('вернулась роль Admin', r.ok && r.data.role === 'Admin');
-r = call('/auth/login', { login: 'Matvey', pin: '9999' });
+r = call('/auth/login', { login: 'Matvey', pin: '999999' });
 check('неверный PIN отклонён', r.ok === false && r.status === 401, r);
 
 console.log('\n== добавление сотрудника администратором ==');
-r = call('/staff/create', { full_name: 'Иван', login: 'ivan', pin: '1111', role: 'Warehouse Staff' }, token);
+r = call('/staff/create', { full_name: 'Иван', login: 'ivan', pin: '111111', role: 'Warehouse Staff' }, token);
 check('сотрудник создан', r.ok === true && r.data.staff_id === 2, r);
-r = call('/staff/create', { full_name: 'Дубль', login: 'IVAN', pin: '2222' }, token);
+r = call('/staff/create', { full_name: 'Дубль', login: 'IVAN', pin: '222222' }, token);
 check('дубль логина отклонён (409)', r.ok === false && r.status === 409, r);
 r = call('/staff/list', {}, token);
 check('в списке 2 сотрудника', r.ok && r.data.length === 2, r.data);
 check('pin_hash не утекает в /staff/list', r.ok && r.data.every(s => s.pin_hash === undefined));
 
 console.log('\n== не-админ не может управлять сотрудниками ==');
-const ivanLogin = call('/auth/login', { login: 'ivan', pin: '1111' });
+const ivanLogin = call('/auth/login', { login: 'ivan', pin: '111111' });
 const ivanToken = ivanLogin.ok ? ivanLogin.data.token : null;
 r = call('/staff/list', {}, ivanToken);
 check('сотруднику склада отказано (403)', r.ok === false && r.status === 403, r);
@@ -707,7 +712,7 @@ check('фильтр дефектов работает', r.ok && r.data.length ==
 console.log('\n== отключение сотрудника ==');
 r = call('/staff/set-active', { staff_id: 2, active: false }, token);
 check('сотрудник отключён', r.ok === true, r);
-r = call('/auth/login', { login: 'ivan', pin: '1111' });
+r = call('/auth/login', { login: 'ivan', pin: '111111' });
 check('отключённый не может войти', r.ok === false && r.status === 401, r);
 // Отключение должно действовать сразу, а не когда истечёт срок сессии: иначе
 // человек с уже открытым приложением продолжает работать.
@@ -911,7 +916,7 @@ check('отметка bootstrap_done уцелела после перезали�
 check('сотрудники перезаливку пережили',
   JSON.stringify(readRows(getSheet(SHEETS.STAFF)).map(x => x.staff_id)) === JSON.stringify(staffBefore),
   readRows(getSheet(SHEETS.STAFF)).map(x => x.staff_id));
-r = call('/staff/create', { full_name: 'Новый', login: 'newbie', pin: '3333' }, token);
+r = call('/staff/create', { full_name: 'Новый', login: 'newbie', pin: '333333' }, token);
 check('новому сотруднику достаётся свободный номер, а не номер работающего',
   r.ok && staffBefore.indexOf(r.data.staff_id) === -1, [staffBefore, r.data]);
 r = call('/client/create', { client_name: 'Второй клиент', project_name: 'Тест' }, token);
@@ -954,37 +959,47 @@ check('...и предмет сразу доступен снова', status(cIte
 
 console.log('\n== смена PIN ==');
 const petrId = call('/staff/create',
-  { full_name: 'Пётр', login: 'petr', pin: '1234', role: 'Warehouse Staff' }, token).data.staff_id;
-let petrToken = call('/auth/login', { login: 'petr', pin: '1234' }).data.token;
+  { full_name: 'Пётр', login: 'petr', pin: '123412', role: 'Warehouse Staff' }, token).data.staff_id;
+let petrToken = call('/auth/login', { login: 'petr', pin: '123412' }).data.token;
 check('слишком короткий PIN отклонён',
-  call('/staff/set-pin', { pin: '12', current_pin: '1234' }, petrToken).status === 400);
+  call('/staff/set-pin', { pin: '12', current_pin: '123412' }, petrToken).status === 400);
+check('5-значный новый PIN отклонён',
+  call('/staff/set-pin', { pin: '12345', current_pin: '123412' }, petrToken).status === 400);
+check('7-значный новый PIN отклонён',
+  call('/staff/set-pin', { pin: '1234567', current_pin: '123412' }, petrToken).status === 400);
+check('администратор тоже не сбросит на 5 цифр',
+  call('/staff/set-pin', { staff_id: petrId, pin: '12345' }, token).status === 400);
+check('заводить сотрудника с 4-значным PIN нельзя',
+  call('/staff/create', { full_name: 'Короткий', login: 'shortpin', pin: '1234' }, token).status === 400);
+check('...и строка не появилась',
+  !readRows(getSheet(SHEETS.STAFF)).some((x) => x.login === 'shortpin'));
 // 403, а не 401: сессия цела, ошибся человек — иначе клиент выбросил бы его на вход
 check('неверный текущий PIN отклонён, но сессия не рушится',
-  call('/staff/set-pin', { pin: '5555', current_pin: '0000' }, petrToken).status === 403);
+  call('/staff/set-pin', { pin: '555555', current_pin: '000000' }, petrToken).status === 403);
 check('...и токен после этого ещё живой', call('/equipment/list', {}, petrToken).ok === true);
-r = call('/staff/set-pin', { pin: '5555', current_pin: '1234' }, petrToken);
+r = call('/staff/set-pin', { pin: '555555', current_pin: '123412' }, petrToken);
 check('свой PIN сменён', r.ok === true, r);
 check('взамен выдан новый токен, человек не вылетает из приложения', r.ok && !!r.data.token, r.data);
 check('старый токен больше не действует', call('/equipment/list', {}, petrToken).status === 401);
-check('старый PIN не пускает', call('/auth/login', { login: 'petr', pin: '1234' }).status === 401);
-petrToken = call('/auth/login', { login: 'petr', pin: '5555' }).data.token;
+check('старый PIN не пускает', call('/auth/login', { login: 'petr', pin: '123412' }).status === 401);
+petrToken = call('/auth/login', { login: 'petr', pin: '555555' }).data.token;
 check('новый PIN пускает', !!petrToken);
 
-r = call('/staff/set-pin', { staff_id: petrId, pin: '7777' }, token);
+r = call('/staff/set-pin', { staff_id: petrId, pin: '777777' }, token);
 check('администратор сбрасывает PIN сотруднику без текущего PIN', r.ok === true, r);
 check('сессия сотрудника при сбросе обнуляется', call('/equipment/list', {}, petrToken).status === 401);
-petrToken = call('/auth/login', { login: 'petr', pin: '7777' }).data.token;
+petrToken = call('/auth/login', { login: 'petr', pin: '777777' }).data.token;
 check('сотрудник склада не может менять PIN другому',
-  call('/staff/set-pin', { staff_id: 1, pin: '9999' }, petrToken).status === 403);
+  call('/staff/set-pin', { staff_id: 1, pin: '999999' }, petrToken).status === 403);
 
 console.log('\n== защита от перебора PIN ==');
-for (let i = 0; i < 5; i++) call('/auth/login', { login: 'petr', pin: '0000' });
-r = call('/auth/login', { login: 'petr', pin: '7777' });
+for (let i = 0; i < 5; i++) call('/auth/login', { login: 'petr', pin: '000000' });
+r = call('/auth/login', { login: 'petr', pin: '777777' });
 check('после 5 промахов не пускает даже верный PIN', r.ok === false && r.status === 429, r);
 const petrRow = () => readRows(getSheet(SHEETS.STAFF)).filter(x => x.login === 'petr')[0];
 updateRow(getSheet(SHEETS.STAFF), petrRow().__row,
   { locked_until: new Date(Date.now() - 1000).toISOString() });
-r = call('/auth/login', { login: 'petr', pin: '7777' });
+r = call('/auth/login', { login: 'petr', pin: '777777' });
 check('когда блокировка истекла, вход снова работает', r.ok === true, r);
 check('счётчик промахов обнулён удачным входом', Number(petrRow().failed_attempts || 0) === 0,
   petrRow().failed_attempts);
@@ -1123,15 +1138,30 @@ check('настройки отдаются вошедшему', cfg.ok === true,
 check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
   cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
 check('категории приходят вместе с настройками', cfg.data.categories.length === 14);
+// Кнопка «Создать недостающие вкладки»: видна, только пока таблица отстаёт
+// от схемы в коде.
+check('после setupSheets таблица не отстаёт — кнопку не показываем',
+  cfg.data.maintenance.schema_outdated === false, cfg.data.maintenance);
+metaSet('schema_sig', '');
+check('отметки нет (таблица заведена до неё) — кнопку показываем',
+  call('/settings/get', {}, token).data.maintenance.schema_outdated === true);
+SCHEMA.__probe = ['x'];
+metaSet('schema_sig', schemaSignature());
+delete SCHEMA.__probe;
+check('в схеме появилась вкладка или колонка — кнопку показываем',
+  call('/settings/get', {}, token).data.maintenance.schema_outdated === true);
+check('/maintenance setup ставит отметку — кнопка уходит',
+  call('/maintenance', { action: 'setup' }, token).ok === true &&
+  call('/settings/get', {}, token).data.maintenance.schema_outdated === false);
 // Отдельная учётка: повторный вход аннулирует прежний токен, и войди мы здесь
 // под администратором — сломали бы сессию, которой пользуются проверки ниже.
-call('/staff/create', { full_name: 'Проба', login: 'probe', pin: '9876', role: 'Warehouse Staff' }, token);
-const probeLogin = call('/auth/login', { login: 'probe', pin: '9876' });
+call('/staff/create', { full_name: 'Проба', login: 'probe', pin: '987698', role: 'Warehouse Staff' }, token);
+const probeLogin = call('/auth/login', { login: 'probe', pin: '987698' });
 check('настройки и категории приезжают уже при входе',
   !!probeLogin.data.settings && !!probeLogin.data.categories, probeLogin.data);
 const probeToken = probeLogin.data.token;
 check('повторный вход выкидывает прежнюю сессию',
-  !!call('/auth/login', { login: 'probe', pin: '9876' }).data.token &&
+  !!call('/auth/login', { login: 'probe', pin: '987698' }).data.token &&
   call('/equipment/list', {}, probeToken).status === 401);
 
 r = call('/settings/set', { settings: { max_login_attempts: 0 } }, token);
@@ -1177,8 +1207,8 @@ console.log('\n== удаление сотрудника ==');
 // выдавал технику.
 const delItem = call('/item/create', { name: 'Aputure 300x', category: 'LGT' }, token).data.item_id;
 const victim = call('/staff/create',
-  { full_name: 'Игорь Уволенный', login: 'igor', pin: '1212', role: 'Warehouse Staff' }, token).data;
-const victimToken = call('/auth/login', { login: 'igor', pin: '1212' }).data.token;
+  { full_name: 'Игорь Уволенный', login: 'igor', pin: '121212', role: 'Warehouse Staff' }, token).data;
+const victimToken = call('/auth/login', { login: 'igor', pin: '121212' }).data.token;
 call('/transaction/checkout', { item_id: delItem, client_id: clientId }, victimToken);
 call('/transaction/checkin', { item_id: delItem, has_defect: true,
   defect_description: 'Скол на корпусе', defect_severity: 'Minor' }, victimToken);
@@ -1197,7 +1227,7 @@ r = call('/staff/delete', { staff_id: victim.staff_id }, token);
 check('администратор удалил сотрудника', r.ok === true, r);
 check('сотрудник исчез из списка',
   call('/staff/list', {}, token).data.every(x => x.staff_id !== victim.staff_id));
-check('войти под удалённым нельзя', call('/auth/login', { login: 'igor', pin: '1212' }).status === 401);
+check('войти под удалённым нельзя', call('/auth/login', { login: 'igor', pin: '121212' }).status === 401);
 check('история после удаления по-прежнему называет имя, а не номер',
   readRows(getSheet(SHEETS.TRANSACTIONS)).some(t => t.staff_out_name === 'Игорь Уволенный'));
 
@@ -1445,7 +1475,7 @@ console.log('\n== главный администратор ==');
 // а удаление обязано убирать именно того, кого выбрали.
 // Повторный вход выдаёт новый токен и гасит прежний, поэтому дальше работаем
 // именно им.
-const ownerLogin = call('/auth/login', { login: 'matvey', pin: '4321' }).data;
+const ownerLogin = call('/auth/login', { login: 'matvey', pin: '432143' }).data;
 check('вход сообщает, что вы главный', ownerLogin.is_owner === true, ownerLogin);
 const ownerToken = ownerLogin.token;
 r = call('/staff/list', {}, ownerToken);
@@ -1463,9 +1493,9 @@ check('главного нельзя понизить', r.ok === false && r.stat
 
 // Трое подряд: удаляем среднего и смотрим, что соседи целы. Именно здесь
 // вылезал бы сдвиг строк — «удалил другого, а отключился сам».
-call('/staff/create', { full_name: 'Первый', login: 'one', pin: '1111' }, ownerToken);
-call('/staff/create', { full_name: 'Второй', login: 'two', pin: '2222' }, ownerToken);
-call('/staff/create', { full_name: 'Третий', login: 'three', pin: '3333' }, ownerToken);
+call('/staff/create', { full_name: 'Первый', login: 'one', pin: '111111' }, ownerToken);
+call('/staff/create', { full_name: 'Второй', login: 'two', pin: '222222' }, ownerToken);
+call('/staff/create', { full_name: 'Третий', login: 'three', pin: '333333' }, ownerToken);
 const two = call('/staff/list', {}, ownerToken).data.filter(s2 => s2.login === 'two')[0];
 r = call('/staff/delete', { staff_id: two.staff_id }, ownerToken);
 check('удалён именно выбранный', r.ok === true && r.data.full_name === 'Второй', r);
@@ -1481,13 +1511,13 @@ check('журнал выдач не пострадал: имена в нём о�
 console.log('\n== права обычного администратора ==');
 call('/staff/set-role', { staff_id: call('/staff/list', {}, ownerToken).data
   .filter(s2 => s2.login === 'one')[0].staff_id, role: 'Admin' }, ownerToken);
-const oneToken = call('/auth/login', { login: 'one', pin: '1111' }).data.token;
+const oneToken = call('/auth/login', { login: 'one', pin: '111111' }).data.token;
 check('обычный админ сотрудников не заводит',
-  call('/staff/create', { full_name: 'Никто', login: 'nobody', pin: '5555' }, oneToken).status === 403);
+  call('/staff/create', { full_name: 'Никто', login: 'nobody', pin: '555555' }, oneToken).status === 403);
 check('обычный админ сотрудников не удаляет',
   call('/staff/delete', { staff_id: 3 }, oneToken).status === 403);
 check('обычный админ не сбрасывает PIN главному',
-  call('/staff/set-pin', { staff_id: 1, pin: '9999' }, oneToken).status === 409);
+  call('/staff/set-pin', { staff_id: 1, pin: '999999' }, oneToken).status === 409);
 check('обычный админ настройки менять по-прежнему может',
   call('/settings/set', { settings: { session_ttl_hours: 12 } }, oneToken).ok === true);
 
@@ -1510,10 +1540,10 @@ check('новый главный стал администратором',
 check('прежний главный остался администратором',
   owners.filter(s2 => String(s2.login).toLowerCase() === 'matvey')[0].role === 'Admin', owners);
 check('прежний главный сотрудников больше не заводит',
-  call('/staff/create', { full_name: 'Никто', login: 'nobody', pin: '5555' }, ownerToken).status === 403);
-const threeToken = call('/auth/login', { login: 'three', pin: '3333' }).data.token;
+  call('/staff/create', { full_name: 'Никто', login: 'nobody', pin: '555555' }, ownerToken).status === 403);
+const threeToken = call('/auth/login', { login: 'three', pin: '333333' }).data.token;
 check('новый главный сотрудников заводит',
-  call('/staff/create', { full_name: 'Новичок', login: 'rookie', pin: '6666' }, threeToken).ok === true);
+  call('/staff/create', { full_name: 'Новичок', login: 'rookie', pin: '666666' }, threeToken).ok === true);
 check('теперь нельзя удалить нового главного',
   call('/staff/delete', { staff_id: three.staff_id }, threeToken).status === 409);
 // Возвращаем права назад, чтобы дальнейшие проверки шли от прежнего владельца.
@@ -1735,7 +1765,7 @@ console.log('\n== самозагрузка первого администрат
 const staffSheet = getSheet(SHEETS.STAFF);
 staffSheet.getRange(2, 1, staffSheet.getLastRow() - 1, staffSheet.getLastColumn()).clearContent();
 check('лист Staff пуст', readRows(staffSheet).length === 0, readRows(staffSheet).length);
-r = call('/staff/create', { full_name: 'Чужой', login: 'intruder', pin: '0000' });
+r = call('/staff/create', { full_name: 'Чужой', login: 'intruder', pin: '000000' });
 check('на пустом Staff администратора без токена не создать', r.ok === false && r.status === 403, r);
 check('в отказе сказано, как владелец таблицы вернёт доступ',
   /bootstrap_done/.test(String(r.error)), r.error);
@@ -1743,14 +1773,14 @@ check('в отказе сказано, как владелец таблицы в
 const flagRow = readRows(getSheet(SHEETS.META)).filter(m => m.key === 'bootstrap_done')[0];
 check('отметка bootstrap_done стоит в Meta', !!flagRow, flagRow);
 updateRow(getSheet(SHEETS.META), flagRow.__row, { key: '', value: '' });
-r = call('/staff/create', { full_name: 'Матвей', login: 'matvey', pin: '4321' });
+r = call('/staff/create', { full_name: 'Матвей', login: 'matvey', pin: '432143' });
 check('после удаления отметки вручную самозагрузка снова доступна', r.ok === true, r);
 
 console.log('\n== перенос модели в другую категорию ==');
 // Номер вещи начинается с номера категории, поэтому переносим с перенумерацией.
 // Главное, что здесь проверяется: у вещи не отвязывается история — на номер
 // ссылаются журнал выдач, дефекты и сверки.
-const mvLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const mvLogin = call('/auth/login', { login: 'matvey', pin: '432143' });
 const mvToken = mvLogin.ok ? mvLogin.data.token : null;
 check('вход перед переносом', mvLogin.ok === true, mvLogin);
 
@@ -1844,10 +1874,10 @@ check('в категорию с другим способом учёта — о�
 // Своего сотрудника, а не «ивана» из проверок выше: его токен к этому месту
 // уже отозван, и проверка в if молча не выполнялась — то есть её не было.
 const mvStaffNew = call('/staff/create', {
-  full_name: 'Складмен Переноса', login: 'movecheck', pin: '5555', role: 'Warehouse Staff',
+  full_name: 'Складмен Переноса', login: 'movecheck', pin: '555555', role: 'Warehouse Staff',
 }, mvToken);
 check('сотрудник склада для проверки прав заведён', mvStaffNew.ok === true, mvStaffNew);
-const mvStaffLogin = call('/auth/login', { login: 'movecheck', pin: '5555' });
+const mvStaffLogin = call('/auth/login', { login: 'movecheck', pin: '555555' });
 check('он вошёл', mvStaffLogin.ok === true, mvStaffLogin);
 r = call('/model/move', { category: 'LEN', model_code: '01', to_category: 'CAM' },
          mvStaffLogin.ok ? mvStaffLogin.data.token : 'нет-токена');
@@ -1879,7 +1909,7 @@ console.log('\n== этикетки в чат не уходят ==');
 // объяснением, куда теперь нажимать, а в Telegram не уходит ничего.
 // Входим заново: к этому месту прежние токены уже отозваны сменой PIN, выходом
 // и чисткой листа Staff в проверках выше.
-const labelLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const labelLogin = call('/auth/login', { login: 'matvey', pin: '432143' });
 check('вход перед отправкой этикеток', labelLogin.ok === true, labelLogin);
 const labelToken = labelLogin.ok ? labelLogin.data.token : null;
 const png = Buffer.from('PNG-заглушка').toString('base64');
@@ -1905,7 +1935,7 @@ console.log('\n== исправление номеров у вещи ==');
 // здесь проверяется: номер вещи не трогается, а дубль номера не проходит —
 // по этим номерам ищут технику, и повторный импорт считает одинаковые номера
 // одной и той же вещью.
-const numLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const numLogin = call('/auth/login', { login: 'matvey', pin: '432143' });
 const numToken = numLogin.ok ? numLogin.data.token : null;
 check('вход перед правкой номеров', numLogin.ok === true, numLogin);
 
@@ -1972,10 +2002,10 @@ check('полке номер не вписать',
   num.ok === false && num.status === 409 && /количеством/.test(String(num.error)), num);
 
 const numStaff = call('/staff/create', {
-  full_name: 'Складмен Номеров', login: 'numcheck', pin: '7777', role: 'Warehouse Staff',
+  full_name: 'Складмен Номеров', login: 'numcheck', pin: '777777', role: 'Warehouse Staff',
 }, numToken);
 check('сотрудник склада для проверки прав заведён', numStaff.ok === true, numStaff);
-const numStaffLogin = call('/auth/login', { login: 'numcheck', pin: '7777' });
+const numStaffLogin = call('/auth/login', { login: 'numcheck', pin: '777777' });
 check('он вошёл', numStaffLogin.ok === true, numStaffLogin);
 num = call('/item/numbers', { item_id: numId, serial_number: 'SN-ЧУЖОЙ' },
            numStaffLogin.ok ? numStaffLogin.data.token : 'нет-токена');
@@ -2074,10 +2104,10 @@ check('в справочнике и у вещей осталось канони�
 
 // Категория — только главному администратору.
 const updAdmin = call('/staff/create', {
-  full_name: 'Админ Правки', login: 'updadmin', pin: '8888', role: 'Admin',
+  full_name: 'Админ Правки', login: 'updadmin', pin: '888888', role: 'Admin',
 }, numToken);
 check('обычный администратор заведён', updAdmin.ok === true, updAdmin);
-const updOne = call('/auth/login', { login: 'updadmin', pin: '8888' });
+const updOne = call('/auth/login', { login: 'updadmin', pin: '888888' });
 check('обычный администратор вошёл', updOne.ok === true && updOne.data.role === 'Admin' &&
   !updOne.data.is_owner, updOne);
 upd = call('/item/update', { item_id: numId, category: 'LEN' }, updOne.ok ? updOne.data.token : '');
@@ -2165,7 +2195,7 @@ console.log('\n== разделы витрины: КИНО и ФОТО ==');
 // Раздел — свойство модели, а не категории: объектив служит и кино, и фото.
 // Проверяем главное: незнакомое значение не записывается, пустое законно, и
 // неразмеченная модель не исчезает с витрины.
-const secLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const secLogin = call('/auth/login', { login: 'matvey', pin: '432143' });
 const secToken = secLogin.ok ? secLogin.data.token : null;
 check('вход перед разметкой', secLogin.ok === true, secLogin);
 
@@ -2217,10 +2247,10 @@ sec = call('/models/sections', { models: [] }, secToken);
 check('пустой список отклонён', sec.ok === false && sec.status === 400, sec);
 
 const secStaff = call('/staff/create', {
-  full_name: 'Складмен Разделов', login: 'seccheck', pin: '8888', role: 'Warehouse Staff',
+  full_name: 'Складмен Разделов', login: 'seccheck', pin: '888888', role: 'Warehouse Staff',
 }, secToken);
 check('сотрудник склада заведён', secStaff.ok === true, secStaff);
-const secStaffLogin = call('/auth/login', { login: 'seccheck', pin: '8888' });
+const secStaffLogin = call('/auth/login', { login: 'seccheck', pin: '888888' });
 sec = call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'CINE' }] },
            secStaffLogin.ok ? secStaffLogin.data.token : 'нет-токена');
 check('сотруднику склада разметка запрещена', sec.ok === false && sec.status === 403, sec);
@@ -2232,7 +2262,7 @@ check('публичный каталог отдаёт раздел',
   secPublic.ok ? secPublic.data.models[0] : secPublic);
 
 console.log('\n== заявка с сайта ==');
-const siteAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+const siteAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;
 const siteCat = call('/public/catalog', {}).data.models[0];
 function siteText(no, extra) {
   return [
@@ -2419,12 +2449,12 @@ call('/settings/set', { settings: { public_orders: 0 } }, siteAdmin);
 // добытые выше токены после него стали бы недействительны.
 console.log('\n== PIN в таблице ==');
 const pinCol = SCHEMA.Staff.indexOf('pin_hash');
-const pinAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+const pinAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;
 
 // Одинаковый PIN у двух человек не должен давать одинаковую строку: иначе по
 // таблице видно, у кого код совпадает, и один перебор вскрывает обоих.
-call('/staff/create', { full_name: 'Первый', login: 'pin_a', pin: '5150', role: 'Warehouse Staff' }, pinAdmin);
-call('/staff/create', { full_name: 'Второй', login: 'pin_b', pin: '5150', role: 'Warehouse Staff' }, pinAdmin);
+call('/staff/create', { full_name: 'Первый', login: 'pin_a', pin: '515051', role: 'Warehouse Staff' }, pinAdmin);
+call('/staff/create', { full_name: 'Второй', login: 'pin_b', pin: '515051', role: 'Warehouse Staff' }, pinAdmin);
 const pinRows = dumpSheet('Staff');
 const loginCol = SCHEMA.Staff.indexOf('login');
 const rowA = pinRows.filter((x) => x[loginCol] === 'pin_a')[0];
@@ -2432,11 +2462,12 @@ const rowB = pinRows.filter((x) => x[loginCol] === 'pin_b')[0];
 check('одинаковый PIN — разные строки в таблице',
   rowA && rowB && rowA[pinCol] !== rowB[pinCol], [rowA && rowA[pinCol], rowB && rowB[pinCol]]);
 check('оба входят со своим PIN',
-  call('/auth/login', { login: 'pin_a', pin: '5150' }).ok === true &&
-  call('/auth/login', { login: 'pin_b', pin: '5150' }).ok === true);
+  call('/auth/login', { login: 'pin_a', pin: '515051' }).ok === true &&
+  call('/auth/login', { login: 'pin_b', pin: '515051' }).ok === true);
 
-// В живой таблице PIN лежат в прежнем виде. После выкладки вход по ним обязан
-// работать и обязан тут же переписать запись по-новому.
+// В живой таблице PIN лежат в прежнем виде — и часто из четырёх цифр: правило
+// «ровно 6» действует только для нового PIN. Вход по старому обязан работать
+// и обязан тут же переписать запись по-новому.
 console.log('\n== старый формат PIN переезжает сам ==');
 const legacyRow = dumpSheet('Staff').filter((x) => x[loginCol] === 'pin_a')[0];
 legacyRow[pinCol] = crypto.createHash('sha256').update('5150').digest('hex');
@@ -2447,9 +2478,14 @@ check('тот же PIN по-прежнему пускает',
   call('/auth/login', { login: 'pin_a', pin: '5150' }).ok === true);
 check('чужой PIN не пускает',
   call('/auth/login', { login: 'pin_a', pin: '5151' }).status === 401);
+const legacyToken = call('/auth/login', { login: 'pin_a', pin: '5150' }).data.token;
+check('старый 4-значный PIN годится как текущий при смене на 6 цифр',
+  call('/staff/set-pin', { pin: '515099', current_pin: '5150' }, legacyToken).ok === true);
+check('после смены пускает новый 6-значный',
+  call('/auth/login', { login: 'pin_a', pin: '515099' }).ok === true);
 
 console.log('\n== выдача по заявке без скана ==');
-const issAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+const issAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;
 // Свой заказ, чтобы не тревожить те, на которых висят прежние проверки.
 const issModel = call('/models/list', {}, issAdmin).data
   .filter((m) => !categoryByQty(m.category))[0];
@@ -2484,6 +2520,140 @@ check('несопоставленную строку выдать нельзя',
 check('несуществующую строку тоже',
   call('/order/issue', { order_id: issOrder, line_no: 99 }, issAdmin).status === 404);
 
+console.log('\n== выдача строки целиком: один вход и один замок ==');
+// Строка на несколько предметов идёт одним проходом под одним замком, как
+// приём пачкой (/transaction/checkin-batch): вход, замок и выбор свободных —
+// один раз на запрос, а не на каждый предмет.
+const mFree = () => readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) =>
+  String(e.category) === String(issModel.category) &&
+  String(e.model_code) !== '' && Number(e.model_code) === Number(issModel.model_code) &&
+  e.status === 'Available').map((e) => String(e.item_id));
+while (mFree().length < 3) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const mOrderOf = (no, qty) => call('/order/create', {
+  order_no: no, student_name: 'Строкой Выдаев', student_phone: '+79990000004',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [{ line_no: 1, raw_name: issModel.model_name, category: issModel.category,
+            model_code: issModel.model_code, qty: qty }],
+}, issAdmin).data.order_id;
+// Счётчики: сколько раз вход, замок и пересборка акта случились за запрос.
+const spy = { auth: 0, lock: 0, rebuild: 0, onLock: null };
+const realCheckAuth = global.checkAuth, realRebuild = global.rebuildAct;
+const realLock = global.LockService.getScriptLock;
+global.checkAuth = function () { spy.auth++; return realCheckAuth.apply(this, arguments); };
+global.rebuildAct = function () { spy.rebuild++; return { skipped: 'spy' }; };
+global.LockService.getScriptLock = () => ({
+  waitLock() { spy.lock++; if (spy.onLock) { const f = spy.onLock; spy.onLock = null; f(); } },
+  releaseLock() {},
+});
+const spyReset = () => { spy.auth = 0; spy.lock = 0; spy.rebuild = 0; };
+const mTx = (id) => readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.order_id) === String(id));
+const mCard = (id) => call('/order/card', { order_id: id }, issAdmin).data;
+
+const want3 = mFree().slice(0, 3).sort();
+const mOrder = mOrderOf('LINE-3', 3);
+spyReset();
+r = call('/order/issue', { order_id: mOrder, line_no: 1 }, issAdmin);
+check('строка на три предмета выдана целиком', r.ok === true && r.data.issued.length === 3 && r.data.left === 0, r);
+check('ответ прежнего вида: issued [{item_id, qty}], left, order_id, line_no',
+  r.data.issued.every((i) => typeof i.item_id !== 'undefined' && i.qty === 1) &&
+  r.data.order_id === Number(mOrder) && r.data.line_no === 1, r.data);
+check('взяты свободные по порядку номеров',
+  r.data.issued.map((i) => String(i.item_id)).join(',') === want3.join(','), [r.data.issued, want3]);
+check('вход — один раз на запрос', spy.auth === 1, spy.auth);
+check('замок — один раз на запрос', spy.lock === 1, spy.lock);
+check('акт не пересобирался: всё легло в состав', spy.rebuild === 0, spy.rebuild);
+check('три записи журнала по строке 1, все с пометкой «без сканирования»',
+  mTx(mOrder).length === 3 && mTx(mOrder).every((t) => String(t.order_line) === '1' &&
+    /без сканирования/.test(t.notes) && t.status === 'Open'), mTx(mOrder));
+check('в строке «выдано 3 из 3», заказ выдан',
+  mCard(mOrder).items[0].issued_qty === 3 && mCard(mOrder).order.status === 'Issued', mCard(mOrder));
+check('предметы ушли со склада', want3.every((id) => !mFree().includes(id)));
+
+spyReset();
+r = call('/order/issue', { order_id: mOrder, line_no: 1 }, issAdmin);
+check('второе нажатие — 409, а не вторая выдача', r.ok === false && r.status === 409, r);
+check('второе нажатие ничего не записало', mTx(mOrder).length === 3 && mCard(mOrder).items[0].issued_qty === 3);
+
+// Свободных меньше, чем в строке: выдаём что есть, остаток — в left.
+while (mFree().length < 2) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const freeNow = mFree().length;
+const pOrder = mOrderOf('LINE-PART', freeNow + 2);
+r = call('/order/issue', { order_id: pOrder, line_no: 1 }, issAdmin);
+check('частичная выдача: выдано сколько свободно', r.ok === true && r.data.issued.length === freeNow, r);
+check('частичная выдача: остаток по строке в left', r.data.left === 2, r.data);
+check('частичная выдача: в строке «выдано N из N+2»',
+  mCard(pOrder).items[0].issued_qty === freeNow, mCard(pOrder).items[0]);
+r = call('/order/issue', { order_id: pOrder, line_no: 1 }, issAdmin);
+check('по остатку свободных нет — 409, лишнего не выдано',
+  r.ok === false && r.status === 409 && mTx(pOrder).length === freeNow, r);
+r = call('/order/issue', { order_id: pOrder, line_no: 1, qty: 3 }, issAdmin);
+check('просят больше остатка по строке — 409', r.ok === false && r.status === 409, r);
+
+// Выбор свободных — под замком. Пока запрос ждал замок, другой телефон забрал
+// один из предметов: запрос должен увидеть это и взять следующий свободный,
+// а не упасть на середине и не выдать чужое.
+for (let k = 0; k < 2; k++) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const raceFree = mFree().sort();
+const raceOrder = mOrderOf('LINE-RACE', 1);
+const otherOrder = mOrderOf('LINE-OTHER', 1);
+spy.onLock = () => {
+  // «Второй телефон» успел раньше: первый свободный уже на руках.
+  realCheckout(raceFree[0], otherOrder);
+};
+function realCheckout(itemId, orderId) {
+  checkoutUnderLock({ item_id: itemId, order_id: orderId, notes: 'другой телефон' },
+    { staff_id: 1, full_name: 'Другой' });
+}
+r = call('/order/issue', { order_id: raceOrder, line_no: 1 }, issAdmin);
+check('забранный другим предмет не выдан повторно',
+  r.ok === true && r.data.issued.length === 1 && String(r.data.issued[0].item_id) === raceFree[1], [r, raceFree]);
+check('у забранного предмета одна открытая выдача',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.item_id) === raceFree[0] && t.status === 'Open').length === 1);
+
+// Вне состава выдача по строке лечь не должна, но если легла — акт
+// пересобирается один раз на запрос, а не на каждый предмет.
+while (mFree().length < 3) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const offOrder = mOrderOf('LINE-OFF', 3);
+const realClaim = global.claimOrderLine;
+global.claimOrderLine = (oid, item, qty) => [{ line: 'off-order', qty: qty }];
+spyReset();
+r = call('/order/issue', { order_id: offOrder, line_no: 1 }, issAdmin);
+global.claimOrderLine = realClaim;
+check('выдача трёх вне состава прошла', r.ok === true && r.data.issued.length === 3, r);
+check('акт пересобран один раз на три предмета', spy.rebuild === 1, spy.rebuild);
+check('замок один и при пересборке', spy.lock === 1, spy.lock);
+
+// Одиночная выдача после выноса тела в checkoutUnderLock — по-прежнему
+// замок и вход на запрос и пересборка акта вне состава.
+const soloItem = call('/item/create', { name: issModel.model_name, category: issModel.category,
+  model_code: issModel.model_code }, issAdmin).data.item_id;
+const soloOrder = mOrderOf('LINE-SOLO', 1);
+global.claimOrderLine = (oid, item, qty) => [{ line: 'off-order', qty: qty }];
+spyReset();
+r = call('/transaction/checkout', { item_id: soloItem, order_id: soloOrder }, issAdmin);
+global.claimOrderLine = realClaim;
+check('одиночная выдача вне состава: ответ прежний', r.ok === true && r.data.order_line === 'off-order' &&
+  r.data.order_id === undefined && r.data.transaction_id, r);
+check('одиночная выдача: вход, замок и пересборка — по одному',
+  spy.auth === 1 && spy.lock === 1 && spy.rebuild === 1, spy);
+check('одиночная выдача по заказу ставит заказу «Issued»', mCard(soloOrder).order.status === 'Issued');
+
+global.checkAuth = realCheckAuth;
+global.rebuildAct = realRebuild;
+global.LockService.getScriptLock = realLock;
+
 console.log('\n== выдача количеством в счёт заказа ==');
 // «Выдано N из M» у позиции количеством: 10 мешков — это 10 в строке, а не 1.
 check('категория GEL учитывается количеством', categoryByQty('GEL') === true);
@@ -2514,6 +2684,84 @@ check('заказ закрылся, когда вернули всё',
   call('/order/card', { order_id: qtyOrder }, issAdmin).data.order.status === 'Returned');
 // Поштучная выдача по-прежнему +1 — выше, в «выдаче по заявке без скана».
 check('поштучная выдача по-прежнему +1', issCard.data.items[0].issued_qty === 1, issCard.data.items[0]);
+
+console.log('\n== приём всего заказа одним запросом ==');
+// «Принять всё» на карточке заказа — один вызов вместо запроса на позицию.
+// Сделано как одиночный приём выше: те же записи журнала и строки состава.
+const bModel = issModel;
+const bItem = () => call('/item/create',
+  { name: bModel.model_name, category: bModel.category, model_code: bModel.model_code }, issAdmin).data.item_id;
+const bA = bItem(), bB = bItem(), bC = bItem(), bD = bItem();
+const bGel = call('/item/create', { name: 'Скотч пачкой', category: 'GEL', qty: 20 }, issAdmin).data.item_id;
+const bGelRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(bGel))[0];
+const bOrder = call('/order/create', {
+  order_no: 'BATCH-1', student_name: 'Пачкой Принимаев', student_phone: '+79990000003',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [
+    { line_no: 1, raw_name: bModel.model_name, category: bModel.category, model_code: bModel.model_code, qty: 3 },
+    { line_no: 2, raw_name: 'Скотч', category: 'GEL', model_code: bGelRow.model_code, qty: 5 },
+  ],
+}, issAdmin).data.order_id;
+call('/transaction/checkout', { item_id: bA, order_id: bOrder }, issAdmin);
+call('/transaction/checkout', { item_id: bB, order_id: bOrder }, issAdmin);
+call('/transaction/checkout', { item_id: bD, order_id: bOrder }, issAdmin);
+call('/transaction/checkout', { item_id: bGel, order_id: bOrder, qty: 5 }, issAdmin);
+const bCard = () => call('/order/card', { order_id: bOrder }, issAdmin).data;
+check('до приёма заказ выдан, строки заняты',
+  bCard().order.status === 'Issued' && bCard().items.map((i) => i.issued_qty).join(',') === '3,5',
+  bCard().items.map((i) => i.issued_qty));
+
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [] }, issAdmin);
+check('пустой список — 400', r.ok === false && r.status === 400, r);
+r = call('/transaction/checkin-batch', { order_id: bOrder,
+  items: Array.from({ length: 41 }, () => ({ item_id: bA })) }, issAdmin);
+check('больше сорока позиций — 400', r.ok === false && r.status === 400, r);
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [{ item_id: bA }] }, 'не-токен');
+check('чужой токен — отказ целиком', r.ok === false && r.status === 401, r);
+check('после отказа ничего не принято', bCard().order.status === 'Issued' &&
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(bA))[0].status === 'Rented');
+
+// Две позиции не принять: bC не выдавался, скотча на руках 5, а не 99.
+// Остальные проходят — сбой одной не отменяет других.
+const logsBefore = logRows().length;
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [
+  { item_id: bA }, { item_id: bC }, { item_id: bGel, qty: 99 },
+] }, issAdmin);
+check('пачка с ошибками отвечает ok и по каждой позиции', r.ok === true && r.data.results.length === 3, r);
+check('годная позиция принята', r.data.results[0].ok === true && r.data.results[0].transaction_id, r.data.results[0]);
+check('невыданная — отказ 409', r.data.results[1].ok === false && r.data.results[1].status === 409
+  && r.data.results[1].item_id === String(bC), r.data.results[1]);
+check('лишнее количество — отказ 409 с причиной', r.data.results[2].ok === false
+  && r.data.results[2].status === 409 && /На руках 5/.test(r.data.results[2].error), r.data.results[2]);
+check('счётчики: принято 1, не принято 2', r.data.done === 1 && r.data.failed === 2, r.data);
+const bLogs = logRows().slice(logsBefore).filter((l) => l.kind === 'checkin' && l.endpoint === 'batch');
+check('в Logs одна строка об отказах пачки', bLogs.length === 1 && bLogs[0].context.includes(String(bC))
+  && /На руках/.test(bLogs[0].context), bLogs);
+check('заказ ещё выдан — на руках остались вещи', bCard().order.status === 'Issued');
+
+// Остаток заказа одним вызовом: две штучные (одна с дефектом) и количество.
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [
+  { item_id: bB, has_defect: true, defect_description: 'Трещина', defect_severity: 'Major' },
+  { item_id: bD },
+  { item_id: bGel, qty: 5 },
+] }, issAdmin);
+check('остаток принят целиком', r.ok === true && r.data.done === 3 && r.data.failed === 0, r);
+check('позиция количеством вернула остаток на складе', r.data.results[2].qty === 5 && r.data.results[2].qty_out === 0,
+  r.data.results[2]);
+check('по дефекту заведена заявка', !!r.data.results[0].defect_id, r.data.results[0]);
+const bEq = (id) => readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(id))[0];
+check('серьёзный дефект увёл предмет в ремонт', bEq(bB).status === 'In Repair', bEq(bB).status);
+check('без дефекта — снова доступны', bEq(bA).status === 'Available' && bEq(bD).status === 'Available',
+  [bEq(bA).status, bEq(bD).status]);
+check('заказ закрылся, когда вернули всё', bCard().order.status === 'Returned' && String(bCard().order.closed_at) !== '',
+  bCard().order);
+check('строки состава свободны', bCard().items.map((i) => i.issued_qty).join(',') === '0,0',
+  bCard().items.map((i) => i.issued_qty));
+check('все записи журнала по заказу закрыты',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.order_id) === String(bOrder))
+    .every((t) => t.status === 'Closed'));
+check('полный успех в Logs не пишется',
+  logRows().filter((l) => l.kind === 'checkin' && l.endpoint === 'batch').length === 1);
 
 console.log('\n== архив заказа ==');
 check('заказ с вещью на руках в архив не уходит',
@@ -2546,8 +2794,8 @@ check('и снова в обычном списке',
   call('/orders/list', {}, issAdmin).data.length === beforeArc);
 
 call('/staff/create', { full_name: 'Складмен Архива', login: 'arccheck',
-                        pin: '5566', role: 'Warehouse Staff' }, issAdmin);
-const arcStaff = call('/auth/login', { login: 'arccheck', pin: '5566' });
+                        pin: '556655', role: 'Warehouse Staff' }, issAdmin);
+const arcStaff = call('/auth/login', { login: 'arccheck', pin: '556655' });
 check('сотруднику склада архив запрещён',
   call('/order/archive', { order_id: emptyId }, arcStaff.data.token).status === 403);
 check('а выдавать без скана он может',
@@ -2571,7 +2819,7 @@ check('фамилия сокращается', shortName('Гриднев Его�
 console.log('\n== чат склада находится сам ==');
 // В Telegram на телефоне id чата не показывают, а открывать getUpdates в
 // браузере — значит носить токен по адресной строке. Спрашивает бэкенд.
-const chatAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+const chatAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;
 scriptProps.TELEGRAM_BOT_TOKEN = '';
 check('без токена бота сказано, куда его класть',
   /TELEGRAM_BOT_TOKEN/.test(call('/notify/chats', {}, chatAdmin).error || ''),
@@ -2739,15 +2987,15 @@ check('складскому сотруднику связь не переклю�
   call('/notify/webhook', { mode: 'on' }, '').ok === false);
 
 console.log('\n== акт: шаблон ==');
-const actAdmin = call('/auth/login', { login: 'Matvey', pin: '4321' }).data.token;
+const actAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;
 let act = call('/act/build', { order_id: 1 }, actAdmin);
 check('без шаблона сборка отказывает понятно',
   act.ok === false && act.status === 409 && /Шаблон акта не создан/.test(act.error), act);
 
 const helper = call('/staff/create', {
-  full_name: 'Складмен Актов', login: 'actstaff', pin: '7788', role: 'Warehouse Staff',
+  full_name: 'Складмен Актов', login: 'actstaff', pin: '778877', role: 'Warehouse Staff',
 }, actAdmin);
-const helperToken = call('/auth/login', { login: 'actstaff', pin: '7788' }).data.token;
+const helperToken = call('/auth/login', { login: 'actstaff', pin: '778877' }).data.token;
 check('сотруднику склада шаблон создавать нельзя',
   call('/act/template', {}, helperToken).status === 403, helper.ok);
 
@@ -3106,7 +3354,7 @@ console.log('\n== журнал Logs: служебное — в таблицу, �
 // Telegram и откат из темы в General пишутся в лист Logs.
 scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
 metaSet('setting_notify_chat_id', '-1001234567890');
-const logLogin = call('/auth/login', { login: 'matvey', pin: '4321' });
+const logLogin = call('/auth/login', { login: 'matvey', pin: '432143' });
 const logToken = logLogin.ok ? logLogin.data.token : null;
 check('вход перед проверкой журнала', !!logToken, logLogin);
 
@@ -3268,6 +3516,113 @@ check('logs_24h считает только последние сутки',
   warehouseSummary().logs_24h === logs24Before + 1, warehouseSummary().logs_24h);
 check('logs_24h отдаётся вместе с настройками',
   call('/settings/get', {}, logToken).data.summary.logs_24h === logs24Before + 1);
+
+console.log('\n== уборка тестовых строк ==');
+// Свои строки с номерами 9xxx — рядом с тем, что накопили проверки выше.
+const sh = (n) => getSheet(n);
+const rowsOf = (n) => readRows(sh(n));
+const hasRow = (n, col, v) => rowsOf(n).some(r => String(r[col]) === String(v));
+appendRow(sh('Students'), { student_id: 9001, full_name: 'Тест Ученик', created_at: '2026-09-01' });
+appendRow(sh('Students'), { student_id: 9002, full_name: 'Тестова Анна', created_at: '2026-09-01' });
+appendRow(sh('Students'), { student_id: 9003, full_name: 'Тест Смешанный', created_at: '2026-09-01' });
+appendRow(sh('Orders'), { order_id: 9101, order_no: '9101', student_id: 9001, student_name: 'Тест Ученик',
+                          created_at: '2026-09-02', act_url: 'https://docs.google.com/document/d/act9101' });
+appendRow(sh('Orders'), { order_id: 9102, order_no: '9102', student_id: 9002, student_name: 'Тестова Анна', created_at: '2026-09-02' });
+appendRow(sh('Orders'), { order_id: 9103, order_no: '9103', student_id: 9002, student_name: '[тест] на руках', created_at: '2026-09-02' });
+appendRow(sh('Orders'), { order_id: 9104, order_no: 'TEST-1', student_id: 9003, student_name: 'Смешанный', created_at: '2026-09-02' });
+appendRow(sh('Orders'), { order_id: 9105, order_no: '9105', student_id: 9003, student_name: 'Смешанный', created_at: '2026-09-02' });
+[[9101, 1], [9101, 2], [9102, 1], [9103, 1], [9104, 1]].forEach(([o, l]) =>
+  appendRow(sh('OrderItems'), { order_id: o, line_no: l, raw_name: 'Позиция ' + o + '/' + l, qty: 1 }));
+appendRow(sh('Transactions'), { transaction_id: 9201, item_id: '010101', order_id: 9101, status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9202, item_id: '010101', order_id: 9102, status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9203, item_id: '010102', order_id: 9103, status: 'Open', checked_out_at: '2026-09-03' });
+appendRow(sh('Defects'), { defect_id: 9301, item_id: '010101', related_transaction_id: 9201, status: 'Resolved', description: 'тест' });
+appendRow(sh('Defects'), { defect_id: 9302, item_id: '010101', related_transaction_id: 9202, status: 'Open', description: 'настоящий' });
+const owner = findRowByValue(sh('Staff'), 'staff_id', ownerId());
+const ownerName = owner.full_name;
+updateRow(sh('Staff'), owner.__row, { full_name: 'Тест Владелец' });
+appendRow(sh('Staff'), { staff_id: 9401, full_name: 'Сотрудник Проба', login: 'test1', role: 'Staff', active: true });
+appendRow(sh('Staff'), { staff_id: 9402, full_name: 'Тест Админ', login: 'tadm', role: 'Admin', active: true });
+appendRow(sh('Staff'), { staff_id: 9403, full_name: 'Тестеров Иван', login: 'tester', role: 'Staff', active: true });
+
+check('isTestName: слово «Тест», пометка, но не фамилия',
+  isTestName(' тест ') && isTestName('Test-1') && isTestName('Иванов [TEST]') &&
+  !isTestName('Тестова Анна') && !isTestName('Testov') && !isTestName(''));
+
+const equipBefore = JSON.stringify(dumpSheet('Equipment'));
+const sizes = () => ['Orders', 'OrderItems', 'Transactions', 'Defects', 'Students', 'Staff']
+  .map(n => rowsOf(n).length).join();
+const sizesBefore = sizes();
+
+const preview = cleanupTestDataPreview();
+const plan = cleanupTestPlan();
+const planIds = (list, col) => list.map(r => String(r[col]));
+check('просмотр ничего не удаляет', sizes() === sizesBefore, [sizes(), sizesBefore]);
+check('просмотр: тестовый заказ и заказ TEST-1 в списке, настоящий нет',
+  planIds(plan.orders, 'order_id').includes('9101') && planIds(plan.orders, 'order_id').includes('9104') &&
+  !planIds(plan.orders, 'order_id').includes('9102'), planIds(plan.orders, 'order_id'));
+check('просмотр: заказ с техникой на руках отказан с причиной',
+  plan.refused.some(x => x.order_id === '9103' && /010102/.test(x.reason)) && /на руках/.test(preview), plan.refused);
+check('просмотр: в отчёте ссылка на акт и счётчики',
+  /act9101/.test(preview) && /Orders — \d+/.test(preview) && /Тест Ученик/.test(preview), preview);
+check('просмотр: ученик с настоящим заказом оставлен',
+  plan.keptStudents.some(x => String(x.row.student_id) === '9003'));
+check('просмотр: главный администратор оставлен',
+  plan.keptStaff.some(x => String(x.row.staff_id) === String(owner.staff_id) && /главный/.test(x.reason)));
+
+// Последний действующий администратор: гасим всех остальных — тестовый
+// администратор остаётся. Лист Staff потом возвращаем как был.
+const staffSnapshot = sh('Staff').data.map(r => r.slice());
+rowsOf('Staff').forEach(r => {
+  if (r.role === 'Admin' && String(r.staff_id) !== '9402') updateRow(sh('Staff'), r.__row, { active: false });
+});
+const lonely = cleanupTestPlan();
+check('последний действующий администратор не удаляется',
+  lonely.keptStaff.some(x => String(x.row.staff_id) === '9402' && /последний/.test(x.reason)) &&
+  !planIds(lonely.staff, 'staff_id').includes('9402'), lonely.keptStaff.map(x => x.row.staff_id));
+sh('Staff').data = staffSnapshot;
+
+// Копия не получилась — не удаляется ничего.
+logBefore = logRows().length;
+global.__driveFail = 'Диск недоступен';
+r = cleanupTestData();
+global.__driveFail = null;
+check('без копии уборка отменена', /отменена/.test(r) && sizes() === sizesBefore, r);
+check('отказ уборки записан в Logs',
+  logRows().slice(logBefore).some(l => l.kind === 'cleanup' && l.reason === 'backup_failed'));
+
+const copiesBefore = backupFiles.length;
+logBefore = logRows().length;
+r = cleanupTestData();
+const cleanupLogs = logRows().slice(logBefore).filter(l => l.kind === 'cleanup');
+check('перед уборкой сделана копия таблицы', backupFiles.length === copiesBefore + 1, r);
+check('удалены тестовый заказ, его позиции, выдача и дефект',
+  !hasRow('Orders', 'order_id', 9101) && !hasRow('Orders', 'order_id', 9104) &&
+  !hasRow('OrderItems', 'order_id', 9101) && !hasRow('OrderItems', 'order_id', 9104) &&
+  !hasRow('Transactions', 'transaction_id', 9201) && !hasRow('Defects', 'defect_id', 9301));
+check('удалён тестовый ученик', !hasRow('Students', 'student_id', 9001));
+check('настоящий заказ, его состав, выдача, дефект и ученица на месте',
+  hasRow('Orders', 'order_id', 9102) && hasRow('OrderItems', 'order_id', 9102) &&
+  hasRow('Transactions', 'transaction_id', 9202) && hasRow('Defects', 'defect_id', 9302) &&
+  hasRow('Students', 'student_id', 9002));
+check('ученик с настоящим заказом оставлен', hasRow('Students', 'student_id', 9003) && hasRow('Orders', 'order_id', 9105));
+check('заказ с техникой на руках не тронут',
+  hasRow('Orders', 'order_id', 9103) && hasRow('OrderItems', 'order_id', 9103) && hasRow('Transactions', 'transaction_id', 9203));
+check('Equipment не тронут', JSON.stringify(dumpSheet('Equipment')) === equipBefore);
+check('тестовые сотрудники удалены, «Тестеров» и главный на месте',
+  !hasRow('Staff', 'staff_id', 9401) && !hasRow('Staff', 'staff_id', 9402) &&
+  hasRow('Staff', 'staff_id', 9403) && hasRow('Staff', 'staff_id', owner.staff_id));
+check('в Logs одна строка уборки со счётчиками',
+  cleanupLogs.length === 1 && /заказов \d+/.test(cleanupLogs[0].message) && /act9101/.test(cleanupLogs[0].context),
+  cleanupLogs);
+
+const sizesAfter = sizes();
+const again = cleanupTestPlan();
+r = cleanupTestData();
+check('повторный запуск ничего не удаляет',
+  sizes() === sizesAfter && again.orders.length === 0 && again.items.length === 0 &&
+  again.transactions.length === 0 && again.students.length === 0 && again.staff.length === 0, r);
+updateRow(sh('Staff'), findRowByValue(sh('Staff'), 'staff_id', owner.staff_id).__row, { full_name: ownerName });
 
 console.log('\n== объявления склада ==');
 // Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.

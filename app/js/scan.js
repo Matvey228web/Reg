@@ -5,6 +5,7 @@ const ScanScreen = (() => {
   let currentItem = null;
   let orders = [];
   let ordersError = "";       // заказы не загрузились — сказать, а не молчать
+  let ordersLoading = false;  // заказы тянутся в фоне, форма уже на экране
   let mode = null; // "checkout" | "checkin" | "defect"
   let preferredMode = null;   // с чем пришли с карточки предмета
   let lockedOrder = null;     // выдача по одному заказу: {orderId, orderNo, returnDate, studentName}
@@ -106,7 +107,7 @@ const ScanScreen = (() => {
         notes: "",
       });
       TG.hapticSuccess();
-      Cache.clear("orders");   // изменился статус и состав заказа
+      markStale("orders");     // изменился статус и состав заказа
       Cache.patch("equipment", "item_id", row.item_id,
         ItemState.afterCheckout(row, 1, res && res.transaction_id));
       const offOrder = !!(res && res.order_line === "off-order");
@@ -145,7 +146,7 @@ const ScanScreen = (() => {
       Cache.patch("equipment", "item_id", item.item_id, {
         status: item.status, qty_out: item.qty_out, qty_free: item.qty_free,
       });
-      await showItem(item);
+      showItem(item);
     } catch (err) {
       currentItem = null;
       result.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
@@ -155,7 +156,11 @@ const ScanScreen = (() => {
   // Предмет уже известен — после поиска, с карточки предмета или после своей
   // же выдачи. Второй раз спрашивать о нём таблицу незачем: это ещё 6–9 секунд
   // у стойки, а новое состояние мы знаем и так (ItemState в cache.js).
-  async function showItem(item) {
+  //
+  // Рисуем сразу, ничего не дожидаясь: раньше здесь ждали список заказов, и
+  // после приёма кнопка висела в «Отправляем…» ещё 5–8 секунд, хотя приём
+  // давно записан. Заказы для выдачи подтягиваются в фоне (prepareOrders).
+  function showItem(item) {
     currentItem = item;
     // Отсканированный номер становится примером в поле ввода — серым, как
     // подсказка. Наклейки затираются, и увидеть, что именно прочиталось, —
@@ -167,8 +172,40 @@ const ScanScreen = (() => {
     else if (preferredMode === "checkin" && canCheckin(item)) mode = "checkin";
     else mode = canCheckout(item) ? "checkout" : canCheckin(item) ? "checkin" : null;
     preferredMode = null;
-    if (mode === "checkout") await loadOrders();
+    if (mode === "checkout") prepareOrders();
     renderItem();
+  }
+
+  // Список устарел своей же записью: не выбрасываем его (Cache.stale), а
+  // помечаем — следующий экран покажет его сразу и обновит молча. Без
+  // Cache.stale — как раньше, сбросом.
+  function markStale(name) {
+    if (Cache.stale) Cache.stale(name);
+    else Cache.clear(name);
+  }
+
+  // Заказы для формы выдачи — без ожидания. Лежат в кэше — берём оттуда сразу.
+  // Нет — форма появляется с «загружаем заказы…» в списке, а сам список
+  // встаёт на место, когда придёт, и только если человек всё ещё на этой форме.
+  function prepareOrders() {
+    if (lockedOrder) { orders = []; return; }
+    const cached = Cache.items("orders");
+    if (cached) {
+      ordersError = "";
+      orders = activeOrders(cached);
+      return;
+    }
+    if (ordersLoading) return;
+    ordersLoading = true;
+    loadOrders().finally(() => {
+      ordersLoading = false;
+      if (currentItem && mode === "checkout") refreshOrderField();
+    });
+  }
+
+  function activeOrders(all) {
+    // Выдавать можно по заказу, который оформлен или уже частично выдан.
+    return all.filter((o) => o.status === "New" || o.status === "Issued");
   }
 
   // Своя запись прошла — правим предмет на экране и строку в кэше каталога
@@ -203,8 +240,7 @@ const ScanScreen = (() => {
       all = [];
       ordersError = err.message;
     }
-    // Выдавать можно по заказу, который оформлен или уже частично выдан.
-    orders = all.filter((o) => o.status === "New" || o.status === "Issued");
+    orders = activeOrders(all);
   }
 
   // Шапка режима «выдача по заказу»: по какому заказу идёт работа и что уже
@@ -325,11 +361,12 @@ const ScanScreen = (() => {
       ${unavailableHint(item)}
       <div id="mode-form"></div>
     `;
-    document.getElementById("mode-checkout").addEventListener("click", async () => {
-      mode = "checkout"; await loadOrders(); renderItem(); renderForm();
+    document.getElementById("mode-checkout").addEventListener("click", () => {
+      mode = "checkout"; prepareOrders(); renderItem();
     });
-    document.getElementById("mode-checkin").addEventListener("click", () => { mode = "checkin"; renderItem(); renderForm(); });
-    document.getElementById("mode-defect").addEventListener("click", () => { mode = "defect"; renderItem(); renderForm(); });
+    // renderItem сам рисует форму — второй renderForm только перерисовывал её.
+    document.getElementById("mode-checkin").addEventListener("click", () => { mode = "checkin"; renderItem(); });
+    document.getElementById("mode-defect").addEventListener("click", () => { mode = "defect"; renderItem(); });
     renderForm();
   }
 
@@ -352,18 +389,7 @@ const ScanScreen = (() => {
                    value="${escapeHtml("№" + lockedOrder.orderNo + (lockedWho ? " · " + lockedWho : ""))}" />
             <input type="hidden" id="scan-order" value="${escapeHtml(String(lockedOrder.orderId))}" />
           </div>` : `
-          <div class="field">
-            <label for="scan-order">Заказ</label>
-            <select id="scan-order">
-              <option value="">— выберите —</option>
-              ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
-              <option value="none">Без заказа (для склада)</option>
-            </select>
-            ${ordersError ? `<p class="hint">Заказы не загрузились: ${escapeHtml(ordersError)}
-            Выдать можно без заказа или открыть предмет заново.</p>`
-            : orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
-            или выдайте без заказа.</p>`}
-          </div>`}
+          <div class="field" id="scan-order-field">${orderFieldHtml()}</div>`}
           ${currentItem.by_qty ? `
           <div class="field">
             <label for="scan-qty">Сколько выдаём</label>
@@ -389,13 +415,7 @@ const ScanScreen = (() => {
         </div>`;
       // Срок возврата приходит из заказа — вводить его заново значит рано или
       // поздно ввести не то, что обещано студенту на сайте.
-      if (!lockedOrder) {
-        document.getElementById("scan-order").addEventListener("change", (e) => {
-          const picked = e.target.selectedOptions[0];
-          const date = picked ? picked.dataset.return : "";
-          if (date) document.getElementById("scan-return-date").value = date;
-        });
-      }
+      if (!lockedOrder) wireOrderField();
       confirmButton("Подтвердить выдачу", submitCheckout);
     } else if (mode === "checkin") {
       box.innerHTML = `
@@ -458,6 +478,44 @@ const ScanScreen = (() => {
     }
   }
 
+  // Поле «Заказ» в форме выдачи — отдельно, чтобы подставить список, когда он
+  // догрузится в фоне, не трогая остальную форму (заметки, количество, срок).
+  function orderFieldHtml() {
+    return `
+            <label for="scan-order">Заказ</label>
+            <select id="scan-order">
+              <option value="">${ordersLoading ? "загружаем заказы…" : "— выберите —"}</option>
+              ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
+              <option value="none">Без заказа (для склада)</option>
+            </select>
+            ${ordersLoading ? `<p class="hint">Список заказов подгружается — можно пока заполнить остальное.</p>`
+            : ordersError ? `<p class="hint">Заказы не загрузились: ${escapeHtml(ordersError)}
+            Выдать можно без заказа или открыть предмет заново.</p>`
+            : orders.length ? "" : `<p class="hint">Активных заказов нет. Заведите его во вкладке «Заказы»
+            или выдайте без заказа.</p>`}`;
+  }
+
+  function wireOrderField() {
+    document.getElementById("scan-order").addEventListener("change", (e) => {
+      const picked = e.target.selectedOptions[0];
+      const date = picked ? picked.dataset.return : "";
+      const dateField = document.getElementById("scan-return-date");
+      if (date && dateField) dateField.value = date;
+    });
+  }
+
+  // Заказы догрузились, а форма выдачи уже на экране: меняем только поле
+  // заказа, сохранив выбор, если его успели сделать («Без заказа»).
+  function refreshOrderField() {
+    const box = document.getElementById("scan-order-field");
+    if (!box || lockedOrder) return;
+    const was = document.getElementById("scan-order").value;
+    box.innerHTML = orderFieldHtml();
+    const select = document.getElementById("scan-order");
+    if (was && Array.from(select.options).some((o) => o.value === was)) select.value = was;
+    wireOrderField();
+  }
+
   // Подтверждение живёт в самой форме, а не в нативной кнопке Telegram.
   // Нативную было не видно в браузере, её нельзя было нажать из теста, и
   // проверялся у нас поэтому путь, которым на телефоне никто не ходит.
@@ -511,7 +569,7 @@ const ScanScreen = (() => {
       // Выдача вне состава заказа разрешена (акт пересобирается сам) — отмечаем
       // её в списке выданного за заход, а не останавливаем человека.
       const offOrder = !!(result && result.order_line === "off-order" && orderId);
-      if (orderId) Cache.clear("orders");   // изменился статус и состав заказа
+      if (orderId) markStale("orders");     // изменился статус и состав заказа
       // Что стало с предметом, известно без нового поиска: выдали столько-то.
       applyLocal(ItemState.afterCheckout(currentItem, qty, result && result.transaction_id));
       // Выдача по заказу — это подряд десяток позиций. Показывать после каждой
@@ -523,7 +581,7 @@ const ScanScreen = (() => {
         nextInOrder(currentItem.name + qtyNote + (offOrder ? " — сверх заявки" : ""));
         return;
       }
-      await showItem(currentItem);
+      showItem(currentItem);
     } catch (err) {
       TG.hapticError();
       TG.showAlert(formError(err));
@@ -550,14 +608,16 @@ const ScanScreen = (() => {
         notes: field("scan-checkin-notes").value.trim(),
       });
       TG.hapticSuccess();
-      TG.showAlert("Оборудование принято");
-      if (hasDefect) Cache.clear("defects");   // в ремонте появилась запись
-      Cache.clear("orders");                   // заказ мог закрыться возвратом
+      // Сначала — экран с принятым, потом всё остальное: раньше после приёма
+      // ждали ещё и список заказов, и кнопка висела в «Отправляем…».
       applyLocal(ItemState.afterCheckin(currentItem, qty, severity, res && res.qty_out), {
         current_transaction: null,
         ...(hasDefect ? withDefect(res && res.defect_id, severity, description) : {}),
       });
-      await showItem(currentItem);
+      showItem(currentItem);
+      if (hasDefect) markStale("defects");     // в ремонте появилась запись
+      markStale("orders");                     // заказ мог закрыться возвратом
+      TG.showAlert("Оборудование принято");
     } catch (err) {
       TG.hapticError();
       TG.showAlert(formError(err));
@@ -578,14 +638,14 @@ const ScanScreen = (() => {
         severity,
       });
       TG.hapticSuccess();
-      TG.showAlert("Дефект сохранён");
-      Cache.clear("defects");
       // Показываем предмет заново, а не закрываем экран: человеку надо увидеть,
       // изменился ли статус — незначительный дефект выдачу не блокирует.
       // Новый статус бэкенд вернул в ответе, перечитывать предмет не нужно.
       applyLocal(ItemState.afterDefect(currentItem, severity, res && res.status),
         withDefect(res && res.defect_id, severity, description));
-      await showItem(currentItem);
+      showItem(currentItem);
+      markStale("defects");
+      TG.showAlert("Дефект сохранён");
     } catch (err) {
       TG.hapticError();
       TG.showAlert(formError(err));
