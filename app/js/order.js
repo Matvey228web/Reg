@@ -411,10 +411,10 @@ const OrderScreen = (() => {
     }
   }
 
-  // Приём всего заказа. Запросов столько же, сколько позиций: каждый приём
-  // берёт в таблице свою блокировку, и складывать их в один вызов, не проверив
-  // поведение повторного захвата, на пути возврата техники нельзя. Зато каждая
-  // позиция закрывается независимо — сбой на одной не отменяет остальные.
+  // Приём всего заказа — одним запросом /transaction/checkin-batch: вход и
+  // замок в таблице один на всю пачку, а не на каждую позицию (раньше было по
+  // 6–9 секунд на штуку). Позиции закрываются независимо: сбой на одной не
+  // отменяет остальные, ответ говорит про каждую.
   async function checkinAll(groups) {
     const btn = document.getElementById("order-checkin-all");
     const status = document.getElementById("order-checkin-status");
@@ -423,17 +423,26 @@ const OrderScreen = (() => {
     receiveError = "";
     const failed = [];
     let done = 0;
-    for (let i = 0; i < groups.length; i++) {
-      status.textContent = `Принимаю ${i + 1} из ${groups.length}…`;
-      try {
-        const res = await apiPost("/transaction/checkin", { item_id: groups[i].item_id, qty: groups[i].qty });
-        // Принятое известно — правим строку каталога, а не сбрасываем весь.
-        Cache.patch("equipment", "item_id", groups[i].item_id,
-          (row) => ItemState.afterCheckin(row, groups[i].qty, null, res && res.qty_out));
-        done += 1;
-      } catch (err) {
-        failed.push(itemName(groups[i].item_id) + ": " + err.message);
-      }
+    status.textContent = `Принимаю ${groups.length} ${plural(groups.length, "позицию", "позиции", "позиций")}…`;
+    try {
+      const res = await apiPost("/transaction/checkin-batch", {
+        order_id: Number(currentOrderId),
+        items: groups.map(({ item_id, qty }) => ({ item_id, qty })),
+      });
+      const byId = new Map(groups.map((g) => [String(g.item_id), g]));
+      ((res && res.results) || []).forEach((r) => {
+        const g = byId.get(String(r.item_id));
+        if (r.ok) {
+          // Принятое известно — правим строку каталога, а не сбрасываем весь.
+          Cache.patch("equipment", "item_id", r.item_id,
+            (row) => ItemState.afterCheckin(row, g ? g.qty : r.qty, null, r.qty_out));
+          done += 1;
+        } else {
+          failed.push(itemName(r.item_id) + ": " + r.error);
+        }
+      });
+    } catch (err) {
+      failed.push(err.message);
     }
     Cache.clear("orders");
     if (failed.length) {

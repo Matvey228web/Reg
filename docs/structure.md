@@ -99,7 +99,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 |---|---|
 | Вход и сотрудники | `/auth/login`, `/staff/*` |
 | Каталог и вещи | `/item/*` (правка карточки — `/item/update`, номера — `/item/numbers`), `/equipment/list`, `/model*` |
-| Выдача и приём | `/transaction/checkout`, `/transaction/checkin` |
+| Выдача и приём | `/transaction/checkout`, `/transaction/checkin`, `/transaction/checkin-batch` (приём всего заказа одним запросом) |
 | Дефекты | `/defect/report`, `/defect/resolve`, `/defects/list` |
 | Заказы | `/order/*`, `/orders/list`, `/students/list`, `/student/history` |
 | Сайт | `/public/catalog`, `/public/order` |

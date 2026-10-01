@@ -508,6 +508,91 @@ const MockStore = (() => {
   };
 })();
 
+// Приём одной позиции — общий для /transaction/checkin и пакетного приёма,
+// как checkinUnderLock в Code.gs. Статус заказа здесь не считается: затронутые
+// заказы копятся в touched и закрываются в mockSettleOrders.
+function mockCheckinOne(body, staff_id, touched) {
+  const item = MockStore.findItem(body.item_id);
+  if (!item) { const e = new Error("Предмет не найден"); e.status = 404; throw e; }
+  const openList = MockStore.transactions.filter((t) => t.item_id === item.item_id && t.status === "Open");
+  if (!openList.length) { const e = new Error("Открытой выдачи для этого предмета не найдено"); e.status = 409; throw e; }
+  const tx = openList[0];
+  const bulkIn = mockByQty(item.category);
+  // Строка состава освобождается на принятое каждой записью — как
+  // releaseOrderLine в Code.gs.
+  const release = (t, n) => {
+    if (!t.order_id) return;
+    touched.add(String(t.order_id));
+    const line = MockStore.orderItems.find((i) =>
+      String(i.order_id) === String(t.order_id) && String(i.line_no) === String(t.order_line));
+    if (line) line.issued_qty = Math.max(0, Number(line.issued_qty || 0) - n);
+  };
+
+  if (bulkIn) {
+    // Приём количеством закрывает выдачи по очереди, начиная с ранней.
+    const back = Math.floor(Number(body.qty || 1));
+    const onHands = openList.reduce((sum, t) => sum + (Number(t.qty || 1) - Number(t.qty_in || 0)), 0);
+    if (!back || back < 1) { const e = new Error("Укажите количество — целое число от одного"); e.status = 400; throw e; }
+    if (back > onHands) { const e = new Error("На руках " + onHands + " — принять больше нельзя"); e.status = 409; throw e; }
+    let left = back;
+    openList.forEach((t) => {
+      if (left <= 0) return;
+      const take = Math.min(Number(t.qty || 1) - Number(t.qty_in || 0), left);
+      left -= take;
+      release(t, take);
+      t.qty_in = Number(t.qty_in || 0) + take;
+      if (t.qty_in >= Number(t.qty || 1)) {
+        t.status = "Closed";
+        t.checked_in_at = new Date().toISOString();
+        t.staff_in = staff_id;
+      }
+    });
+    item.qty_out = Math.max(0, Number(item.qty_out || 0) - back);
+    item.status = item.qty_out >= mockItemQty(item) ? "Rented" : "Available";
+  } else {
+    tx.status = "Closed";
+    tx.checked_in_at = new Date().toISOString();
+    tx.staff_in = staff_id;
+    release(tx, 1);
+  }
+
+  let defect_id = null;
+  if (body.has_defect) {
+    defect_id = MockStore.nextDefectId();
+    MockStore.defects.push({
+      defect_id, item_id: item.item_id, reported_by: staff_id,
+      reported_by_name: (MockStore.findStaffById(staff_id) || {}).full_name || "",
+      related_transaction_id: tx.transaction_id,
+      description: body.defect_description || "",
+      severity: body.defect_severity || "Minor",
+      status: "Open", reported_at: new Date().toISOString(),
+      resolved_at: null, resolution_notes: "",
+    });
+    if (mockDefectBlocksRental(body.defect_severity || "Minor")) item.status = "In Repair";
+    else if (!bulkIn) item.status = "Available";
+  } else if (!bulkIn) {
+    // У штучной позиции статус уже посчитан по остатку выше: «доступно»
+    // здесь затёрло бы «всё на руках».
+    item.status = "Available";
+  }
+  if (!bulkIn) item.current_transaction_id = null;
+  return { transaction_id: tx.transaction_id, defect_id, qty: bulkIn ? Number(body.qty || 1) : 1,
+    qty_out: bulkIn ? item.qty_out : undefined };
+}
+
+// Заказ закрыт, когда по нему на руках ничего нет, — как settleOrderStatus.
+function mockSettleOrders(touched) {
+  touched.forEach((orderId) => {
+    const order = MockStore.orders.find((o) => String(o.order_id) === orderId);
+    if (order && order.status !== "Cancelled") {
+      const stillOut = MockStore.transactions.filter(
+        (t) => String(t.order_id) === orderId && t.status === "Open").length;
+      order.status = stillOut ? "Issued" : "Returned";
+      order.closed_at = stillOut ? "" : new Date().toISOString();
+    }
+  });
+}
+
 const MockAPI = {
   async handle(endpoint, body, token) {
     // имитация сетевой задержки
@@ -852,82 +937,30 @@ const MockAPI = {
 
       case "/transaction/checkin": {
         const staff_id = MockStore.requireToken(token);
-        const item = MockStore.findItem(body.item_id);
-        if (!item) { const e = new Error("Предмет не найден"); e.status = 404; throw e; }
-        const openList = MockStore.transactions.filter((t) => t.item_id === item.item_id && t.status === "Open");
-        if (!openList.length) { const e = new Error("Открытой выдачи для этого предмета не найдено"); e.status = 409; throw e; }
-        const tx = openList[0];
-        const bulkIn = mockByQty(item.category);
-        // Строка состава освобождается на принятое каждой записью — как
-        // releaseOrderLine в Code.gs.
         const touched = new Set();
-        const release = (t, n) => {
-          if (!t.order_id) return;
-          touched.add(String(t.order_id));
-          const line = MockStore.orderItems.find((i) =>
-            String(i.order_id) === String(t.order_id) && String(i.line_no) === String(t.order_line));
-          if (line) line.issued_qty = Math.max(0, Number(line.issued_qty || 0) - n);
-        };
+        const res = mockCheckinOne(body, staff_id, touched);
+        mockSettleOrders(touched);
+        return res;
+      }
 
-        if (bulkIn) {
-          // Приём количеством закрывает выдачи по очереди, начиная с ранней.
-          const back = Math.floor(Number(body.qty || 1));
-          const onHands = openList.reduce((sum, t) => sum + (Number(t.qty || 1) - Number(t.qty_in || 0)), 0);
-          if (!back || back < 1) { const e = new Error("Укажите количество — целое число от одного"); e.status = 400; throw e; }
-          if (back > onHands) { const e = new Error("На руках " + onHands + " — принять больше нельзя"); e.status = 409; throw e; }
-          let left = back;
-          openList.forEach((t) => {
-            if (left <= 0) return;
-            const take = Math.min(Number(t.qty || 1) - Number(t.qty_in || 0), left);
-            left -= take;
-            release(t, take);
-            t.qty_in = Number(t.qty_in || 0) + take;
-            if (t.qty_in >= Number(t.qty || 1)) {
-              t.status = "Closed";
-              t.checked_in_at = new Date().toISOString();
-              t.staff_in = staff_id;
-            }
-          });
-          item.qty_out = Math.max(0, Number(item.qty_out || 0) - back);
-          item.status = item.qty_out >= mockItemQty(item) ? "Rented" : "Available";
-        } else {
-          tx.status = "Closed";
-          tx.checked_in_at = new Date().toISOString();
-          tx.staff_in = staff_id;
-          release(tx, 1);
-        }
-
-        touched.forEach((orderId) => {
-          const order = MockStore.orders.find((o) => String(o.order_id) === orderId);
-          if (order && order.status !== "Cancelled") {
-            const stillOut = MockStore.transactions.filter(
-              (t) => String(t.order_id) === orderId && t.status === "Open").length;
-            order.status = stillOut ? "Issued" : "Returned";
-            order.closed_at = stillOut ? "" : new Date().toISOString();
+      case "/transaction/checkin-batch": {
+        const staff_id = MockStore.requireToken(token);
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (!items.length) { const e = new Error("Нечего принимать — список пуст"); e.status = 400; throw e; }
+        if (items.length > 40) { const e = new Error("За раз можно принять не больше 40 позиций"); e.status = 400; throw e; }
+        const touched = new Set();
+        const results = items.map((it) => {
+          const item_id = String((it && it.item_id) || "").trim();
+          try {
+            const r = mockCheckinOne(it || {}, staff_id, touched);
+            return { item_id, ok: true, transaction_id: r.transaction_id, defect_id: r.defect_id, qty: r.qty, qty_out: r.qty_out };
+          } catch (err) {
+            return { item_id, ok: false, status: err.status || 500, error: err.message };
           }
         });
-
-        let defect_id = null;
-        if (body.has_defect) {
-          defect_id = MockStore.nextDefectId();
-          MockStore.defects.push({
-            defect_id, item_id: item.item_id, reported_by: staff_id,
-            reported_by_name: (MockStore.findStaffById(staff_id) || {}).full_name || "",
-            related_transaction_id: tx.transaction_id,
-            description: body.defect_description || "",
-            severity: body.defect_severity || "Minor",
-            status: "Open", reported_at: new Date().toISOString(),
-            resolved_at: null, resolution_notes: "",
-          });
-          if (mockDefectBlocksRental(body.defect_severity || "Minor")) item.status = "In Repair";
-          else if (!bulkIn) item.status = "Available";
-        } else if (!bulkIn) {
-          // У штучной позиции статус уже посчитан по остатку выше: «доступно»
-          // здесь затёрло бы «всё на руках».
-          item.status = "Available";
-        }
-        if (!bulkIn) item.current_transaction_id = null;
-        return { transaction_id: tx.transaction_id, defect_id, qty: bulkIn ? Number(body.qty || 1) : 1 };
+        mockSettleOrders(touched);
+        const failed = results.filter((r) => !r.ok).length;
+        return { results, done: results.length - failed, failed };
       }
 
       case "/defect/report": {

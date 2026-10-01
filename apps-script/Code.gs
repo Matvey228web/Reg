@@ -1344,6 +1344,7 @@ function doPost(e) {
       case "/item/update": data = handleItemUpdate(payload, token); break;
       case "/transaction/checkout": data = handleTransactionCheckout(payload, token); break;
       case "/transaction/checkin": data = handleTransactionCheckin(payload, token); break;
+      case "/transaction/checkin-batch": data = handleTransactionCheckinBatch(payload, token); break;
       case "/defect/report": data = handleDefectReport(payload, token); break;
       case "/defect/resolve": data = handleDefectResolve(payload, token); break;
       case "/equipment/list": data = handleEquipmentList(payload, token); break;
@@ -2328,16 +2329,6 @@ function checkoutUnderLock(payload, staffRow) {
   }
 }
 
-// Возврат по заказу: строка состава снова свободна, а если на руках больше
-// ничего нет — заказ закрыт. Нужно обеим веткам приёма: мешки и флаги тоже
-// выдаются по заказу, и заказ, закрытый лишь наполовину, ничем не лучше
-// потерянной техники.
-function settleOrderOnCheckin(openTx, txSheet) {
-  if (!openTx.order_id) return;
-  releaseOrderLine(openTx.order_id, openTx.order_line, 1);
-  settleOrderStatus(openTx.order_id, txSheet);
-}
-
 // Заказ закрыт, когда по нему на руках ничего нет. Отдельно от строки
 // состава: приём количеством освобождает строки по каждой записи журнала,
 // а статус заказа считает один раз.
@@ -2354,7 +2345,7 @@ function settleOrderStatus(orderId, txSheet) {
     : { status: "Returned", closed_at: new Date().toISOString() });
 }
 
-// Заявка о дефекте при приёме. Вынесена из handleTransactionCheckin: приём
+// Заявка о дефекте при приёме. Вынесена из checkinUnderLock: приём
 // поштучный и приём количеством — две ветки, а дефект в них один и тот же.
 function reportDefect(itemId, staffRow, transactionId, payload) {
   var defectId = nextId("defect_id", maxIdIn(getSheet(SHEETS.DEFECTS), "defect_id"));
@@ -2425,86 +2416,151 @@ function releaseOrderLine(orderId, lineNo, qty) {
 
 function handleTransactionCheckin(payload, token) {
   var staffRow = checkAuth(token);
-  var itemId = String(payload.item_id || "").trim();
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var eqSheet = getSheet(SHEETS.EQUIPMENT);
-    var item = findRowByValue(eqSheet, "item_id", itemId);
-    if (!item) throw apiError(404, "Предмет не найден");
-
-    var txSheet = getSheet(SHEETS.TRANSACTIONS);
-    var txRows = readRows(txSheet);
-    var openList = txRows.filter(function (t) {
-      return String(t.item_id) === itemId && t.status === "Open";
-    });
-    if (!openList.length) throw apiError(409, "Открытой выдачи для этого предмета не найдено");
-    var openTx = openList[0];
-
-    // Приём количеством: закрываем выдачи по очереди, начиная с самой ранней.
-    // Одна запись журнала может закрыться не полностью — тогда в ней остаётся
-    // то, что ещё на руках, и она ждёт следующего возврата.
-    var byQty = categoryByQty(item.category);
-    if (byQty) {
-      var back = Math.floor(Number(payload.qty || 1));
-      var onHands = openList.reduce(function (sum, t) {
-        return sum + (Number(t.qty || 1) - Number(t.qty_in || 0));
-      }, 0);
-      if (!back || back < 1) throw apiError(400, "Укажите количество — целое число от одного");
-      if (back > onHands) throw apiError(409, "На руках " + onHands + " — принять больше нельзя");
-
-      var left = back, touchedOrders = {};
-      openList.forEach(function (t) {
-        if (left <= 0) return;
-        var remains = Number(t.qty || 1) - Number(t.qty_in || 0);
-        var take = Math.min(remains, left);
-        left -= take;
-        // Строка состава освобождается на принятое этой записью — ровно то,
-        // что при выдаче на неё легло.
-        if (t.order_id) {
-          releaseOrderLine(t.order_id, t.order_line, take);
-          touchedOrders[String(t.order_id)] = true;
-        }
-        var filled = Number(t.qty_in || 0) + take;
-        updateRow(txSheet, t.__row, filled >= Number(t.qty || 1)
-          ? { qty_in: filled, status: "Closed", checked_in_at: new Date().toISOString(),
-              staff_in: staffRow.staff_id, staff_in_name: staffRow.full_name }
-          : { qty_in: filled });
-      });
-
-      var total = itemQty(item);
-      var newOut = Math.max(0, Number(item.qty_out || 0) - back);
-      var defectIdQty = null;
-      var statusQty = newOut >= total ? "Rented" : "Available";
-      if (payload.has_defect) {
-        defectIdQty = reportDefect(itemId, staffRow, openTx.transaction_id, payload);
-        if (defectBlocksRental(payload.defect_severity || "Minor")) statusQty = "In Repair";
-      }
-      updateRow(eqSheet, item.__row, { qty_out: newOut, status: statusQty });
-      Object.keys(touchedOrders).forEach(function (id) { settleOrderStatus(id, txSheet); });
-      return { transaction_id: openTx.transaction_id, defect_id: defectIdQty, qty: back, qty_out: newOut };
-    }
-
-    updateRow(txSheet, openTx.__row, {
-      status: "Closed",
-      checked_in_at: new Date().toISOString(),
-      staff_in: staffRow.staff_id,
-      staff_in_name: staffRow.full_name,
-    });
-
-    settleOrderOnCheckin(openTx, txSheet);
-
-    var defectId = null;
-    var newStatus = "Available";
-    if (payload.has_defect) {
-      defectId = reportDefect(itemId, staffRow, openTx.transaction_id, payload);
-      if (defectBlocksRental(payload.defect_severity || "Minor")) newStatus = "In Repair";
-    }
-    updateRow(eqSheet, item.__row, { status: newStatus, current_transaction_id: "" });
-    return { transaction_id: openTx.transaction_id, defect_id: defectId };
+    var touched = {};
+    var res = checkinUnderLock(payload, staffRow, touched);
+    settleTouchedOrders(touched);
+    return res;
   } finally {
     lock.releaseLock();
   }
+}
+
+// Приём всего заказа одним запросом. Раньше «Принять всё» слало по запросу на
+// позицию, и каждый — это вход, замок и чтение листов заново: 6–9 секунд на
+// штуку. Здесь вход один и замок один, а позиции идут тем же
+// checkinUnderLock, что и одиночный приём, — правило приёма остаётся в одном
+// месте. Отказ по одной позиции не отменяет остальные: склад уже держит их в
+// руках, и ответ говорит, что принято, а что нет. Статус заказа считается
+// один раз в конце — по всем затронутым заказам.
+var CHECKIN_BATCH_MAX = 40;
+
+function handleTransactionCheckinBatch(payload, token) {
+  var staffRow = checkAuth(token);
+  var items = Array.isArray(payload.items) ? payload.items : [];
+  if (!items.length) throw apiError(400, "Нечего принимать — список пуст");
+  if (items.length > CHECKIN_BATCH_MAX) {
+    throw apiError(400, "За раз можно принять не больше " + CHECKIN_BATCH_MAX + " позиций");
+  }
+  var results = [], failures = [], touched = {};
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    items.forEach(function (it) {
+      it = it || {};
+      var itemId = String(it.item_id || "").trim();
+      try {
+        var res = checkinUnderLock(it, staffRow, touched);
+        results.push({ item_id: itemId, ok: true, transaction_id: res.transaction_id,
+          defect_id: res.defect_id, qty: res.qty, qty_out: res.qty_out });
+      } catch (err) {
+        var status = err && err.isApiError ? err.status : 500;
+        var error = err && err.message ? err.message : String(err);
+        results.push({ item_id: itemId, ok: false, status: status, error: error });
+        failures.push({ item_id: itemId, status: status, error: error });
+      }
+    });
+    settleTouchedOrders(touched);
+  } finally {
+    lock.releaseLock();
+  }
+  if (failures.length) {
+    logEvent("checkin", "batch", "partial", "Не принято " + failures.length + " из " + items.length,
+      { order_id: payload.order_id || "", failures: failures });
+  }
+  return { results: results, done: results.length - failures.length, failed: failures.length };
+}
+
+// Статус заказа после приёма — один раз на заказ, а не на каждую позицию.
+function settleTouchedOrders(touched) {
+  var txSheet = getSheet(SHEETS.TRANSACTIONS);
+  Object.keys(touched).forEach(function (id) { settleOrderStatus(id, txSheet); });
+}
+
+// Тело приёма одной позиции, без замка: замок берёт вызывающий — одиночный
+// приём на одну позицию, пакетный на все сразу. Статус заказа здесь не
+// считается: затронутые заказы копятся в touched и закрываются после.
+function checkinUnderLock(payload, staffRow, touched) {
+  var itemId = String(payload.item_id || "").trim();
+  var eqSheet = getSheet(SHEETS.EQUIPMENT);
+  var item = findRowByValue(eqSheet, "item_id", itemId);
+  if (!item) throw apiError(404, "Предмет не найден");
+
+  var txSheet = getSheet(SHEETS.TRANSACTIONS);
+  var txRows = readRows(txSheet);
+  var openList = txRows.filter(function (t) {
+    return String(t.item_id) === itemId && t.status === "Open";
+  });
+  if (!openList.length) throw apiError(409, "Открытой выдачи для этого предмета не найдено");
+  var openTx = openList[0];
+
+  // Приём количеством: закрываем выдачи по очереди, начиная с самой ранней.
+  // Одна запись журнала может закрыться не полностью — тогда в ней остаётся
+  // то, что ещё на руках, и она ждёт следующего возврата.
+  var byQty = categoryByQty(item.category);
+  if (byQty) {
+    var back = Math.floor(Number(payload.qty || 1));
+    var onHands = openList.reduce(function (sum, t) {
+      return sum + (Number(t.qty || 1) - Number(t.qty_in || 0));
+    }, 0);
+    if (!back || back < 1) throw apiError(400, "Укажите количество — целое число от одного");
+    if (back > onHands) throw apiError(409, "На руках " + onHands + " — принять больше нельзя");
+
+    var left = back;
+    openList.forEach(function (t) {
+      if (left <= 0) return;
+      var remains = Number(t.qty || 1) - Number(t.qty_in || 0);
+      var take = Math.min(remains, left);
+      left -= take;
+      // Строка состава освобождается на принятое этой записью — ровно то,
+      // что при выдаче на неё легло.
+      if (t.order_id) {
+        releaseOrderLine(t.order_id, t.order_line, take);
+        touched[String(t.order_id)] = true;
+      }
+      var filled = Number(t.qty_in || 0) + take;
+      updateRow(txSheet, t.__row, filled >= Number(t.qty || 1)
+        ? { qty_in: filled, status: "Closed", checked_in_at: new Date().toISOString(),
+            staff_in: staffRow.staff_id, staff_in_name: staffRow.full_name }
+        : { qty_in: filled });
+    });
+
+    var total = itemQty(item);
+    var newOut = Math.max(0, Number(item.qty_out || 0) - back);
+    var defectIdQty = null;
+    var statusQty = newOut >= total ? "Rented" : "Available";
+    if (payload.has_defect) {
+      defectIdQty = reportDefect(itemId, staffRow, openTx.transaction_id, payload);
+      if (defectBlocksRental(payload.defect_severity || "Minor")) statusQty = "In Repair";
+    }
+    updateRow(eqSheet, item.__row, { qty_out: newOut, status: statusQty });
+    return { transaction_id: openTx.transaction_id, defect_id: defectIdQty, qty: back, qty_out: newOut };
+  }
+
+  updateRow(txSheet, openTx.__row, {
+    status: "Closed",
+    checked_in_at: new Date().toISOString(),
+    staff_in: staffRow.staff_id,
+    staff_in_name: staffRow.full_name,
+  });
+
+  // Возврат по заказу: строка состава снова свободна, а закрыт ли заказ —
+  // решится после, когда приняты все позиции.
+  if (openTx.order_id) {
+    releaseOrderLine(openTx.order_id, openTx.order_line, 1);
+    touched[String(openTx.order_id)] = true;
+  }
+
+  var defectId = null;
+  var newStatus = "Available";
+  if (payload.has_defect) {
+    defectId = reportDefect(itemId, staffRow, openTx.transaction_id, payload);
+    if (defectBlocksRental(payload.defect_severity || "Minor")) newStatus = "In Repair";
+  }
+  updateRow(eqSheet, item.__row, { status: newStatus, current_transaction_id: "" });
+  return { transaction_id: openTx.transaction_id, defect_id: defectId };
 }
 
 // Одно правило для всех путей заявки о дефекте. Раньше приём с дефектом всегда

@@ -2531,6 +2531,84 @@ check('заказ закрылся, когда вернули всё',
 // Поштучная выдача по-прежнему +1 — выше, в «выдаче по заявке без скана».
 check('поштучная выдача по-прежнему +1', issCard.data.items[0].issued_qty === 1, issCard.data.items[0]);
 
+console.log('\n== приём всего заказа одним запросом ==');
+// «Принять всё» на карточке заказа — один вызов вместо запроса на позицию.
+// Сделано как одиночный приём выше: те же записи журнала и строки состава.
+const bModel = issModel;
+const bItem = () => call('/item/create',
+  { name: bModel.model_name, category: bModel.category, model_code: bModel.model_code }, issAdmin).data.item_id;
+const bA = bItem(), bB = bItem(), bC = bItem(), bD = bItem();
+const bGel = call('/item/create', { name: 'Скотч пачкой', category: 'GEL', qty: 20 }, issAdmin).data.item_id;
+const bGelRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(bGel))[0];
+const bOrder = call('/order/create', {
+  order_no: 'BATCH-1', student_name: 'Пачкой Принимаев', student_phone: '+79990000003',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [
+    { line_no: 1, raw_name: bModel.model_name, category: bModel.category, model_code: bModel.model_code, qty: 3 },
+    { line_no: 2, raw_name: 'Скотч', category: 'GEL', model_code: bGelRow.model_code, qty: 5 },
+  ],
+}, issAdmin).data.order_id;
+call('/transaction/checkout', { item_id: bA, order_id: bOrder }, issAdmin);
+call('/transaction/checkout', { item_id: bB, order_id: bOrder }, issAdmin);
+call('/transaction/checkout', { item_id: bD, order_id: bOrder }, issAdmin);
+call('/transaction/checkout', { item_id: bGel, order_id: bOrder, qty: 5 }, issAdmin);
+const bCard = () => call('/order/card', { order_id: bOrder }, issAdmin).data;
+check('до приёма заказ выдан, строки заняты',
+  bCard().order.status === 'Issued' && bCard().items.map((i) => i.issued_qty).join(',') === '3,5',
+  bCard().items.map((i) => i.issued_qty));
+
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [] }, issAdmin);
+check('пустой список — 400', r.ok === false && r.status === 400, r);
+r = call('/transaction/checkin-batch', { order_id: bOrder,
+  items: Array.from({ length: 41 }, () => ({ item_id: bA })) }, issAdmin);
+check('больше сорока позиций — 400', r.ok === false && r.status === 400, r);
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [{ item_id: bA }] }, 'не-токен');
+check('чужой токен — отказ целиком', r.ok === false && r.status === 401, r);
+check('после отказа ничего не принято', bCard().order.status === 'Issued' &&
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(bA))[0].status === 'Rented');
+
+// Две позиции не принять: bC не выдавался, скотча на руках 5, а не 99.
+// Остальные проходят — сбой одной не отменяет других.
+const logsBefore = logRows().length;
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [
+  { item_id: bA }, { item_id: bC }, { item_id: bGel, qty: 99 },
+] }, issAdmin);
+check('пачка с ошибками отвечает ok и по каждой позиции', r.ok === true && r.data.results.length === 3, r);
+check('годная позиция принята', r.data.results[0].ok === true && r.data.results[0].transaction_id, r.data.results[0]);
+check('невыданная — отказ 409', r.data.results[1].ok === false && r.data.results[1].status === 409
+  && r.data.results[1].item_id === String(bC), r.data.results[1]);
+check('лишнее количество — отказ 409 с причиной', r.data.results[2].ok === false
+  && r.data.results[2].status === 409 && /На руках 5/.test(r.data.results[2].error), r.data.results[2]);
+check('счётчики: принято 1, не принято 2', r.data.done === 1 && r.data.failed === 2, r.data);
+const bLogs = logRows().slice(logsBefore).filter((l) => l.kind === 'checkin' && l.endpoint === 'batch');
+check('в Logs одна строка об отказах пачки', bLogs.length === 1 && bLogs[0].context.includes(String(bC))
+  && /На руках/.test(bLogs[0].context), bLogs);
+check('заказ ещё выдан — на руках остались вещи', bCard().order.status === 'Issued');
+
+// Остаток заказа одним вызовом: две штучные (одна с дефектом) и количество.
+r = call('/transaction/checkin-batch', { order_id: bOrder, items: [
+  { item_id: bB, has_defect: true, defect_description: 'Трещина', defect_severity: 'Major' },
+  { item_id: bD },
+  { item_id: bGel, qty: 5 },
+] }, issAdmin);
+check('остаток принят целиком', r.ok === true && r.data.done === 3 && r.data.failed === 0, r);
+check('позиция количеством вернула остаток на складе', r.data.results[2].qty === 5 && r.data.results[2].qty_out === 0,
+  r.data.results[2]);
+check('по дефекту заведена заявка', !!r.data.results[0].defect_id, r.data.results[0]);
+const bEq = (id) => readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) => String(e.item_id) === String(id))[0];
+check('серьёзный дефект увёл предмет в ремонт', bEq(bB).status === 'In Repair', bEq(bB).status);
+check('без дефекта — снова доступны', bEq(bA).status === 'Available' && bEq(bD).status === 'Available',
+  [bEq(bA).status, bEq(bD).status]);
+check('заказ закрылся, когда вернули всё', bCard().order.status === 'Returned' && String(bCard().order.closed_at) !== '',
+  bCard().order);
+check('строки состава свободны', bCard().items.map((i) => i.issued_qty).join(',') === '0,0',
+  bCard().items.map((i) => i.issued_qty));
+check('все записи журнала по заказу закрыты',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.order_id) === String(bOrder))
+    .every((t) => t.status === 'Closed'));
+check('полный успех в Logs не пишется',
+  logRows().filter((l) => l.kind === 'checkin' && l.endpoint === 'batch').length === 1);
+
 console.log('\n== архив заказа ==');
 check('заказ с вещью на руках в архив не уходит',
   call('/order/archive', { order_id: issOrder }, issAdmin).status === 409,
