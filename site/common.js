@@ -84,11 +84,103 @@ var Site = (function () {
     return have.indexOf(k) === -1 ? "" : "photos/" + k + ".jpg";
   }
 
-  // Пока фотографии нет. Картинка приходит поверх и прячет знак — см. style.css.
-  function shotIcon() {
-    return '<svg class="shot-ico" viewBox="0 0 24 24" aria-hidden="true">' +
-      '<rect x="3" y="6" width="13" height="12"/>' +
-      '<path d="M16 10l5-3v10l-5-3z"/></svg>';
+  // --- Значки ---
+  // Lucide (лицензия ISC, lucide.dev): контуры вставлены сюда, а не подгружаются,
+  // чтобы значок не стоил ни запроса, ни шрифта. Цвет — currentColor, размер и
+  // толщина линии задаются в style.css (.ico).
+  var ICONS = {
+    "shopping-cart": '<path d="m2.05 2.05 1.099-.028a1 1 0 0 1 1.008.815l2.69 14.347A1 1 0 0 0 7.83 18H18"/><path d="M4.563 5h16.435a1 1 0 0 1 .981 1.204l-1.026 6.226A2 2 0 0 1 18.962 14H6.25"/><circle cx="18" cy="20" r="2"/><circle cx="8" cy="20" r="2"/>',
+    "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+    "arrow-left": '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+    "copy": '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    "check": '<path d="M20 6 9 17l-5-5"/>',
+    "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+    "moon": '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/>',
+    "video": '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+    "aperture": '<circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94"/><path d="M9.69 8h11.48"/><path d="m7.38 12 5.74-9.94"/><path d="M9.69 16 3.95 6.06"/><path d="M14.31 16H2.83"/><path d="m16.62 12-5.74 9.94"/>',
+    "lightbulb": '<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>',
+    "mic": '<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>',
+    "wrench": '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>',
+    "package": '<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/>',
+    "search": '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
+    "plus": '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    "minus": '<path d="M5 12h14"/>',
+  };
+
+  function icon(name, cls) {
+    return '<svg class="ico' + (cls ? " " + cls : "") + '" viewBox="0 0 24 24" aria-hidden="true">' +
+      (ICONS[name] || "") + "</svg>";
+  }
+
+  // Знак категории: пока своей фотографии у позиции нет, он стоит на фоне
+  // картинки категории. Картинка приходит поверх и прячет знак — см. style.css.
+  var CAT_ICON = {
+    CAM: "video", LEN: "aperture", LGT: "lightbulb",
+    AUD: "mic", GRP: "wrench", OTH: "package",
+  };
+
+  function shotIcon(m) {
+    return icon(CAT_ICON[m && m.category] || "package", "shot-ico");
+  }
+
+  // Атрибут для .shot / .item-shot: у позиции без снимка за знаком стоит
+  // приглушённая картинка её категории. Со своим снимком фон не нужен.
+  function shotAttr(m) {
+    return !photo(m) && CAT_ICON[m && m.category]
+      ? ' data-cat="' + escapeHtml(m.category) + '"' : "";
+  }
+
+  // --- Бегущие цифры ---
+  // Число сменилось — старое уезжает вверх и гаснет, новое въезжает снизу.
+  // Целиком число, не по цифрам: так хватает одного приёма на всё. `old` —
+  // что стояло раньше; страницы, которые перерисовываются целиком (корзина),
+  // берут его из старой разметки и передают сюда. Нет старого значения — это
+  // первая отрисовка, и анимации нет. Уменьшенное движение — просто подмена.
+  // Работает и с <input> (счётчик в карточке и в корзине), и с обычным
+  // элементом (число в шапке и на витрине): призрак старого числа лежит поверх
+  // и ничего не двигает, стили — в style.css (.num-box, .num-ghost).
+  function tick(el, value, old) {
+    if (!el) return;
+    value = String(value);
+    var input = el.tagName === "INPUT";
+    var target = el;
+    if (!input) {
+      target = el.querySelector(".num-v");
+      if (!target) {
+        // Число обёрнуто один раз; то, что стояло в элементе, сохраняется.
+        var prev = el.textContent;
+        el.innerHTML = '<span class="num-v"></span>';
+        target = el.firstChild;
+        target.textContent = prev;
+      }
+    }
+    if (old === undefined) old = input ? el.value : target.textContent;
+    if (input) el.value = value; else target.textContent = value;
+    if (old === "" || old === null || String(old) === value) return;
+    var calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (calm || !target.animate) return;
+
+    var box = input ? el.parentNode : el;
+    box.classList.add("num-box");
+    // Быстрые нажатия: прежний призрак и незаконченное движение снимаем сразу,
+    // иначе призраки копятся по одному на нажатие.
+    var olds = box.querySelectorAll(".num-ghost");
+    for (var i = 0; i < olds.length; i++) olds[i].remove();
+    if (target.getAnimations) target.getAnimations().forEach(function (a) { a.cancel(); });
+    var ghost = document.createElement("span");
+    ghost.className = "num-ghost";
+    ghost.textContent = old;
+    box.appendChild(ghost);
+    var opts = { duration: 220, easing: "cubic-bezier(.16,.84,.24,1)" };
+    var out = ghost.animate([
+      { transform: "translateY(0)", opacity: 1 },
+      { transform: "translateY(-70%)", opacity: 0 },
+    ], opts);
+    out.onfinish = out.oncancel = function () { ghost.remove(); };
+    target.animate([
+      { transform: "translateY(70%)", opacity: 0 },
+      { transform: "translateY(0)", opacity: 1 },
+    ], opts);
   }
 
   function humanDate(iso) {
@@ -159,6 +251,29 @@ var Site = (function () {
       });
   }
 
+  // Объявления склада с бэкенда. Таблица при промахе кэша отвечает до 30 секунд,
+  // а блок объявлений стоит первой строкой и ждать его долго нельзя: через пять
+  // секунд сдаёмся, и вызывающий берёт запасной файл.
+  function announcements() {
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, 5000) : null;
+    return fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ endpoint: "/public/announcements", payload: {} }),
+      signal: ctl ? ctl.signal : undefined,
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (timer) clearTimeout(timer);
+        if (!data || !data.ok || !data.data) throw new Error("не ответил");
+        return data.data.items || [];
+      }, function (err) {
+        if (timer) clearTimeout(timer);
+        throw err;
+      });
+  }
+
   // Принимает ли склад заявки прямо с сайта. Спрашиваем один раз за страницу:
   // показывать кнопку, которая заведомо откажет, хуже, чем сразу предложить
   // скопировать текст.
@@ -220,6 +335,10 @@ var Site = (function () {
   var stored = null;       // прижилась ли запись; null — ещё не проверяли
 
   function readCart() {
+    // Корзина в памяти страницы — главный источник: её сбрасывает refreshCart
+    // (соседняя вкладка, возврат «назад»). Разбирать JSON из хранилища на
+    // каждом нажатии незачем.
+    if (memCart) return memCart;
     try {
       var raw = localStorage.getItem(CART_KEY);
       var data = raw ? JSON.parse(raw) : null;
@@ -239,8 +358,8 @@ var Site = (function () {
     try {
       localStorage.setItem(CART_KEY, text);
       // Записалось — не значит сохранилось: в приватном режиме запись молча
-      // не доживает до чтения.
-      stored = localStorage.getItem(CART_KEY) === text;
+      // не доживает до чтения. Проверяем, пока не убедились; дальше хватает записи.
+      if (stored !== true) stored = localStorage.getItem(CART_KEY) === text;
     } catch (e) {
       stored = false;
     }
@@ -337,16 +456,20 @@ var Site = (function () {
     var el = $("cart-count");
     if (!el) return;
     var n = cartCount();
-    el.textContent = n ? String(n) : "";
+    // Прежнее число берём из шапки: при первой отрисовке его нет — и движения нет.
+    var cur = el.querySelector(".num-v");
+    var old = el.hidden ? "" : (cur ? cur.textContent : el.textContent);
     el.hidden = !n;
+    if (n) tick(el, n, old);
+    else el.textContent = "";
   }
 
   return {
     $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
-    humanDate: humanDate, shotIcon: shotIcon,
+    humanDate: humanDate, icon: icon, shotIcon: shotIcon, shotAttr: shotAttr, tick: tick,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
-    sendOrder: sendOrder, ordersOpen: ordersOpen,
+    sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
@@ -368,6 +491,79 @@ document.addEventListener("DOMContentLoaded", function () {
         Site.escapeHtml(c.label) + "</a></li>";
     }).join("");
   }).catch(function () { /* нет снимка — подвал остаётся без списка */ });
+});
+
+// Объявления склада: первой строкой на каждой странице. Завхоз пишет их в чат,
+// складмен вставляет в приложении, а сюда они приходят через воркер:
+// /public/announcements, кэш пять минут, снятое исчезает сразу (запись сбрасывает
+// кэш). Не ответил бэкенд — берём announcements.json рядом со страницей: это
+// запасной список, и правится он руками. Ответил пустым списком — значит,
+// объявлений нет, и запасной файл не нужен: иначе снятое объявление
+// воскресало бы из файла.
+// Срок (until, а в файле ещё from) проверяется здесь, в браузере: у посетителя
+// свой часовой пояс. ?ann=all показывает всё без оглядки на даты — для проверки.
+document.addEventListener("DOMContentLoaded", function () {
+  var box = Site.$("notice");
+  if (!box) return;
+  var all = /[?&]ann=all\b/.test(location.search);
+  var d = new Date();
+  var today = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" +
+    ("0" + d.getDate()).slice(-2);
+
+  function paint(items) {
+    var shown = (items || []).filter(function (a) {
+      return all || ((!a.from || a.from <= today) && (!a.until || a.until >= today));
+    });
+    if (!shown.length) return;
+    box.innerHTML = shown.map(function (a) {
+      return '<details class="notice-item" open><summary><span class="notice-tag">Внимание</span>' +
+        '<span class="notice-title">' + Site.escapeHtml(a.title) + "</span>" + Site.icon("chevron-down") + "</summary>" +
+        '<div class="notice-body">' + (a.lines || []).map(function (line) {
+          return "<p>" + Site.escapeHtml(line) + "</p>";
+        }).join("") + "</div></details>";
+    }).join("");
+    box.hidden = false;
+  }
+
+  Site.announcements()
+    .then(paint)
+    .catch(function () {
+      return fetch("announcements.json", { cache: "no-cache" })
+        .then(function (res) { return res.json(); })
+        .then(function (data) { paint(data.items); });
+    })
+    .catch(function () { /* нет ни ответа, ни файла — объявлений просто нет */ });
+});
+
+// ВРЕМЕННО: переключатель темы — убрать, когда определимся с темой по умолчанию.
+// Сама тема выставляется ещё до отрисовки скриптом в <head> каждой страницы
+// (data-theme на <html>, выбор в localStorage `mifs_theme`); здесь только кнопка.
+// Без кнопки тема продолжает работать.
+document.addEventListener("DOMContentLoaded", function () {
+  var btn = Site.$("theme-toggle");
+  if (!btn) return;
+  var COLORS = { light: "#f4f3f0", dark: "#0d0d0f" };
+
+  function now() {
+    return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  }
+
+  // Показываем то, во что нажатие переключит: в тёмной — солнце, в светлой — луна.
+  function paint() {
+    var light = now() === "light";
+    btn.innerHTML = Site.icon(light ? "moon" : "sun");
+    btn.setAttribute("aria-label", light ? "Включить тёмную тему" : "Включить светлую тему");
+  }
+
+  btn.addEventListener("click", function () {
+    var next = now() === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", COLORS[next]);
+    try { localStorage.setItem("mifs_theme", next); } catch (e) { /* не сохранилось — до перезагрузки */ }
+    paint();
+  });
+  paint();
 });
 
 // Возврат кнопкой «назад» страницу заново не выполняет: браузер достаёт её из

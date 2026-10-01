@@ -21,6 +21,9 @@ var SHEETS = {
   DEFECTS: "Defects",
   CATEGORIES: "Categories",
   INVENTORY: "Inventory",
+  // Объявления склада: их вставляет складмен в приложении, а сайт читает через
+  // /public/announcements и показывает первой строкой.
+  ANNOUNCEMENTS: "Announcements",
   // Как читать чужую таблицу при импорте. Раньше и названия колонок, и правила
   // раскладки по категориям были прибиты в коде: чужая выгрузка с колонкой
   // «Название» вместо «Наименование» импортировалась пустой, и починить это
@@ -159,6 +162,11 @@ var SCHEMA = {
   // лист пухнет на каждую сверку.
   Inventory: ["inventory_id", "kind", "item_id", "item_name", "expected_qty", "found_qty",
               "scope", "started_at", "finished_at", "staff_id", "staff_name"],
+  // Объявления склада. text — абзацы через перенос строки. until — последний
+  // день показа "ГГГГ-ММ-ДД", пусто — пока не снимут. removed_at: снятое не
+  // удаляем, как и заказы: «мало ли что», и строка остаётся в таблице.
+  Announcements: ["announcement_id", "title", "text", "until", "created_at",
+                  "created_by", "created_by_name", "removed_at"],
   Meta: ["key", "value"],
   // Журнал служебных событий (см. logEvent). context — JSON с подробностями,
   // обрезанный: ячейка не резиновая, а стек на пару экранов читать некому.
@@ -184,6 +192,8 @@ var TEXT_COLUMNS = {
   OrderItems: ["model_code"],
   Transactions: ["item_id"],
   Defects: ["item_id"],
+  // until — день показа строкой, а не датой со своим поясом (см. выше).
+  Announcements: ["until"],
   // Журнал сверок: без этого номер 010101 записывался числом 10101 — ведущий
   // ноль съедала таблица, и поиск по номеру в журнале ничего не находил.
   Inventory: ["item_id"],
@@ -1336,6 +1346,7 @@ function doPost(e) {
       // ничего, по чему можно опознать конкретную единицу техники.
       case "/public/catalog": data = handlePublicCatalog(payload); break;
       case "/public/order": data = handlePublicOrder(payload); break;
+      case "/public/announcements": data = handlePublicAnnouncements(payload); break;
       case "/act/template": data = handleActTemplate(payload, token); break;
       case "/act/build": data = handleActBuild(payload, token); break;
       case "/item/lookup": data = handleItemLookup(payload, token); break;
@@ -1386,6 +1397,9 @@ function doPost(e) {
       case "/model/move": data = handleModelMove(payload, token); break;
       case "/inventory/save": data = handleInventorySave(payload, token); break;
       case "/inventory/list": data = handleInventoryList(payload, token); break;
+      case "/announcements/list": data = handleAnnouncementsList(payload, token); break;
+      case "/announcement/save": data = handleAnnouncementSave(payload, token); break;
+      case "/announcement/remove": data = handleAnnouncementRemove(payload, token); break;
       case "/settings/get": data = handleSettingsGet(payload, token); break;
       case "/settings/set": data = handleSettingsSet(payload, token); break;
       case "/category/create": data = handleCategoryCreate(payload, token); break;
@@ -3994,6 +4008,151 @@ function handleInventoryList(payload, token) {
 }
 
 // ---------------------------------------------------------------------
+// Объявления склада
+// ---------------------------------------------------------------------
+//
+// Завхоз пишет важное (график, инвентаризация, правила) в чат, складмен
+// вставляет это в приложении, а сайт показывает первой строкой. Писать может
+// любой вошедший, а не только администратор: складмен — это роль Warehouse
+// Staff, и requireAdmin пустил бы только владельца таблицы.
+
+var ANN_LIMITS = { title: 120, text: 2000, lines: 10, active: 10 };
+
+// Дата "ГГГГ-ММ-ДД" или пустая строка. Ячейка могла стать датой, если вкладку
+// заводили руками без текстового формата, — приводим и такую.
+function announcementUntil(raw) {
+  if (raw instanceof Date) return raw.toISOString().substring(0, 10);
+  return parseRuDate(raw);
+}
+
+function announcementLines(text) {
+  return String(text || "").split(/\r?\n/).map(function (l) { return l.trim(); })
+    .filter(function (l) { return l; });
+}
+
+function announcementActive(row, today) {
+  if (row.removed_at) return false;
+  var until = announcementUntil(row.until);
+  return !until || until >= today;
+}
+
+/**
+ * Публичные объявления для сайта. Наружу — только заголовок, абзацы и срок:
+ * кто и когда заводил, сайту знать незачем. Срок отдаём как есть, а решает
+ * браузер: у посетителя свой часовой пояс, и сервер, сверяющий по UTC, снял бы
+ * объявление не в тот день. Сервер отсекает только снятое и давно просроченное
+ * (неделя запаса), чтобы ответ не рос.
+ */
+function handlePublicAnnouncements(payload) {
+  // Вкладки может не быть, если setupSheets после выкладки ещё не запускали.
+  // Сайту это не повод падать: объявлений просто нет.
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.ANNOUNCEMENTS);
+  if (!sheet) return { items: [] };
+  var cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+  var items = [];
+  readRows(sheet).forEach(function (r) {
+    if (r.removed_at) return;
+    var until = announcementUntil(r.until);
+    if (until && until < cutoff) return;
+    var lines = announcementLines(r.text);
+    if (!r.title || !lines.length) return;
+    var item = { id: "a" + r.announcement_id, title: String(r.title), lines: lines };
+    if (until) item.until = until;
+    items.push(item);
+  });
+  return { items: items.reverse() };
+}
+
+function handleAnnouncementsList(payload, token) {
+  checkAuth(token);
+  var today = new Date().toISOString().substring(0, 10);
+  var items = readRows(getSheet(SHEETS.ANNOUNCEMENTS)).filter(function (r) {
+    return !r.removed_at;
+  }).map(function (r) {
+    var until = announcementUntil(r.until);
+    return {
+      announcement_id: String(r.announcement_id),
+      title: String(r.title),
+      text: String(r.text),
+      until: until,
+      created_at: r.created_at,
+      created_by_name: r.created_by_name,
+      expired: !!until && until < today,
+    };
+  });
+  return { items: items.reverse(), limits: ANN_LIMITS };
+}
+
+function handleAnnouncementSave(payload, token) {
+  var me = checkAuth(token);
+  var title = String(payload.title || "").trim();
+  var text = String(payload.text || "").trim();
+  if (!title) throw apiError(400, "Укажите заголовок объявления");
+  if (title.length > ANN_LIMITS.title) {
+    throw apiError(400, "Заголовок длиннее " + ANN_LIMITS.title + " символов");
+  }
+  var lines = announcementLines(text);
+  if (!lines.length) throw apiError(400, "Напишите текст объявления");
+  if (text.length > ANN_LIMITS.text) {
+    throw apiError(400, "Текст длиннее " + ANN_LIMITS.text + " символов");
+  }
+  if (lines.length > ANN_LIMITS.lines) {
+    throw apiError(400, "Больше " + ANN_LIMITS.lines + " абзацев — объявление превращается в простыню");
+  }
+  var untilRaw = String(payload.until || "").trim();
+  var until = "";
+  if (untilRaw) {
+    until = parseRuDate(untilRaw);
+    // Дата 2026-02-31 по формату проходит, а днём не является.
+    var d = new Date(until + "T00:00:00Z");
+    if (!until || isNaN(d.getTime()) || d.toISOString().substring(0, 10) !== until) {
+      throw apiError(400, "Дата «показывать до» не распознана");
+    }
+  }
+
+  var sheet = getSheet(SHEETS.ANNOUNCEMENTS);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var id = String(payload.announcement_id || "").trim();
+    if (id) {
+      var row = findRowByValue(sheet, "announcement_id", id);
+      if (!row || row.removed_at) throw apiError(404, "Объявление не найдено");
+      updateRow(sheet, row.__row, { title: title, text: lines.join("\n"), until: until });
+      return { announcement_id: id, changed: true };
+    }
+    var today = new Date().toISOString().substring(0, 10);
+    var active = readRows(sheet).filter(function (r) { return announcementActive(r, today); }).length;
+    if (active >= ANN_LIMITS.active) {
+      throw apiError(409, "Уже " + active + " действующих объявлений. Снимите лишнее, " +
+        "иначе сайт превратится в простыню.");
+    }
+    var newId = String(nextId("announcement_id"));
+    appendRow(sheet, {
+      announcement_id: newId, title: title, text: lines.join("\n"), until: until,
+      created_at: new Date().toISOString(),
+      created_by: me.staff_id, created_by_name: me.full_name,
+    });
+    return { announcement_id: newId, changed: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Снятое не удаляется, а получает метку: удалять записи нельзя, «мало ли что».
+function handleAnnouncementRemove(payload, token) {
+  checkAuth(token);
+  var id = String(payload.announcement_id || "").trim();
+  if (!id) throw apiError(400, "Не указано, какое объявление снять");
+  var sheet = getSheet(SHEETS.ANNOUNCEMENTS);
+  var row = findRowByValue(sheet, "announcement_id", id);
+  if (!row) throw apiError(404, "Объявление не найдено");
+  if (row.removed_at) return { announcement_id: id, changed: false };
+  updateRow(sheet, row.__row, { removed_at: new Date().toISOString() });
+  return { announcement_id: id, changed: true };
+}
+
+// ---------------------------------------------------------------------
 // Настройки, категории и обслуживание — экран админки
 // ---------------------------------------------------------------------
 
@@ -4457,6 +4616,9 @@ function handleMaintenance(payload, token) {
   var action = String(payload.action || "");
   if (action === "archive") return { message: archiveJournal() };
   if (action === "trim") return { message: trimJournal() };
+  // Новая вкладка или колонка после выкладки: то же, что «Run» у setupSheets в
+  // редакторе, но с телефона. Повторный запуск безопасен: данные не трогаются.
+  if (action === "setup") return { message: setupSheets() };
   throw apiError(400, "Неизвестное действие обслуживания");
 }
 

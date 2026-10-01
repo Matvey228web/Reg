@@ -463,6 +463,7 @@ const MockStore = (() => {
     students, orders, orderItems,
     findStaffByLogin, findStaffById, findItem, staffPublic, requireToken, requireAdmin, rotateToken,
     inventories: [],
+    announcements: [],
     ownerId: () => ownerStaffId,
     setOwnerId: (id) => { ownerStaffId = id; },
     requireOwner(token) {
@@ -591,6 +592,12 @@ function mockSettleOrders(touched) {
       order.closed_at = stillOut ? "" : new Date().toISOString();
     }
   });
+}
+
+function mockFail(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
 }
 
 const MockAPI = {
@@ -1561,6 +1568,53 @@ const MockAPI = {
         return MockStore.inventories.slice().reverse();
       }
 
+      // Объявления склада: писать и снимать может любой вошедший, не только
+      // администратор. Публичной ручки для сайта в демо нет — сайт мок не
+      // использует.
+      case "/announcements/list": {
+        MockStore.requireToken(token);
+        const today = new Date().toISOString().substring(0, 10);
+        return {
+          items: MockStore.announcements.filter((a) => !a.removed_at).map((a) => ({
+            ...a, expired: !!a.until && a.until < today,
+          })).reverse(),
+          limits: { title: 120, text: 2000, lines: 10, active: 10 },
+        };
+      }
+
+      case "/announcement/save": {
+        const staff_id = MockStore.requireToken(token);
+        const title = String(body.title || "").trim();
+        const text = String(body.text || "").trim();
+        if (!title) throw mockFail(400, "Укажите заголовок объявления");
+        if (!text) throw mockFail(400, "Напишите текст объявления");
+        const until = String(body.until || "").trim();
+        const id = String(body.announcement_id || "");
+        if (id) {
+          const rec = MockStore.announcements.find((a) => a.announcement_id === id && !a.removed_at);
+          if (!rec) throw mockFail(404, "Объявление не найдено");
+          Object.assign(rec, { title, text, until });
+          return { announcement_id: id, changed: true };
+        }
+        const rec = {
+          announcement_id: String(MockStore.announcements.length + 1),
+          title, text, until,
+          created_at: new Date().toISOString(),
+          created_by_name: MockStore.findStaffById(staff_id).full_name,
+          removed_at: "",
+        };
+        MockStore.announcements.push(rec);
+        return { announcement_id: rec.announcement_id, changed: true };
+      }
+
+      case "/announcement/remove": {
+        MockStore.requireToken(token);
+        const rec = MockStore.announcements.find((a) => a.announcement_id === String(body.announcement_id));
+        if (!rec) throw mockFail(404, "Объявление не найдено");
+        rec.removed_at = rec.removed_at || new Date().toISOString();
+        return { announcement_id: rec.announcement_id, changed: true };
+      }
+
       case "/settings/get": {
         const meId = MockStore.requireToken(token);
         const me = MockStore.findStaffById(meId);
@@ -1680,6 +1734,7 @@ const MockAPI = {
       case "/maintenance": {
         MockStore.requireAdmin(token);
         if (body.action === "archive") return { message: "Журнал выгружен (демо-режим)." };
+        if (body.action === "setup") return { message: "Готово. Создано вкладок: 0 (демо-режим)." };
         if (body.action === "trim") {
           return { message: "Подрезка отменена: журнал ни разу не выгружался." };
         }

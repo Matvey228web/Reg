@@ -85,6 +85,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | `Transactions` | журнал выдач и приёмов |
 | `Defects` | дефекты и их закрытие |
 | `Inventory` | журнал сверок: итог и расхождения, не все найденные позиции |
+| `Announcements` | объявления склада для сайта: заголовок, абзацы, «показывать до»; снятое получает `removed_at`, а не удаляется |
 | `ImportMap`, `ImportRules` | как читать чужую выгрузку: синонимы колонок и раскладка по категориям |
 | `Meta` | значения настроек |
 | `Logs` | журнал сбоев: время, род, ручка, причина, текст, подробности. Подрезается до 90 дней ночью |
@@ -102,7 +103,8 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Выдача и приём | `/transaction/checkout`, `/transaction/checkin`, `/transaction/checkin-batch` (приём всего заказа одним запросом) |
 | Дефекты | `/defect/report`, `/defect/resolve`, `/defects/list` |
 | Заказы | `/order/*`, `/orders/list`, `/students/list`, `/student/history` |
-| Сайт | `/public/catalog`, `/public/order` |
+| Сайт | `/public/catalog`, `/public/order`, `/public/announcements` |
+| Объявления | `/announcements/list`, `/announcement/save`, `/announcement/remove` (любой вошедший, не только Admin) |
 | Акт | `/act/template`, `/act/build` |
 | Бот | `/notify/*`; `/labels/send` выведена из работы и отвечает `410` с подсказкой — ради старых версий приложения |
 | Сверка | `/inventory/save`, `/inventory/list` |
@@ -165,6 +167,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | `js/order.js` | карточка заказа, выдача прямо из неё |
 | `js/repair.js` | доска дефектов с фильтром по статусу |
 | `js/inventory.js` | сверка склада сканированием, по кэшу, один запрос в конце |
+| `js/announcements.js` | объявления склада: список, добавить, править, снять; видят все вошедшие |
 | `js/labels.js` | печать QR на термопринтер этикеток |
 | `js/staff.js` | сотрудники и роли (администратор) |
 | `js/models.js` | справочник моделей по категориям, перенос с перенумерацией |
