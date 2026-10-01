@@ -1,0 +1,158 @@
+/* Сезонная тема «Новый год» (15 декабря - 15 января). Грузится theme.js после
+ * style.css; каждое правило с префиксом html[data-season="xmas"], чтобы
+ * перебить основные по специфичности. Тёмная база остаётся, цвета: хвоя, клюква,
+ * золото. Только CSS и SVG в data-URI, без скриптов и шрифтов; движутся
+ * лишь opacity/transform/background-position, при prefers-reduced-motion
+ * всё стоит (лампочки горят ровно).
+ *
+ * Контраст (расчёт). Тёмная: ink/bg 17.4, ink/panel 16.2, dim/bg 7.7,
+ * dim/panel 7.1, белый на --accent (хвоя) 6.1, accent-text/bg 10.2, /panel 9.5,
+ * белый на клюкве 6.9, клюква-текст/bg 7.2. Светлая: ink/bg 14.7, dim/bg 6.0,
+ * dim/panel 6.7, белый на accent 8.3, accent-text/bg 8.1, клюква-текст/bg 6.8. */
+
+/* --- Токены. Светлая тема: морозный бело-зелёный фон. --- */
+html[data-season="xmas"] {
+  --bg: #09120e;
+  --panel: #0f1b16;
+  --line: #23382e;
+  --ink: #f1f6f3;
+  --dim: #93aa9e;
+  --accent: #17704a;          /* хвоя: заливка, белый на ней 6.1 */
+  --accent-text: #62d394;     /* хвоя текстом на тёмном: 10.2 */
+  --shot: #0c1713;
+  --veil-rgb: 9, 18, 14;
+  --img-filter: saturate(.95) brightness(.95);
+
+  --cran: #b3122e;            /* клюква: заливка, белый 6.9 */
+  --cran-text: #ff7088;       /* клюква текстом на тёмном: 7.2 */
+  --gold: #e3c06a;            /* золото: кромки и знак */
+  --gold-line: rgba(227, 192, 106, .55);
+  --snow: 255, 255, 255;
+  --snow-op: .3;
+  --glow-rgb: 255, 190, 90;
+}
+html[data-season="xmas"][data-theme="light"] {
+  --bg: #eef4f1;
+  --panel: #ffffff;
+  --line: #cddbd4;
+  --ink: #12231b;
+  --dim: #4c6157;
+  --accent: #0f5a3a;          /* белый на нём 8.3 */
+  --accent-text: #0d5434;     /* на фоне 8.1 */
+  --shot: #e2ece7;
+  --veil-rgb: 238, 244, 241;
+  --img-filter: saturate(.7) brightness(1.08);
+
+  --cran: #b3122e;
+  --cran-text: #a80f2b;       /* на фоне 6.8 */
+  --gold: #9a7620;
+  --gold-line: rgba(154, 118, 32, .6);
+  --snow: 120, 165, 150;
+  --snow-op: .35;
+  --glow-rgb: 255, 200, 110;
+}
+
+/* --- Снегопад: фиксированный слой за содержимым, клики не ловит. Слой выше
+   экрана на период плитки (720), сдвиг transform - плавно и без перерисовки. --- */
+html[data-season="xmas"] body::before {
+  content: ""; position: fixed; left: 0; right: 0; top: -720px; bottom: 0; z-index: -1;
+  pointer-events: none; opacity: var(--snow-op);
+  background:
+    radial-gradient(1.6px 1.6px at 40px 30px, rgb(var(--snow)) 98%, transparent) 0 0 / 180px 180px,
+    radial-gradient(1.2px 1.2px at 120px 90px, rgb(var(--snow)) 98%, transparent) 0 0 / 240px 240px,
+    radial-gradient(2px 2px at 80px 150px, rgb(var(--snow)) 98%, transparent) 0 0 / 360px 360px;
+  will-change: transform;
+  animation: xmas-snow 60s linear infinite;
+}
+@keyframes xmas-snow { to { transform: translateY(720px); } }
+
+/* --- Шапка: золотая кромка, золотой знак, клюквенный счётчик. --- */
+html[data-season="xmas"] .topbar { border-bottom-color: var(--gold-line); }
+html[data-season="xmas"] .logo-mark { color: var(--gold); }
+html[data-season="xmas"] .wordmark { --lk-num-color: var(--gold); }
+html[data-season="xmas"] .cart-link { border-color: var(--gold-line); }
+html[data-season="xmas"] .cart-count {
+  background: var(--cran); color: #fff;
+  box-shadow: 0 0 0 3px var(--cran);   /* вширь без сдвига раскладки */
+}
+html[data-season="xmas"] .theme-btn:hover::before { border-color: var(--accent-text); }
+html[data-season="xmas"] .theme-btn:active::before { background: var(--accent); border-color: var(--accent); }
+
+/* Тёмная хвоя на тёмном фоне не читается как линия (3.1): там, где акцент
+   был рамкой или подчёркиванием, берём светлую хвою или золото. */
+html[data-season="xmas"] .add:hover { border-color: var(--accent-text); }
+html[data-season="xmas"] .section--on { border-bottom-color: var(--gold); }
+html[data-season="xmas"] input[type="checkbox"]:checked { border-color: var(--accent-text); }
+html[data-season="xmas"] input[type="checkbox"]:checked::after { background: var(--accent-text); }
+html[data-season="xmas"] .card-add .stepper--wide { border-color: var(--accent-text); }
+html[data-season="xmas"] .btn--secondary { border-color: var(--line); }
+
+/* Красное по смыслу «нет / убрать / ошибка» - клюква, а не хвоя. */
+html[data-season="xmas"] .card-free.none, html[data-season="xmas"] .link-danger, html[data-season="xmas"] .cart-warn, html[data-season="xmas"] .hint--bad { color: var(--cran-text); }
+html[data-season="xmas"] input.is-bad, html[data-season="xmas"] textarea.is-bad { border-color: var(--cran-text); }
+html[data-season="xmas"] .notice-tag { background: var(--cran); color: #fff; }
+html[data-season="xmas"] .notice { border-bottom-color: var(--gold-line); }
+
+/* --- Баннер: фото гирлянды вместо hero.jpg (так же, как в style.css: узкому
+   экрану лёгкий -m, от 720 широкий), завеса и фильтр на месте, поверх тёплое
+   золотое свечение слева-внизу, под заголовком. --- */
+html[data-season="xmas"] .hero::before { background-image: url(../img/season-xmas-m.jpg); background-position: center 45%; }
+html[data-season="xmas"] .hero::after {
+  background:
+    radial-gradient(70% 90% at 12% 100%, rgba(var(--glow-rgb), .22), transparent 70%),
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .3) 0%, rgba(var(--veil-rgb), .5) 62%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .7), rgba(var(--veil-rgb), 0) 75%);
+}
+@media (min-width: 720px) {
+  html[data-season="xmas"] .hero::before { background-image: url(../img/season-xmas.jpg); }
+}
+
+/* --- Гирлянда: провисающий хвойный провод (SVG в data-URI) и шесть лампочек
+   градиентами на одном псевдоэлементе. Мигание в три фазы (красные, золотые,
+   зелёные) через зарегистрированные --l1/--l2/--l3; лампочка не гаснет в ноль.
+   Нет @property - горят ровно. Висит на псевдоэлементах: pointer-events none,
+   вёрстку не двигает. Повисла не везде: шапка, объявления, баннер, строка
+   поиска, подвал. --- */
+@property --l1 { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --l2 { syntax: "<number>"; inherits: false; initial-value: 1; }
+@property --l3 { syntax: "<number>"; inherits: false; initial-value: 1; }
+@keyframes xl1 { 0%, 100% { --l1: 1; } 28% { --l1: 1; } 42% { --l1: .25; } 56% { --l1: 1; } }
+@keyframes xl2 { 0%, 100% { --l2: 1; } 28% { --l2: 1; } 42% { --l2: .25; } 56% { --l2: 1; } }
+@keyframes xl3 { 0%, 100% { --l3: 1; } 28% { --l3: 1; } 42% { --l3: .25; } 56% { --l3: 1; } }
+
+html[data-season="xmas"] .topbar::after,
+html[data-season="xmas"] footer::before,
+html[data-season="xmas"] .notice::after,
+html[data-season="xmas"] .controls::before,
+html[data-season="xmas"] .hero-in::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 12px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12px 6.35px, rgb(255 255 255 / calc(var(--l1) * .85)) 0, rgb(238 60 80 / var(--l1)) 1.2px, rgb(238 60 80 / calc(var(--l1) * .92)) 2.5px, rgb(238 60 80 / calc((var(--l1) - .25) * .4)) 3.3px, transparent 6px),
+    radial-gradient(circle at 24px 7.1px, rgb(255 255 255 / calc(var(--l2) * .85)) 0, rgb(255 200 70 / var(--l2)) 1.2px, rgb(255 200 70 / calc(var(--l2) * .92)) 2.5px, rgb(255 200 70 / calc((var(--l2) - .25) * .4)) 3.3px, transparent 6px),
+    radial-gradient(circle at 36px 6.35px, rgb(255 255 255 / calc(var(--l3) * .85)) 0, rgb(80 200 130 / var(--l3)) 1.2px, rgb(80 200 130 / calc(var(--l3) * .92)) 2.5px, rgb(80 200 130 / calc((var(--l3) - .25) * .4)) 3.3px, transparent 6px),
+    radial-gradient(circle at 60px 6.35px, rgb(255 255 255 / calc(var(--l3) * .85)) 0, rgb(80 200 130 / var(--l3)) 1.2px, rgb(80 200 130 / calc(var(--l3) * .92)) 2.5px, rgb(80 200 130 / calc((var(--l3) - .25) * .4)) 3.3px, transparent 6px),
+    radial-gradient(circle at 72px 7.1px, rgb(255 255 255 / calc(var(--l1) * .85)) 0, rgb(238 60 80 / var(--l1)) 1.2px, rgb(238 60 80 / calc(var(--l1) * .92)) 2.5px, rgb(238 60 80 / calc((var(--l1) - .25) * .4)) 3.3px, transparent 6px),
+    radial-gradient(circle at 84px 6.35px, rgb(255 255 255 / calc(var(--l2) * .85)) 0, rgb(255 200 70 / var(--l2)) 1.2px, rgb(255 200 70 / calc(var(--l2) * .92)) 2.5px, rgb(255 200 70 / calc((var(--l2) - .25) * .4)) 3.3px, transparent 6px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='12' viewBox='0 0 96 12'%3E%3Cpath d='M0 .8Q24 6.8 48 .8Q72 6.8 96 .8' fill='none' stroke='%234a8a68' stroke-width='1.1'/%3E%3Crect x='11' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='23' y='3.60' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='35' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='59' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='71' y='3.60' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='83' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3C/svg%3E");
+  background-size: 96px 12px; background-repeat: repeat-x;
+  animation: xl1 1.8s ease-in-out infinite, xl2 1.8s ease-in-out -.6s infinite, xl3 1.8s ease-in-out -1.2s infinite;
+}
+html[data-season="xmas"] footer, html[data-season="xmas"] .notice, html[data-season="xmas"] .controls, html[data-season="xmas"] .hero-in { position: relative; }
+
+/* Шапка: провод по нижней кромке, лампочки свисают на страницу. */
+html[data-season="xmas"] .topbar::after { bottom: -11px; }
+/* Подвал: с верхней кромки внутрь, в верхний отступ колонок. */
+html[data-season="xmas"] footer::before { top: 0; animation-delay: -.3s, -.9s, -1.5s; }
+/* Объявления: по нижнему краю полосы, в её нижнем отступе. */
+html[data-season="xmas"] .notice::after { bottom: 0; animation-delay: -.9s, -1.5s, -.3s; }
+/* Строка поиска: по верхнему краю, в верхнем отступе. */
+html[data-season="xmas"] .controls::before { top: 0; animation-delay: -1.2s, -.3s, -.9s; }
+/* Баннер: под заголовком, в нижнем отступе блока текста. */
+html[data-season="xmas"] .hero-in::after { bottom: 0; animation-delay: -.6s, -1.2s, 0s; }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-season="xmas"] body::before { animation: none; will-change: auto; }
+  html[data-season="xmas"] .topbar::after, html[data-season="xmas"] footer::before, html[data-season="xmas"] .notice::after,
+  html[data-season="xmas"] .controls::before, html[data-season="xmas"] .hero-in::after { animation: none; }
+}

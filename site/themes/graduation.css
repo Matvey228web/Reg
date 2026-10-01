@@ -1,0 +1,139 @@
+/* Сезонная тема «Выпускной» (15–30 июня). Подключается theme.js после style.css,
+ * поэтому каждое правило начинается с html[data-season="graduation"]: специфичность
+ * выше базовой, порядок файлов не нужен. Концепция — «академия»: глубокий полуночный
+ * синий, тёплое золото вместо красного, тонкие золотые линии, лавровая веточка у
+ * заголовков групп, медленное конфетти в баннере. Светлая тема — слоновая кость,
+ * тёмно-синие чернила, золото.
+ *
+ * Контраст (ink / dim / текст на золоте / золотой текст, на bg):
+ *   тёмная:  16.05 / 7.69 / 8.79 / 9.99
+ *   светлая: 14.07 / 5.86 / 6.70 / 5.63 (на панели не ниже 6.14)
+ * Золото — заливка кнопок с тёмно-синим текстом (--on-accent), а не синяя кнопка:
+ * корзина, «Забронировать» и счётчик остаются главным действием, как красные. */
+
+html[data-season="graduation"] {
+  --bg: #0b1226;
+  --panel: #111a34;
+  --line: #26335c;
+  --ink: #f3eee0;
+  --dim: #9ba6c8;
+  --accent: #d9ac3e;
+  --accent-text: #e2b94d;
+  --on-accent: #0b1226;
+  --shot: #0e1630;
+  --veil-rgb: 11, 18, 38;
+  --img-filter: saturate(.7) brightness(.9);
+  --gold-line: linear-gradient(90deg, var(--accent), rgba(217, 172, 62, 0) 75%);
+}
+
+html[data-season="graduation"][data-theme="light"] {
+  --bg: #f8f2e2;
+  --panel: #fffcf4;
+  --line: #e2d6b8;
+  --ink: #14204a;
+  --dim: #575c78;
+  --accent: #d1a23a;
+  --accent-text: #7d5a08;
+  --on-accent: #14204a;
+  --shot: #efe6cf;
+  --veil-rgb: 248, 242, 226;
+  --img-filter: saturate(.55) brightness(1.05);
+  --gold-line: linear-gradient(90deg, #b98a1f, rgba(185, 138, 31, 0) 75%);
+}
+
+/* --- Баннер: фото выпускников, как у hero.jpg (узкому экрану — лёгкий -m) --- */
+
+html[data-season="graduation"] .hero::before {
+  background-image: url(../img/season-graduation-m.jpg);
+  background-position: center 55%;
+}
+@media (min-width: 720px) {
+  html[data-season="graduation"] .hero::before {
+    background-image: url(../img/season-graduation.jpg);
+  }
+}
+
+/* Завеса остаётся (заголовок читается), поверх неё — прожектор сверху справа,
+   виньетка по краям и два слоя конфетти. Всё в одном ::after: ни одного нового
+   элемента, ничего не сдвигается. Падает только background-position у слоёв
+   конфетти; остальные слои в кадрах стоят на месте. */
+html[data-season="graduation"] .hero::after {
+  pointer-events: none;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='480'%3E%3Cg fill-opacity='0.8'%3E%3Crect x='127' y='30' width='5' height='9' fill='%23e8c25c' transform='rotate%2824 129.5 34.5%29'/%3E%3Crect x='315' y='84' width='6' height='10' fill='%23ffffff' transform='rotate%28-67 318.0 89.0%29'/%3E%3Crect x='246' y='134' width='5' height='9' fill='%237f9bf0' transform='rotate%28-21 248.5 138.5%29'/%3E%3Crect x='373' y='204' width='6' height='11' fill='%23e8c25c' transform='rotate%2831 376.0 209.5%29'/%3E%3Crect x='333' y='283' width='5' height='9' fill='%23ffffff' transform='rotate%28-32 335.5 287.5%29'/%3E%3Crect x='273' y='320' width='6' height='10' fill='%237f9bf0' transform='rotate%28-54 276.0 325.0%29'/%3E%3Crect x='87' y='398' width='6' height='10' fill='%23e8c25c' transform='rotate%287 90.0 403.0%29'/%3E%3Crect x='21' y='461' width='7' height='5' fill='%23ffffff' transform='rotate%2851 24.5 463.5%29'/%3E%3C/g%3E%3C/svg%3E")
+      0 0 / 400px 480px repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='360'%3E%3Cg fill-opacity='0.55'%3E%3Crect x='171' y='56' width='6' height='11' fill='%23ffffff' transform='rotate%28-58 174.0 61.5%29'/%3E%3Crect x='43' y='121' width='6' height='10' fill='%23e8c25c' transform='rotate%2823 46.0 126.0%29'/%3E%3Crect x='35' y='198' width='5' height='9' fill='%237f9bf0' transform='rotate%28-61 37.5 202.5%29'/%3E%3Crect x='50' y='242' width='6' height='10' fill='%23ffffff' transform='rotate%28-9 53.0 247.0%29'/%3E%3Crect x='52' y='321' width='6' height='10' fill='%23e8c25c' transform='rotate%28-39 55.0 326.0%29'/%3E%3C/g%3E%3C/svg%3E")
+      0 0 / 280px 360px repeat,
+    radial-gradient(ellipse 60% 100% at 78% 0%, rgba(255, 226, 150, .17), rgba(255, 226, 150, 0) 70%) 0 0 / auto no-repeat,
+    radial-gradient(ellipse 90% 90% at 50% 40%, rgba(5, 8, 20, 0) 55%, rgba(5, 8, 20, .45) 100%) 0 0 / auto no-repeat,
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .36) 0%, rgba(var(--veil-rgb), .64) 62%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .55), rgba(var(--veil-rgb), 0));
+  animation: grad-fall 48s linear infinite;
+}
+html[data-season="graduation"][data-theme="light"] .hero::after {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='480'%3E%3Cg fill-opacity='0.8'%3E%3Crect x='127' y='30' width='5' height='9' fill='%23c4932a' transform='rotate%2824 129.5 34.5%29'/%3E%3Crect x='315' y='84' width='6' height='10' fill='%2314204a' transform='rotate%28-67 318.0 89.0%29'/%3E%3Crect x='246' y='134' width='5' height='9' fill='%234a6ad0' transform='rotate%28-21 248.5 138.5%29'/%3E%3Crect x='373' y='204' width='6' height='11' fill='%23c4932a' transform='rotate%2831 376.0 209.5%29'/%3E%3Crect x='333' y='283' width='5' height='9' fill='%2314204a' transform='rotate%28-32 335.5 287.5%29'/%3E%3Crect x='273' y='320' width='6' height='10' fill='%234a6ad0' transform='rotate%28-54 276.0 325.0%29'/%3E%3Crect x='87' y='398' width='6' height='10' fill='%23c4932a' transform='rotate%287 90.0 403.0%29'/%3E%3Crect x='21' y='461' width='7' height='5' fill='%2314204a' transform='rotate%2851 24.5 463.5%29'/%3E%3C/g%3E%3C/svg%3E")
+      0 0 / 400px 480px repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='360'%3E%3Cg fill-opacity='0.55'%3E%3Crect x='171' y='56' width='6' height='11' fill='%2314204a' transform='rotate%28-58 174.0 61.5%29'/%3E%3Crect x='43' y='121' width='6' height='10' fill='%23c4932a' transform='rotate%2823 46.0 126.0%29'/%3E%3Crect x='35' y='198' width='5' height='9' fill='%234a6ad0' transform='rotate%28-61 37.5 202.5%29'/%3E%3Crect x='50' y='242' width='6' height='10' fill='%2314204a' transform='rotate%28-9 53.0 247.0%29'/%3E%3Crect x='52' y='321' width='6' height='10' fill='%23c4932a' transform='rotate%28-39 55.0 326.0%29'/%3E%3C/g%3E%3C/svg%3E")
+      0 0 / 280px 360px repeat,
+    radial-gradient(ellipse 60% 100% at 78% 0%, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 70%) 0 0 / auto no-repeat,
+    radial-gradient(ellipse 90% 90% at 50% 40%, rgba(120, 90, 30, 0) 55%, rgba(120, 90, 30, .14) 100%) 0 0 / auto no-repeat,
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .36) 0%, rgba(var(--veil-rgb), .64) 62%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .55), rgba(var(--veil-rgb), 0));
+}
+/* Слой A опускается на плитку (480), слой B — на две плитки (720): скорости
+   разные, шов не виден. Статичные слои повторены в кадрах как есть. */
+@keyframes grad-fall {
+  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+  to { background-position: 0 480px, 0 720px, 0 0, 0 0, 0 0, 0 0; }
+}
+
+/* Золотая черта под заголовком баннера. */
+html[data-season="graduation"] .hero h1::after,
+html[data-season="graduation"] .page h1.title::after,
+html[data-season="graduation"] .item-main h1::after {
+  content: ""; display: block; width: 72px; height: 2px; margin-top: 10px;
+  background: var(--gold-line);
+}
+html[data-season="graduation"] .page h1.title { padding-bottom: 12px; }
+html[data-season="graduation"] .item-main h1 { margin-bottom: 14px; }
+html[data-season="graduation"] .item-main h1::after { margin-top: 12px; }
+
+/* --- Золотые линии и украшения --- */
+
+html[data-season="graduation"] .topbar {
+  border-bottom-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+html[data-season="graduation"] .notice {
+  border-bottom-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+
+/* Верх карточки — золотая волосяная линия, гаснущая вправо. */
+html[data-season="graduation"] .cell { position: relative; }
+html[data-season="graduation"] .cell::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; z-index: 2;
+  background: var(--gold-line); opacity: .8; pointer-events: none;
+}
+
+/* Заголовок группы: под ним — лавровая веточка и золотая линия. Рисунок — маска,
+   цвет берётся из --accent, так что одна картинка годится обеим темам. */
+html[data-season="graduation"] .group-title { position: relative; padding-bottom: 20px; }
+html[data-season="graduation"] .group-title::after {
+  content: ""; position: absolute; left: var(--pad); bottom: 7px;
+  width: 132px; height: 10px; pointer-events: none;
+  background: var(--accent);
+  -webkit-mask: var(--laurel) left center / 132px 10px no-repeat;
+  mask: var(--laurel) left center / 132px 10px no-repeat;
+  --laurel: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='132' height='10' viewBox='0 0 132 10'%3E%3Cg%3E%3Cellipse cx='6' cy='3' rx='4' ry='1.6' transform='rotate(-35 6 3)'/%3E%3Cellipse cx='6' cy='7' rx='4' ry='1.6' transform='rotate(35 6 7)'/%3E%3Cellipse cx='14' cy='2.6' rx='4' ry='1.6' transform='rotate(-30 14 2.6)'/%3E%3Cellipse cx='14' cy='7.4' rx='4' ry='1.6' transform='rotate(30 14 7.4)'/%3E%3Cellipse cx='22' cy='2.6' rx='4' ry='1.6' transform='rotate(-25 22 2.6)'/%3E%3Cellipse cx='22' cy='7.4' rx='4' ry='1.6' transform='rotate(25 22 7.4)'/%3E%3Cpath d='M0 5h30v.8H0z'/%3E%3Cpath d='M34 5l3-3 3 3-3 3z'/%3E%3Cpath d='M43 4.6h89v.8H43z' opacity='.6'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Подписи разделов и «свободно» не трогаем; активный раздел — золотая подводка
+   уже даёт --accent. Кнопка «в корзину» при наведении — золотая рамка. */
+html[data-season="graduation"] .add:hover { border-color: var(--accent); }
+
+/* Корзина в шапке: золото с тёмно-синим текстом, тонкая светлая кромка сверху. */
+html[data-season="graduation"] .cart-link { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28); }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-season="graduation"] .hero::after { animation: none; }
+}

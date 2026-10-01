@@ -1,0 +1,211 @@
+/* Сезонная тема «Хэллоуин» (25 октября — 1 ноября). Грузится после style.css
+ * (см. theme.js), поэтому каждое правило начинается с html[data-season="halloween"]:
+ * специфичность выше базовой. Кинематографичный хоррор-постер, не мультяшный:
+ * почти чёрный фиолет, тыквенный оранжевый на действии, пурпурный туман.
+ * Только CSS и инлайн-SVG; движется только transform и opacity; при
+ * prefers-reduced-motion анимаций нет.
+ *
+ * Контраст (расчёт WCAG):
+ *  тёмная: ink на bg 17.1; dim на bg 7.3, на panel 6.7; белый на accent 4.76;
+ *          accent-text на bg 8.3, на panel 7.7.
+ *  светлая: ink на bg 15.1; dim на bg 6.5, на panel 7.7; белый на accent 4.76;
+ *          accent-text на bg 5.0, на panel 5.9. */
+
+/* --- Токены: тёмная (по умолчанию) --- */
+html[data-season="halloween"] {
+  --bg: #0f0a16;
+  --panel: #170f21;
+  --line: #2f2142;
+  --ink: #f3eef8;
+  --dim: #a698b8;
+  --accent: #c9480c;
+  --accent-text: #ff8a3d;
+  --on-accent: #fff;
+  --shot: #130c1c;
+  --veil-rgb: 15, 10, 22;
+  --img-filter: saturate(1) brightness(1.08);
+
+  /* Паутина (углом) и стая: SVG в ссылке, цвет обводки зашит, поэтому у светлой
+     темы свой набор. */
+  --hw-web: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 90 90' fill='none' stroke='%23cdbbe8' stroke-width='.8' stroke-linecap='round'%3E%3Cpath d='M0 0L90 0M0 0L84.1 32.1M0 0L75.4 49.2M0 0L49.2 75.4M0 0L32.1 84.1M0 0L0 90M22 0Q17.3 3.2 20.6 7.8M20.6 7.8Q15.7 8 18.4 12M18.4 12Q12.4 12.4 12 18.4M12 18.4Q8 15.7 7.8 20.6M7.8 20.6Q3.2 17.3 0 22M40 0Q31.5 5.8 37.4 14.2M37.4 14.2Q28.5 14.5 33.5 21.9M33.5 21.9Q22.6 22.6 21.9 33.5M21.9 33.5Q14.5 28.5 14.2 37.4M14.2 37.4Q5.8 31.5 0 40M58 0Q45.6 8.4 54.2 20.7M54.2 20.7Q41.3 21.1 48.6 31.7M48.6 31.7Q32.8 32.8 31.7 48.6M31.7 48.6Q21.1 41.3 20.7 54.2M20.7 54.2Q8.4 45.6 0 58M76 0Q59.8 11 71 27.1M71 27.1Q54.2 27.6 63.6 41.5M63.6 41.5Q43 43 41.5 63.6M41.5 63.6Q27.6 54.2 27.1 71M27.1 71Q11 59.8 0 76'/%3E%3C/svg%3E");
+  --hw-bats: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 150 50' fill='%23684a94'%3E%3Cdefs%3E%3Cpath id='b' d='M20 6C18 3 17 2 16 1L15 5C12 3 8 3 0 6C4 7 5 9 6 12C8 10 10 10 12 12C14 11 17 11 20 16C23 11 26 11 28 12C30 10 32 10 34 12C35 9 36 7 40 6C32 3 28 3 25 5L24 1C23 2 22 3 20 6Z'/%3E%3C/defs%3E%3Cuse href='%23b' x='0' y='14'/%3E%3Cuse href='%23b' x='46' y='2' transform='translate(46 2) scale(.7) translate(-46 -2)'/%3E%3Cuse href='%23b' x='90' y='26' transform='translate(90 26) scale(.55) translate(-90 -26)'/%3E%3Cuse href='%23b' x='108' y='4' transform='translate(108 4) scale(.8) translate(-108 -4)'/%3E%3C/svg%3E");
+  --hw-fog: 112, 60, 175;        /* цвет тумана */
+  --hw-fog-a: .26;               /* плотность тумана */
+  --hw-glow: 255, 120, 30;       /* свет фонаря */
+}
+
+/* --- Токены: светлая --- */
+html[data-season="halloween"][data-theme="light"] {
+  --bg: #eee9f5;
+  --panel: #ffffff;
+  --line: #d3c9e2;
+  --ink: #1c1030;
+  --dim: #5a4d6e;
+  --accent: #c9480c;
+  --accent-text: #b03d08;
+  --on-accent: #fff;
+  --shot: #e3dcee;
+  --veil-rgb: 238, 233, 245;
+  --img-filter: saturate(.9) brightness(1.05);
+
+  --hw-web: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 90 90' fill='none' stroke='%23584078' stroke-width='.8' stroke-linecap='round'%3E%3Cpath d='M0 0L90 0M0 0L84.1 32.1M0 0L75.4 49.2M0 0L49.2 75.4M0 0L32.1 84.1M0 0L0 90M22 0Q17.3 3.2 20.6 7.8M20.6 7.8Q15.7 8 18.4 12M18.4 12Q12.4 12.4 12 18.4M12 18.4Q8 15.7 7.8 20.6M7.8 20.6Q3.2 17.3 0 22M40 0Q31.5 5.8 37.4 14.2M37.4 14.2Q28.5 14.5 33.5 21.9M33.5 21.9Q22.6 22.6 21.9 33.5M21.9 33.5Q14.5 28.5 14.2 37.4M14.2 37.4Q5.8 31.5 0 40M58 0Q45.6 8.4 54.2 20.7M54.2 20.7Q41.3 21.1 48.6 31.7M48.6 31.7Q32.8 32.8 31.7 48.6M31.7 48.6Q21.1 41.3 20.7 54.2M20.7 54.2Q8.4 45.6 0 58M76 0Q59.8 11 71 27.1M71 27.1Q54.2 27.6 63.6 41.5M63.6 41.5Q43 43 41.5 63.6M41.5 63.6Q27.6 54.2 27.1 71M27.1 71Q11 59.8 0 76'/%3E%3C/svg%3E");
+  --hw-bats: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 150 50' fill='%232a1745'%3E%3Cdefs%3E%3Cpath id='b' d='M20 6C18 3 17 2 16 1L15 5C12 3 8 3 0 6C4 7 5 9 6 12C8 10 10 10 12 12C14 11 17 11 20 16C23 11 26 11 28 12C30 10 32 10 34 12C35 9 36 7 40 6C32 3 28 3 25 5L24 1C23 2 22 3 20 6Z'/%3E%3C/defs%3E%3Cuse href='%23b' x='0' y='14'/%3E%3Cuse href='%23b' x='46' y='2' transform='translate(46 2) scale(.7) translate(-46 -2)'/%3E%3Cuse href='%23b' x='90' y='26' transform='translate(90 26) scale(.55) translate(-90 -26)'/%3E%3Cuse href='%23b' x='108' y='4' transform='translate(108 4) scale(.8) translate(-108 -4)'/%3E%3C/svg%3E");
+  --hw-fog: 150, 110, 210;
+  --hw-fog-a: .30;
+  --hw-glow: 255, 140, 50;
+}
+
+/* --- Туман: два больших слоя за содержимым, медленно плывут --- */
+/* Слои шире экрана и двигаются только transform: перерисовки нет, работает
+   композитор. Фиксированы и позади всего (z-index -1, pointer-events none). */
+html[data-season="halloween"] body::before,
+html[data-season="halloween"] body::after {
+  content: ""; position: fixed; inset: -30%; z-index: -1; pointer-events: none;
+  will-change: transform;
+}
+html[data-season="halloween"] body::before {
+  background:
+    radial-gradient(40% 30% at 20% 30%, rgba(var(--hw-fog), var(--hw-fog-a)), transparent 70%),
+    radial-gradient(35% 28% at 75% 20%, rgba(var(--hw-fog), calc(var(--hw-fog-a) * .7)), transparent 70%),
+    radial-gradient(45% 32% at 60% 80%, rgba(var(--hw-fog), var(--hw-fog-a)), transparent 70%);
+  animation: hw-fog-a 52s ease-in-out infinite alternate;
+}
+html[data-season="halloween"] body::after {
+  background:
+    radial-gradient(38% 30% at 80% 60%, rgba(var(--hw-fog), calc(var(--hw-fog-a) * .8)), transparent 70%),
+    radial-gradient(42% 30% at 25% 85%, rgba(var(--hw-fog), calc(var(--hw-fog-a) * .6)), transparent 70%);
+  animation: hw-fog-b 44s ease-in-out infinite alternate;
+}
+@keyframes hw-fog-a {
+  from { transform: translate3d(-6%, 2%, 0) scale(1); }
+  to   { transform: translate3d(7%, -4%, 0) scale(1.12); }
+}
+@keyframes hw-fog-b {
+  from { transform: translate3d(6%, -3%, 0) scale(1.1); }
+  to   { transform: translate3d(-8%, 4%, 0) scale(1); }
+}
+
+/* --- Баннер: ведьма с фонарём --- */
+/* Как в style.css: узкому экрану — лёгкий снимок, от 720 — большой. Завесу
+   (.hero::after) не трогаем, она держит заголовок читаемым; к снимку добавлен
+   тёплый свет у фонаря, и вся картинка мерцает, как от свечи (opacity). */
+html[data-season="halloween"] .hero::before {
+  background:
+    radial-gradient(circle at 82% 66%, rgba(var(--hw-glow), .28), transparent 38%),
+    url(../img/season-halloween-m.jpg) 62% 36% / cover no-repeat;
+  filter: var(--img-filter);
+  animation: hw-flicker 7s linear infinite;
+}
+html[data-season="halloween"] .hero::after {
+  background:
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .12) 0%, rgba(var(--veil-rgb), .5) 62%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .62), rgba(var(--veil-rgb), 0) 70%);
+}
+/* Светлая тема: баннер остаётся тёмным «кадром» на светлой странице (снимок
+   тёмный, на светлой завесе он превращался в грязно-серое пятно). Завеса тёмная,
+   текст на нём светлый, внизу жёсткая кромка вместо растворения в фон. */
+html[data-season="halloween"][data-theme="light"] .hero::before { filter: saturate(1) brightness(1.05); }
+html[data-season="halloween"][data-theme="light"] .hero::after {
+  background:
+    linear-gradient(to bottom, rgba(15, 10, 22, .1) 0%, rgba(15, 10, 22, .72) 100%),
+    linear-gradient(to right, rgba(15, 10, 22, .5), rgba(15, 10, 22, 0) 70%);
+}
+html[data-season="halloween"][data-theme="light"] .hero { border-bottom: 1px solid var(--line); }
+html[data-season="halloween"][data-theme="light"] .hero h1,
+html[data-season="halloween"][data-theme="light"] .hero p { color: #f6f1fb; }
+@media (min-width: 720px) {
+  html[data-season="halloween"] .hero::before {
+    background:
+      radial-gradient(circle at 82% 78%, rgba(var(--hw-glow), .28), transparent 34%),
+      url(../img/season-halloween.jpg) 62% 40% / cover no-repeat;
+  }
+}
+/* Неровное мерцание: короткие провалы и всплески, а не ровное дыхание. */
+@keyframes hw-flicker {
+  0%, 100% { opacity: 1; }
+  8%  { opacity: .9; }
+  12% { opacity: .97; }
+  21% { opacity: .84; }
+  27% { opacity: .95; }
+  38% { opacity: .88; }
+  41% { opacity: 1; }
+  57% { opacity: .92; }
+  63% { opacity: .82; }
+  68% { opacity: .96; }
+  82% { opacity: .89; }
+  90% { opacity: .98; }
+}
+html[data-season="halloween"] .hero h1 {
+  text-shadow: 0 0 22px rgba(var(--hw-glow), .35), 0 1px 0 rgba(var(--veil-rgb), .6);
+}
+
+/* Летучие мыши: один пролёт за загрузку страницы (1 повтор, ~12 с), потом
+   стоят за краем. Элемент — во всю ширину баннера, стая нарисована у его левого
+   края, поэтому сдвиг на ±100% ширины полностью убирает её с экрана. Живут в
+   верхней части баннера: заголовок прижат книзу. */
+html[data-season="halloween"] .hero-in::before {
+  content: ""; position: absolute; left: 0; top: 14px; width: 100%; height: 50px;
+  background: var(--hw-bats) 0 0 / 150px 50px no-repeat;
+  pointer-events: none; opacity: 0; transform: translateX(-100%);
+  animation: hw-bats 12s linear 1.2s 1 both;
+}
+@keyframes hw-bats {
+  0%   { opacity: 0; transform: translate3d(-100%, 0, 0); }
+  3%   { opacity: .9; }
+  25%  { transform: translate3d(-30%, 14px, 0); }
+  50%  { transform: translate3d(25%, -4px, 0); }
+  75%  { transform: translate3d(65%, 16px, 0); }
+  97%  { opacity: .9; }
+  100% { opacity: 0; transform: translate3d(100%, 4px, 0); }
+}
+
+/* --- Паутина: угол шапки и угол подвала --- */
+/* Под содержимым (z-index -1 внутри собственного контекста шапки/подвала),
+   не ловит нажатий, низкая непрозрачность. */
+html[data-season="halloween"] .topbar::before,
+html[data-season="halloween"] footer::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  width: 90px; height: 90px;
+  background: var(--hw-web) 0 0 / 90px 90px no-repeat;
+  opacity: .4;
+}
+html[data-season="halloween"] .topbar::before { top: 0; left: 0; height: 56px; background-size: 90px 90px; }
+html[data-season="halloween"] footer { position: relative; isolation: isolate; overflow: hidden; }
+html[data-season="halloween"] footer::before { right: 0; bottom: 0; transform: scale(-1, -1); opacity: .3; }
+html[data-season="halloween"][data-theme="light"] .topbar::before { opacity: .32; }
+html[data-season="halloween"][data-theme="light"] footer::before { opacity: .26; }
+
+/* --- Тыквенные тонкие линии --- */
+html[data-season="halloween"] .topbar {
+  border-bottom-color: rgba(var(--hw-glow), .4);
+  box-shadow: 0 1px 0 rgba(var(--hw-glow), .08), 0 6px 18px -10px rgba(var(--hw-glow), .35);
+}
+html[data-season="halloween"] footer { border-top-color: rgba(var(--hw-glow), .35); }
+html[data-season="halloween"] .grid,
+html[data-season="halloween"] .controls {
+  border-color: var(--line);
+}
+html[data-season="halloween"] .section--on { border-bottom-color: var(--accent); }
+html[data-season="halloween"] .add:hover { border-color: var(--accent); }
+html[data-season="halloween"] .cell:hover { box-shadow: 0 0 0 1px rgba(var(--hw-glow), .55); position: relative; }
+
+/* Подпись логотипа и «40» в тон тумана, а не серым. */
+html[data-season="halloween"] .wordmark { --lk-num-color: var(--accent-text); }
+
+/* Нажатие: тёплый свет под пальцем, как у фонаря. */
+html[data-season="halloween"] .cart-link:active,
+html[data-season="halloween"] .btn:active { filter: brightness(.85); }
+
+/* Календарь даты/времени: иконка берёт тон темы. */
+html[data-season="halloween"][data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+html[data-season="halloween"][data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: opacity(.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-season="halloween"] body::before,
+  html[data-season="halloween"] body::after,
+  html[data-season="halloween"] .hero::before,
+  html[data-season="halloween"] .hero-in::before { animation: none !important; will-change: auto; }
+  html[data-season="halloween"] .hero-in::before { opacity: 0; }
+}

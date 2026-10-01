@@ -1,0 +1,181 @@
+/* Сезонная тема «День кино» (27–29 декабря). Грузится после style.css, поэтому
+ * каждое правило начинается с html[data-season="cinema"]: так оно выигрывает по
+ * специфичности. Структура скопирована с основной темы: токены в :root и
+ * переопределение в светлой теме, баннер — .hero::before/::after, как в style.css.
+ *
+ * Замысел: ночь премьеры золотого века кино. Тёмный низ, бархатно-красный
+ * занавес и тёплое золото; перфорация киноплёнки по краям баннера и подвала,
+ * маркиза из лампочек по нижнему краю баннера, медленный луч прожектора, зерно.
+ * Светлая тема — тёплая бумага старой афиши, чёрный текст, красный занавес.
+ *
+ * Декор лежит в псевдоэлементах (absolute), pointer-events: none, вёрстку не
+ * двигает; анимируются только transform и background-position.
+ *
+ * Контраст (расчёт по WCAG), тёмная: ink на bg 17.0, dim на bg 7.5 (на panel 7.1),
+ * белый на заливке акцента 7.7–11.0, золото на bg 10.5, коралл (ошибки) на bg 7.8.
+ * Светлая: ink на bg 15.0, dim на bg 6.5 (на panel 7.1), белый на заливке 7.7–11.0,
+ * accent-text на bg 7.4 (на panel 8.1). */
+
+/* --- Токены --- */
+
+html[data-season="cinema"] {
+  --bg: #0c0808;
+  --panel: #150e0d;
+  --line: #31241a;
+  --ink: #f5ecdd;
+  --dim: #ab9c8b;
+  --accent: #8f1425;        /* бархат занавеса: белый на нём даёт ~10 */
+  --accent-text: #e9b44c;   /* золото текстом: ссылки, наведение, фокус */
+  --on-accent: #fff;
+  --shot: #120c0b;
+  --veil-rgb: 12, 8, 8;
+  --img-filter: sepia(.55) saturate(.9) brightness(1) contrast(1.08);
+
+  --cn-gold: #d9a441;       /* золото линий и меток (не текст) */
+  --cn-gold-rgb: 217, 164, 65;
+  --cn-red: #ff7a6b;        /* «ошибка» и «нет в наличии»: золото тут путало бы с акцентом */
+  --cn-velvet: linear-gradient(180deg, #a3182b, #7a0f1f);
+}
+
+html[data-season="cinema"][data-theme="light"] {
+  --bg: #f1e7d0;            /* бумага старой афиши */
+  --panel: #f8f1de;
+  --line: #d3c29d;
+  --ink: #1a1210;
+  --dim: #5d4e42;
+  --accent: #8f1425;
+  --accent-text: #8f1425;
+  --on-accent: #fff;
+  --shot: #e6d9bb;
+  --veil-rgb: 241, 231, 208;
+  --img-filter: sepia(.5) saturate(.75) brightness(1.05);
+
+  --cn-gold: #a8741a;
+  --cn-gold-rgb: 168, 116, 26;
+  --cn-red: #a3182b;
+}
+
+/* --- Баннер: фото, плёнка, зерно --- */
+
+html[data-season="cinema"] .hero::before { background-image: url(../img/season-cinema-m.jpg); }
+@media (min-width: 720px) {
+  html[data-season="cinema"] .hero::before { background-image: url(../img/season-cinema.jpg); }
+}
+
+html[data-season="cinema"] .hero { min-height: 250px; }
+@media (min-width: 720px) {
+  html[data-season="cinema"] .hero { min-height: 340px; }
+}
+/* Место под перфорацию сверху и под маркизу с перфорацией снизу. */
+html[data-season="cinema"] .hero-in { position: static; padding: 44px var(--pad) 54px; }
+html[data-season="cinema"] .hero h1,
+html[data-season="cinema"] .hero p { position: relative; z-index: 1; }
+html[data-season="cinema"] .hero h1 { color: #f8e6bd; text-shadow: 0 2px 14px rgba(0, 0, 0, .65); }
+html[data-season="cinema"] .hero p { text-shadow: 0 1px 10px rgba(0, 0, 0, .6); }
+html[data-season="cinema"][data-theme="light"] .hero h1 { color: var(--ink); text-shadow: 0 1px 10px rgba(241, 231, 208, .8); }
+html[data-season="cinema"][data-theme="light"] .hero p { text-shadow: 0 1px 8px rgba(241, 231, 208, .8); }
+
+/* Слои сверху вниз: зерно, перфорация сверху, перфорация над маркизой, красная
+   дымка, завеса цвета страницы (как в style.css). */
+html[data-season="cinema"] .hero::after {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16'%3E%3Crect width='24' height='16' fill='%23060404' fill-opacity='.88'/%3E%3Crect x='8' y='4' width='9' height='8' rx='2' fill='%23f3d9a0' fill-opacity='.5'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16'%3E%3Crect width='24' height='16' fill='%23060404' fill-opacity='.88'/%3E%3Crect x='8' y='4' width='9' height='8' rx='2' fill='%23f3d9a0' fill-opacity='.5'/%3E%3C/svg%3E"),
+    linear-gradient(rgba(110, 12, 28, .2), rgba(110, 12, 28, .2)),
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .38) 0%, rgba(var(--veil-rgb), .6) 62%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .62), rgba(var(--veil-rgb), 0) 80%);
+  background-size: 180px 180px, 24px 16px, 24px 16px, 100% 100%, 100% 100%, 100% 100%;
+  background-repeat: repeat, repeat-x, repeat-x, no-repeat, no-repeat, no-repeat;
+  background-position: 0 0, 0 0, left 0 bottom 14px, 0 0, 0 0, 0 0;
+}
+
+/* Луч прожектора: мягкая косая полоса ползёт через баннер. */
+html[data-season="cinema"] .hero-in::before {
+  content: ""; position: absolute; z-index: 0; pointer-events: none;
+  top: -20%; left: 0; width: 34%; height: 140%;
+  background: linear-gradient(90deg, transparent, rgba(255, 232, 180, .17) 50%, transparent);
+  transform: translateX(-60%) skewX(-22deg);
+  animation: cinema-beam 11s ease-in-out infinite alternate;
+}
+html[data-season="cinema"][data-theme="light"] .hero-in::before {
+  background: linear-gradient(90deg, transparent, rgba(255, 250, 235, .55) 50%, transparent);
+}
+@keyframes cinema-beam {
+  from { transform: translateX(-60%) skewX(-22deg); }
+  to { transform: translateX(300%) skewX(-22deg); }
+}
+
+/* Маркиза: ряд лампочек по нижнему краю. Тусклые горят всегда, яркие — по одной
+   из трёх, и «бегут» шагами (три фазы), как на афише театра. */
+html[data-season="cinema"] .hero-in::after {
+  content: ""; position: absolute; z-index: 2; pointer-events: none;
+  left: 0; right: 0; bottom: 0; height: 14px;
+  background-color: #2a0910;
+  background-image:
+    radial-gradient(circle at 10px 50%, #fff4c8 0 2px, #ffc44d 3px, rgba(255, 170, 40, .4) 5px, transparent 8px),
+    radial-gradient(circle at 10px 50%, #7a5526 0 2.5px, transparent 3px);
+  background-size: 60px 14px, 20px 14px;
+  background-repeat: repeat-x;
+  background-position: 0 50%, 0 50%;
+  box-shadow: inset 0 1px 0 rgba(var(--cn-gold-rgb), .55);
+  animation: cinema-chase 1.2s steps(3) infinite;
+}
+@keyframes cinema-chase {
+  from { background-position: 0 50%, 0 50%; }
+  to { background-position: 60px 50%, 0 50%; }
+}
+
+/* --- Шапка, кнопки, счётчики: бархат с золотой кромкой --- */
+
+html[data-season="cinema"] .topbar { border-bottom-color: rgba(var(--cn-gold-rgb), .4); }
+html[data-season="cinema"] .cart-link,
+html[data-season="cinema"] .btn:not(.btn--secondary) {
+  background: var(--cn-velvet);
+  border-color: var(--cn-gold);
+}
+html[data-season="cinema"] .notice-tag { background: var(--cn-velvet); box-shadow: inset 0 0 0 1px rgba(var(--cn-gold-rgb), .7); }
+html[data-season="cinema"] .card-add .stepper--wide { border-color: var(--cn-gold); }
+html[data-season="cinema"] .card-add .stepper--wide::before { background: var(--cn-velvet); }
+html[data-season="cinema"] .add:hover,
+html[data-season="cinema"] .theme-btn:hover::before { border-color: var(--cn-gold); }
+html[data-season="cinema"] .section--on { border-bottom-color: var(--cn-gold); }
+html[data-season="cinema"] .btn--secondary:hover { border-color: var(--cn-gold); }
+
+/* Красный текст «ошибка/нет в наличии» оставляем красным: золото уже значит «выбрано». */
+html[data-season="cinema"] .card-free.none,
+html[data-season="cinema"] .link-danger,
+html[data-season="cinema"] .cart-warn,
+html[data-season="cinema"] .hint--bad { color: var(--cn-red); }
+
+/* --- Карточки и группы --- */
+
+/* Тонкая золотая нить по верху карточки. */
+html[data-season="cinema"] .cell { position: relative; }
+html[data-season="cinema"] .cell::before {
+  content: ""; position: absolute; z-index: 1; pointer-events: none;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, rgba(var(--cn-gold-rgb), .75), rgba(var(--cn-gold-rgb), .15));
+}
+
+/* Метка хлопушки перед названием группы: косая штриховка в золотой рамке. */
+html[data-season="cinema"] .group-title::before {
+  content: ""; display: inline-block; vertical-align: -1px;
+  width: 24px; height: 9px; margin-right: 9px;
+  border: 1px solid var(--cn-gold);
+  background: repeating-linear-gradient(-45deg, var(--cn-gold) 0 3px, transparent 3px 7px);
+}
+
+/* --- Подвал: перфорация плёнки по верху --- */
+
+html[data-season="cinema"] footer { position: relative; padding-top: 16px; border-top-color: rgba(var(--cn-gold-rgb), .4); }
+html[data-season="cinema"] footer::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 16px;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='16'%3E%3Crect width='24' height='16' fill='%23060404' fill-opacity='.88'/%3E%3Crect x='8' y='4' width='9' height='8' rx='2' fill='%23f3d9a0' fill-opacity='.5'/%3E%3C/svg%3E") 0 0 / 24px 16px repeat-x;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-season="cinema"] .hero-in::before,
+  html[data-season="cinema"] .hero-in::after { animation: none !important; }
+}
