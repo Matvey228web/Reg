@@ -49,6 +49,47 @@ footer { flex: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Объявления склада --- */
+
+/* Первая строка страницы, над шапкой: график, инвентаризация, правила. Фон —
+   панель, метка залита акцентом: красное здесь значит «прочти это», а не
+   «нажми». По умолчанию раскрыто: важное не должно прятаться за нажатием. */
+.notice {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding-top: env(safe-area-inset-top);
+}
+.notice[hidden] { display: none; }
+.notice-item { max-width: 1280px; margin: 0 auto; padding: 0 var(--pad); }
+.notice-item + .notice-item { border-top: 1px solid var(--line); }
+.notice summary {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 44px; padding: 8px 0;
+  cursor: pointer; list-style: none;
+  font-size: 14px; line-height: 20px; font-weight: 700;
+}
+.notice summary::-webkit-details-marker { display: none; }
+.notice-tag {
+  flex: none;
+  padding: 3px 8px;
+  background: var(--accent); color: #fff;
+  font-size: var(--cap); line-height: 14px; font-weight: 800;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.notice-title { min-width: 0; }
+/* Стрелка справа — состояние раскрытия, а не украшение. */
+.notice summary::after {
+  content: ""; flex: none; margin-left: auto;
+  width: 8px; height: 8px;
+  border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
+  transform: rotate(45deg);
+}
+.notice details[open] > summary::after { transform: rotate(-135deg); }
+.notice-body { padding: 0 0 12px; max-width: 760px; font-size: 14px; line-height: 21px; color: var(--ink); }
+.notice-body p { margin: 0 0 8px; }
+.notice-body p:last-child { margin-bottom: 0; }
+.notice a:focus-visible, .notice summary:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
 /* --- Шапка --- */
 
 .topbar {
@@ -600,9 +641,9 @@ footer {
 }
 footer a { color: var(--dim); }
 
-/* Подвал в колонки: лого и назначение, каталог по категориям, условия. На
-   телефоне колонки складываются в одну — раскладывать три списка по 130
-   точек ширины бессмысленно. */
+/* Подвал в колонки: лого и назначение, каталог по категориям, условия,
+   документы. На телефоне колонки складываются в одну — раскладывать списки по
+   130 точек ширины бессмысленно. */
 .foot {
   display: grid;
   gap: 24px;
@@ -646,8 +687,8 @@ footer a { color: var(--dim); }
      влезало четыре и больше: названия сжимались, фотография мельчала, а
      взгляд по такой решётке уже не идёт построчно. */
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  /* Подвал в четыре доли: лого пошире, три списка равными. */
-  .foot { grid-template-columns: 1.4fr 1fr 1fr; gap: 40px; padding: 40px var(--pad) 32px; }
+  /* Подвал в четыре колонки: лого, каталог, условия (им нужно больше места), документы. */
+  .foot { grid-template-columns: 1.2fr .8fr 1.5fr 1.2fr; gap: 32px; padding: 40px var(--pad) 32px; }
   /* «Каталог» и поиск в один ряд. Раньше в первой колонке стоял блок дат, его
      убрали — и поиск с «Каталогом» встали лестницей через пустую клетку. */
   .controls { grid-template-columns: auto 1fr; align-items: center; }
@@ -712,3 +753,6 @@ footer a { color: var(--dim); }
   opacity: .45;
   user-select: none;
 }
+
+/* Условия — предложения, а не названия: строки чуть реже и без отступа ссылок. */
+.foot-rules li { margin-bottom: 6px; }

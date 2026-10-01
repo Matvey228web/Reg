@@ -15,6 +15,14 @@
 /cart.html
   Cache-Control: no-cache
 
+# Объявления правятся без смены адреса — тоже перепроверяем.
+/announcements.json
+  Cache-Control: no-cache
+
+# Документы заменяют файлом на месте: имя то же, и устаревшая копия вредна.
+/docs/*
+  Cache-Control: no-cache
+
 /style.css
   Cache-Control: public, max-age=604800
 

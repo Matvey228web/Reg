@@ -591,7 +591,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 15 вкладок (с журналом Logs)', spreadsheet.getSheets().length === 15 && !!spreadsheet.getSheetByName('Logs'), spreadsheet.getSheets().map(s => s.name));
+check('создано 16 вкладок (с журналом Logs и объявлениями)', spreadsheet.getSheets().length === 16 && !!spreadsheet.getSheetByName('Logs'), spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -601,7 +601,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 15', spreadsheet.getSheets().length === 15);
+check('вкладок по-прежнему 16', spreadsheet.getSheets().length === 16);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -3263,6 +3263,100 @@ check('logs_24h считает только последние сутки',
   warehouseSummary().logs_24h === logs24Before + 1, warehouseSummary().logs_24h);
 check('logs_24h отдаётся вместе с настройками',
   call('/settings/get', {}, logToken).data.summary.logs_24h === logs24Before + 1);
+
+console.log('\n== объявления склада ==');
+// Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.
+const annStaff = secStaffLogin.ok ? secStaffLogin.data.token : 'нет-токена';
+const annDay = (shift) => new Date(Date.now() + shift * 86400000).toISOString().substring(0, 10);
+
+check('без объявлений публичный ответ пуст',
+  call('/public/announcements', {}).ok === true &&
+  call('/public/announcements', {}).data.items.length === 0, call('/public/announcements', {}));
+
+const annNew = call('/announcement/save', {
+  title: 'График на лето', text: 'Склад закрыт 12 июня.\n\nВыдача остановлена с 28 июня.',
+  until: annDay(10),
+}, annStaff);
+check('складмен создаёт объявление', annNew.ok === true && !!annNew.data.announcement_id, annNew);
+check('без входа создать нельзя',
+  call('/announcement/save', { title: 'x', text: 'y' }, '').ok === false &&
+  call('/announcement/save', { title: 'x', text: 'y' }, '').status === 401);
+check('без заголовка отказ', call('/announcement/save', { title: ' ', text: 'y' }, annStaff).status === 400);
+check('без текста отказ', call('/announcement/save', { title: 'x', text: ' \n ' }, annStaff).status === 400);
+check('слишком длинный заголовок отказ',
+  call('/announcement/save', { title: 'я'.repeat(121), text: 'y' }, annStaff).status === 400);
+check('слишком длинный текст отказ',
+  call('/announcement/save', { title: 'x', text: 'я'.repeat(2001) }, annStaff).status === 400);
+check('больше десяти абзацев отказ',
+  call('/announcement/save', { title: 'x', text: Array(11).fill('строка').join('\n') }, annStaff).status === 400);
+check('плохая дата отказ',
+  call('/announcement/save', { title: 'x', text: 'y', until: 'завтра' }, annStaff).status === 400);
+check('несуществующий день отказ',
+  call('/announcement/save', { title: 'x', text: 'y', until: '2026-02-31' }, annStaff).status === 400);
+
+let annPub = call('/public/announcements', {});
+check('публичный ответ отдаёт действующее', annPub.ok === true && annPub.data.items.length === 1, annPub);
+const annItem = annPub.ok ? annPub.data.items[0] : {};
+check('абзацы разобраны, пустые строки убраны',
+  JSON.stringify(annItem.lines) === JSON.stringify(['Склад закрыт 12 июня.', 'Выдача остановлена с 28 июня.']), annItem);
+check('срок отдан как есть', annItem.until === annDay(10), annItem);
+check('кто завёл — наружу не уходит',
+  Object.keys(annItem).sort().join() === 'id,lines,title,until', Object.keys(annItem));
+check('публичное чтение не требует входа', call('/public/announcements', {}, '').ok === true);
+
+// Правка и список для приложения.
+check('правка по номеру', call('/announcement/save', {
+  announcement_id: annNew.data.announcement_id, title: 'График на лето (новый)',
+  text: 'Склад закрыт.', until: '',
+}, annStaff).ok === true);
+annPub = call('/public/announcements', {});
+check('правка видна на сайте, срок снят',
+  annPub.data.items[0].title === 'График на лето (новый)' && !('until' in annPub.data.items[0]), annPub);
+check('правка чужого номера отказ', call('/announcement/save', {
+  announcement_id: '999', title: 'x', text: 'y' }, annStaff).status === 404);
+const annList = call('/announcements/list', {}, annStaff);
+check('приложению отдаётся список с автором и текстом целиком',
+  annList.ok === true && annList.data.items.length === 1 &&
+  annList.data.items[0].created_by_name === 'Складмен Разделов' &&
+  annList.data.items[0].text === 'Склад закрыт.', annList);
+check('список без входа закрыт', call('/announcements/list', {}, '').status === 401);
+
+// Просроченное: недавнее остаётся (решает браузер), давнее уходит из ответа.
+call('/announcement/save', { title: 'Вчерашнее', text: 't', until: annDay(-1) }, annStaff);
+call('/announcement/save', { title: 'Давнее', text: 't', until: annDay(-30) }, annStaff);
+const annTitles = call('/public/announcements', {}).data.items.map(i => i.title);
+check('вчерашнее срок ещё отдан (запас на часовые пояса)', annTitles.includes('Вчерашнее'), annTitles);
+check('месячной давности не отдаётся', !annTitles.includes('Давнее'), annTitles);
+check('в списке приложения просроченное помечено',
+  call('/announcements/list', {}, annStaff).data.items.some(i => i.title === 'Давнее' && i.expired === true));
+
+// Лимит действующих: просроченные не считаются.
+let annLimit = null;
+for (let i = 0; i < 12 && !annLimit; i++) {
+  const r = call('/announcement/save', { title: 'Нагрузка ' + i, text: 't' }, annStaff);
+  if (!r.ok) annLimit = r;
+}
+check('больше десяти действующих отказ', annLimit && annLimit.status === 409, annLimit);
+
+// Снятие.
+const annGone = call('/announcement/remove', { announcement_id: annNew.data.announcement_id }, annStaff);
+check('складмен снимает объявление', annGone.ok === true && annGone.data.changed === true, annGone);
+check('снятое пропало с сайта',
+  !call('/public/announcements', {}).data.items.some(i => i.title.startsWith('График на лето')));
+check('снятое пропало из списка приложения',
+  !call('/announcements/list', {}, annStaff).data.items.some(i => i.announcement_id === annNew.data.announcement_id));
+check('но строка в таблице осталась, с меткой',
+  readRows(getSheet(SHEETS.ANNOUNCEMENTS)).some(r => String(r.announcement_id) === annNew.data.announcement_id && !!r.removed_at));
+check('повторное снятие безвредно',
+  call('/announcement/remove', { announcement_id: annNew.data.announcement_id }, annStaff).data.changed === false);
+check('снять несуществующее отказ', call('/announcement/remove', { announcement_id: '999' }, annStaff).status === 404);
+check('снять без входа нельзя', call('/announcement/remove', { announcement_id: '1' }, '').status === 401);
+
+// Нет вкладки — сайту не падать.
+spreadsheet.deleteSheet(spreadsheet.getSheetByName('Announcements'));
+check('нет вкладки — публичный ответ пуст, а не ошибка',
+  call('/public/announcements', {}).ok === true && call('/public/announcements', {}).data.items.length === 0,
+  call('/public/announcements', {}));
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);

@@ -159,6 +159,29 @@ var Site = (function () {
       });
   }
 
+  // Объявления склада с бэкенда. Таблица при промахе кэша отвечает до 30 секунд,
+  // а блок объявлений стоит первой строкой и ждать его долго нельзя: через пять
+  // секунд сдаёмся, и вызывающий берёт запасной файл.
+  function announcements() {
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, 5000) : null;
+    return fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ endpoint: "/public/announcements", payload: {} }),
+      signal: ctl ? ctl.signal : undefined,
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (timer) clearTimeout(timer);
+        if (!data || !data.ok || !data.data) throw new Error("не ответил");
+        return data.data.items || [];
+      }, function (err) {
+        if (timer) clearTimeout(timer);
+        throw err;
+      });
+  }
+
   // Принимает ли склад заявки прямо с сайта. Спрашиваем один раз за страницу:
   // показывать кнопку, которая заведомо откажет, хуже, чем сразу предложить
   // скопировать текст.
@@ -346,7 +369,7 @@ var Site = (function () {
     humanDate: humanDate, shotIcon: shotIcon,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
-    sendOrder: sendOrder, ordersOpen: ordersOpen,
+    sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
     setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
@@ -368,6 +391,48 @@ document.addEventListener("DOMContentLoaded", function () {
         Site.escapeHtml(c.label) + "</a></li>";
     }).join("");
   }).catch(function () { /* нет снимка — подвал остаётся без списка */ });
+});
+
+// Объявления склада: первой строкой на каждой странице. Завхоз пишет их в чат,
+// складмен вставляет в приложении, а сюда они приходят через воркер:
+// /public/announcements, кэш пять минут, снятое исчезает сразу (запись сбрасывает
+// кэш). Не ответил бэкенд — берём announcements.json рядом со страницей: это
+// запасной список, и правится он руками. Ответил пустым списком — значит,
+// объявлений нет, и запасной файл не нужен: иначе снятое объявление
+// воскресало бы из файла.
+// Срок (until, а в файле ещё from) проверяется здесь, в браузере: у посетителя
+// свой часовой пояс. ?ann=all показывает всё без оглядки на даты — для проверки.
+document.addEventListener("DOMContentLoaded", function () {
+  var box = Site.$("notice");
+  if (!box) return;
+  var all = /[?&]ann=all\b/.test(location.search);
+  var d = new Date();
+  var today = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" +
+    ("0" + d.getDate()).slice(-2);
+
+  function paint(items) {
+    var shown = (items || []).filter(function (a) {
+      return all || ((!a.from || a.from <= today) && (!a.until || a.until >= today));
+    });
+    if (!shown.length) return;
+    box.innerHTML = shown.map(function (a) {
+      return '<details class="notice-item" open><summary><span class="notice-tag">Внимание</span>' +
+        '<span class="notice-title">' + Site.escapeHtml(a.title) + "</span></summary>" +
+        '<div class="notice-body">' + (a.lines || []).map(function (line) {
+          return "<p>" + Site.escapeHtml(line) + "</p>";
+        }).join("") + "</div></details>";
+    }).join("");
+    box.hidden = false;
+  }
+
+  Site.announcements()
+    .then(paint)
+    .catch(function () {
+      return fetch("announcements.json", { cache: "no-cache" })
+        .then(function (res) { return res.json(); })
+        .then(function (data) { paint(data.items); });
+    })
+    .catch(function () { /* нет ни ответа, ни файла — объявлений просто нет */ });
 });
 
 // Возврат кнопкой «назад» страницу заново не выполняет: браузер достаёт её из

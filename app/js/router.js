@@ -17,6 +17,7 @@ const Router = (() => {
     repair: "Ремонт", orders: "Заказы", order: "Заказ", item: "Оборудование",
     inventory: "Инвентаризация", staff: "Сотрудники", labels: "Этикетки",
     settings: "Настройки", pin: "Смена PIN", models: "Модели",
+    announcements: "Объявления",
   };
 
   // «Назад» показываем двумя способами сразу: своей кнопкой в шапке и нативной
@@ -42,7 +43,7 @@ const Router = (() => {
   // чтобы на карточке предмета было видно, где ты находишься.
   const PARENT_TAB = { item: "catalog", labels: "catalog", order: "orders",
                        staff: "home", settings: "home", pin: "home", models: "home",
-                       inventory: "home" };
+                       inventory: "home", announcements: "home" };
 
   // Панель разделов видна везде, кроме экрана входа; активная вкладка подсвечена.
   // Вывеска в шапке остаётся и на входе — она и есть название системы, — а
