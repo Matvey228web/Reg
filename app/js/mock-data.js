@@ -1483,7 +1483,7 @@ const MockAPI = {
         MockStore.requireAdmin(token);
         return {
           chats: [
-            { chat_id: "-1001234567890", title: "Склад Киноколледж #40",
+            { chat_id: "-1001234567890", title: "Склад Киноколледж №40",
               type: "supergroup", at: new Date().toISOString() },
             { chat_id: "482913756", title: "Мария Сидорова",
               type: "private", at: new Date().toISOString() },
