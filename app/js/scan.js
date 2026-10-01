@@ -57,8 +57,82 @@ const ScanScreen = (() => {
         return;
       }
       if (!code) return;
-      await lookup(code.trim());
+      await handleCode(code.trim());
     });
+  }
+
+  // Что делать с номером, который прочитали камерой или ввели руками.
+  //
+  // Выдача по заказу — подряд десяток позиций, и каждый запрос к таблице стоит
+  // 6–9 секунд. Если предмет штучный, лежит в кэше каталога и там «Доступно»,
+  // спрашивать о нём /item/lookup незачем: заказ, срок и пустые заметки — те же,
+  // что ушли бы с кнопки «Выдать», — известны. Выдаём сразу, одним запросом.
+  // Кэш здесь только догадка: бэкенд всё равно проверяет выдачу, и устаревшее
+  // «Доступно» кончится его отказом на экране, а не неверной записью.
+  //
+  // Остальное идёт через поиск и форму, как раньше: позиция количеством (надо
+  // спросить, сколько), предмета нет в кэше или он там не «Доступно» — тогда
+  // человек должен увидеть карточку и причину.
+  async function handleCode(itemId) {
+    const row = lockedOrder ? cachedRow(itemId) : null;
+    if (row && !ItemState.byQty(row) && row.status === "Available") {
+      await quickCheckout(row);
+      return;
+    }
+    await lookup(itemId);
+  }
+
+  function cachedRow(itemId) {
+    const list = Cache.items("equipment") || [];
+    return list.find((r) => String(r.item_id) === String(itemId)) || null;
+  }
+
+  // Выдача без формы — сделано как submitCheckout, только поля берутся не из
+  // формы, а из заказа: на экране их и так показывали только для чтения.
+  let quickBusy = false;
+  async function quickCheckout(row) {
+    if (quickBusy) return;
+    quickBusy = true;
+    const result = document.getElementById("scan-result");
+    showBoxError("scan-error", "");
+    result.innerHTML = `<div class="card"><div class="card-sub">Выдаём ${escapeHtml((row.name || "") + " · " + row.item_id)}…</div></div>`;
+    try {
+      const orderId = Number(lockedOrder.orderId);
+      const res = await apiPost("/transaction/checkout", {
+        item_id: row.item_id,
+        order_id: orderId,
+        qty: 1,
+        expected_return_at: lockedOrder.returnDate || null,
+        notes: "",
+      });
+      TG.hapticSuccess();
+      Cache.clear("orders");   // изменился статус и состав заказа
+      Cache.patch("equipment", "item_id", row.item_id,
+        ItemState.afterCheckout(row, 1, res && res.transaction_id));
+      const offOrder = !!(res && res.order_line === "off-order");
+      nextInOrder(row.name + (offOrder ? " — сверх заявки" : ""));
+    } catch (err) {
+      // Отказ (уже выдан, в ремонте…) — строкой на экране, как ошибка поиска,
+      // без окна: заход по заказу продолжается, камера открывается снова.
+      // Под окном сканера видна только вибрация — по ней человек и поймёт,
+      // что эту позицию надо посмотреть.
+      TG.hapticError();
+      result.innerHTML = `<div class="error-box">${escapeHtml(
+        (row.name || row.item_id) + " (" + row.item_id + ") не выдан: " + formError(err))}</div>`;
+      startScan(true);
+    } finally {
+      quickBusy = false;
+    }
+  }
+
+  // Позиция по заказу выдана: в список захода и сразу за следующей.
+  function nextInOrder(line) {
+    session.push(line);
+    currentItem = null;
+    mode = null;
+    document.getElementById("scan-result").innerHTML = "";
+    renderOrderBar();
+    startScan(true);
   }
 
   async function lookup(itemId) {
@@ -446,12 +520,7 @@ const ScanScreen = (() => {
       if (lockedOrder) {
         // У штучных позиций важно, сколько ушло: «Кабель XLR — 4 шт».
         const qtyNote = currentItem.by_qty && qtyField ? " — " + qty + " шт" : "";
-        session.push(currentItem.name + qtyNote + (offOrder ? " — сверх заявки" : ""));
-        currentItem = null;
-        mode = null;
-        document.getElementById("scan-result").innerHTML = "";
-        renderOrderBar();
-        startScan(true);
+        nextInOrder(currentItem.name + qtyNote + (offOrder ? " — сверх заявки" : ""));
         return;
       }
       await showItem(currentItem);
@@ -572,7 +641,7 @@ const ScanScreen = (() => {
       const val = document.getElementById("scan-manual-input").value.replace(/[\s\-]/g, "");
       if (!val) return;
       showBoxError("scan-error", "");
-      await lookup(val);
+      await handleCode(val);
     });
     Router.register("scan", { onShow });
   }
