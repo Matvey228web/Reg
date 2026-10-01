@@ -144,6 +144,34 @@ async function saveImageFor(canvas, filename, title, btn) {
   }
 }
 
+// Текст в буфер обмена. Сначала navigator.clipboard — но внутри Telegram он
+// бывает закрыт (нет разрешения, не тот контекст), тогда старый путь: скрытое
+// поле и execCommand("copy"). Вызывать из обработчика нажатия — иначе
+// откажут оба. Возвращает true/false: что сказать человеку, решает экран.
+async function copyText(text) {
+  const value = String(text == null ? "" : text);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch (ignored) {}
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(area);
+  try {
+    area.select();
+    area.setSelectionRange(0, value.length);
+    return document.execCommand("copy");
+  } catch (ignored) {
+    return false;
+  } finally {
+    area.remove();
+  }
+}
+
 // --- Сегментированный контроль ---
 // Значение живёт в разметке (класс на выбранной кнопке), а не в скрытом поле:
 // скрытое поле рядом с видимыми кнопками — это два органа управления на одну

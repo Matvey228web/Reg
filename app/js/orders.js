@@ -76,24 +76,21 @@ const OrdersScreen = (() => {
       </div>`;
   }
 
-  // Три дела, которые делают, глядя в список, а не открыв заказ: посмотреть
-  // акт перед выдачей, написать студенту, позвонить ему. Раньше за каждым
-  // приходилось заходить в карточку — а на складе список открыт, когда
-  // человек уже стоит рядом.
+  // Быстрые действия в списке — акт и чат: акт смотрят перед выдачей, стоя
+  // у полки, а написать студенту («где вы?», «заказ готов») удобно, не
+  // открывая карточку. Звонка в списке нет: позвонить и скопировать номер —
+  // из карточки заказа, там номер виден целиком.
   //
+  // «Акт» всегда первым, «Чат» за ним: акт на одном и том же месте в каждой
+  // строке, а не прыгает в зависимости от того, есть ли у студента ник.
   // Кнопки не показываем пустыми: нет акта — нет кнопки, и сразу видно, что
   // шаблон не создан. Нет ника — нечего открывать.
   function quickRowHtml(order) {
-    const tg = String(order.student_tg || "").replace(/^@/, "");
-    const phone = String(order.student_phone || "");
-    // Телефон — настоящая ссылка tel:, а не кнопка с вызовом из кода: WebView
-    // отдаёт номер телефону только по нажатию человека на ссылку.
+    const tg = String(order.student_tg || "").trim().replace(/^@/, "");
     const buttons = [
       order.act_url
         ? `<button class="chip-btn" type="button" data-act-url="${escapeHtml(order.act_url)}">Акт</button>` : "",
       tg ? `<button class="chip-btn" type="button" data-tg="${escapeHtml(tg)}">Чат</button>` : "",
-      phone
-        ? `<a class="chip-btn" href="tel:${escapeHtml(phone.replace(/[^\d+]/g, ""))}">Позвонить</a>` : "",
     ].filter(Boolean);
     return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
   }
@@ -102,14 +99,16 @@ const OrdersScreen = (() => {
   // живёт всё время, а перерисовка идёт на каждое нажатие клавиши в поиске.
   // Вешать здесь при каждом render значило копить слушатели, и одно нажатие
   // на «Чат» открывало переписку столько раз, сколько было перерисовок.
-  // Нажатие на кнопку карточку не открывает. Звонок в обработчике не
-  // участвует: там ссылка tel:, и перехватывать её нельзя.
+  // Нажатие на кнопку карточку не открывает: каждая ветка выходит через return.
   function bindList(list) {
     list.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act-url]");
       if (act) { TG.openLink(act.dataset.actUrl); return; }
       const chat = e.target.closest("[data-tg]");
-      if (chat) { TG.openTelegramLink("https://t.me/" + chat.dataset.tg); return; }
+      if (chat) {
+        TG.openTelegramLink("https://t.me/" + encodeURIComponent(chat.dataset.tg));
+        return;
+      }
       if (e.target.closest("a, button, select, input")) return;
       const card = e.target.closest("[data-order-id]");
       if (card) Router.navigate("order", { orderId: card.dataset.orderId });
