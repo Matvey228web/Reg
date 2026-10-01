@@ -2505,6 +2505,140 @@ check('несопоставленную строку выдать нельзя',
 check('несуществующую строку тоже',
   call('/order/issue', { order_id: issOrder, line_no: 99 }, issAdmin).status === 404);
 
+console.log('\n== выдача строки целиком: один вход и один замок ==');
+// Строка на несколько предметов идёт одним проходом под одним замком, как
+// приём пачкой (/transaction/checkin-batch): вход, замок и выбор свободных —
+// один раз на запрос, а не на каждый предмет.
+const mFree = () => readRows(getSheet(SHEETS.EQUIPMENT)).filter((e) =>
+  String(e.category) === String(issModel.category) &&
+  String(e.model_code) !== '' && Number(e.model_code) === Number(issModel.model_code) &&
+  e.status === 'Available').map((e) => String(e.item_id));
+while (mFree().length < 3) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const mOrderOf = (no, qty) => call('/order/create', {
+  order_no: no, student_name: 'Строкой Выдаев', student_phone: '+79990000004',
+  issue_date: '01.10.2026', return_date: '03.10.2026',
+  items: [{ line_no: 1, raw_name: issModel.model_name, category: issModel.category,
+            model_code: issModel.model_code, qty: qty }],
+}, issAdmin).data.order_id;
+// Счётчики: сколько раз вход, замок и пересборка акта случились за запрос.
+const spy = { auth: 0, lock: 0, rebuild: 0, onLock: null };
+const realCheckAuth = global.checkAuth, realRebuild = global.rebuildAct;
+const realLock = global.LockService.getScriptLock;
+global.checkAuth = function () { spy.auth++; return realCheckAuth.apply(this, arguments); };
+global.rebuildAct = function () { spy.rebuild++; return { skipped: 'spy' }; };
+global.LockService.getScriptLock = () => ({
+  waitLock() { spy.lock++; if (spy.onLock) { const f = spy.onLock; spy.onLock = null; f(); } },
+  releaseLock() {},
+});
+const spyReset = () => { spy.auth = 0; spy.lock = 0; spy.rebuild = 0; };
+const mTx = (id) => readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.order_id) === String(id));
+const mCard = (id) => call('/order/card', { order_id: id }, issAdmin).data;
+
+const want3 = mFree().slice(0, 3).sort();
+const mOrder = mOrderOf('LINE-3', 3);
+spyReset();
+r = call('/order/issue', { order_id: mOrder, line_no: 1 }, issAdmin);
+check('строка на три предмета выдана целиком', r.ok === true && r.data.issued.length === 3 && r.data.left === 0, r);
+check('ответ прежнего вида: issued [{item_id, qty}], left, order_id, line_no',
+  r.data.issued.every((i) => typeof i.item_id !== 'undefined' && i.qty === 1) &&
+  r.data.order_id === Number(mOrder) && r.data.line_no === 1, r.data);
+check('взяты свободные по порядку номеров',
+  r.data.issued.map((i) => String(i.item_id)).join(',') === want3.join(','), [r.data.issued, want3]);
+check('вход — один раз на запрос', spy.auth === 1, spy.auth);
+check('замок — один раз на запрос', spy.lock === 1, spy.lock);
+check('акт не пересобирался: всё легло в состав', spy.rebuild === 0, spy.rebuild);
+check('три записи журнала по строке 1, все с пометкой «без сканирования»',
+  mTx(mOrder).length === 3 && mTx(mOrder).every((t) => String(t.order_line) === '1' &&
+    /без сканирования/.test(t.notes) && t.status === 'Open'), mTx(mOrder));
+check('в строке «выдано 3 из 3», заказ выдан',
+  mCard(mOrder).items[0].issued_qty === 3 && mCard(mOrder).order.status === 'Issued', mCard(mOrder));
+check('предметы ушли со склада', want3.every((id) => !mFree().includes(id)));
+
+spyReset();
+r = call('/order/issue', { order_id: mOrder, line_no: 1 }, issAdmin);
+check('второе нажатие — 409, а не вторая выдача', r.ok === false && r.status === 409, r);
+check('второе нажатие ничего не записало', mTx(mOrder).length === 3 && mCard(mOrder).items[0].issued_qty === 3);
+
+// Свободных меньше, чем в строке: выдаём что есть, остаток — в left.
+while (mFree().length < 2) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const freeNow = mFree().length;
+const pOrder = mOrderOf('LINE-PART', freeNow + 2);
+r = call('/order/issue', { order_id: pOrder, line_no: 1 }, issAdmin);
+check('частичная выдача: выдано сколько свободно', r.ok === true && r.data.issued.length === freeNow, r);
+check('частичная выдача: остаток по строке в left', r.data.left === 2, r.data);
+check('частичная выдача: в строке «выдано N из N+2»',
+  mCard(pOrder).items[0].issued_qty === freeNow, mCard(pOrder).items[0]);
+r = call('/order/issue', { order_id: pOrder, line_no: 1 }, issAdmin);
+check('по остатку свободных нет — 409, лишнего не выдано',
+  r.ok === false && r.status === 409 && mTx(pOrder).length === freeNow, r);
+r = call('/order/issue', { order_id: pOrder, line_no: 1, qty: 3 }, issAdmin);
+check('просят больше остатка по строке — 409', r.ok === false && r.status === 409, r);
+
+// Выбор свободных — под замком. Пока запрос ждал замок, другой телефон забрал
+// один из предметов: запрос должен увидеть это и взять следующий свободный,
+// а не упасть на середине и не выдать чужое.
+for (let k = 0; k < 2; k++) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const raceFree = mFree().sort();
+const raceOrder = mOrderOf('LINE-RACE', 1);
+const otherOrder = mOrderOf('LINE-OTHER', 1);
+spy.onLock = () => {
+  // «Второй телефон» успел раньше: первый свободный уже на руках.
+  realCheckout(raceFree[0], otherOrder);
+};
+function realCheckout(itemId, orderId) {
+  checkoutUnderLock({ item_id: itemId, order_id: orderId, notes: 'другой телефон' },
+    { staff_id: 1, full_name: 'Другой' });
+}
+r = call('/order/issue', { order_id: raceOrder, line_no: 1 }, issAdmin);
+check('забранный другим предмет не выдан повторно',
+  r.ok === true && r.data.issued.length === 1 && String(r.data.issued[0].item_id) === raceFree[1], [r, raceFree]);
+check('у забранного предмета одна открытая выдача',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter((t) => String(t.item_id) === raceFree[0] && t.status === 'Open').length === 1);
+
+// Вне состава выдача по строке лечь не должна, но если легла — акт
+// пересобирается один раз на запрос, а не на каждый предмет.
+while (mFree().length < 3) {
+  call('/item/create', { name: issModel.model_name, category: issModel.category,
+    model_code: issModel.model_code }, issAdmin);
+}
+const offOrder = mOrderOf('LINE-OFF', 3);
+const realClaim = global.claimOrderLine;
+global.claimOrderLine = (oid, item, qty) => [{ line: 'off-order', qty: qty }];
+spyReset();
+r = call('/order/issue', { order_id: offOrder, line_no: 1 }, issAdmin);
+global.claimOrderLine = realClaim;
+check('выдача трёх вне состава прошла', r.ok === true && r.data.issued.length === 3, r);
+check('акт пересобран один раз на три предмета', spy.rebuild === 1, spy.rebuild);
+check('замок один и при пересборке', spy.lock === 1, spy.lock);
+
+// Одиночная выдача после выноса тела в checkoutUnderLock — по-прежнему
+// замок и вход на запрос и пересборка акта вне состава.
+const soloItem = call('/item/create', { name: issModel.model_name, category: issModel.category,
+  model_code: issModel.model_code }, issAdmin).data.item_id;
+const soloOrder = mOrderOf('LINE-SOLO', 1);
+global.claimOrderLine = (oid, item, qty) => [{ line: 'off-order', qty: qty }];
+spyReset();
+r = call('/transaction/checkout', { item_id: soloItem, order_id: soloOrder }, issAdmin);
+global.claimOrderLine = realClaim;
+check('одиночная выдача вне состава: ответ прежний', r.ok === true && r.data.order_line === 'off-order' &&
+  r.data.order_id === undefined && r.data.transaction_id, r);
+check('одиночная выдача: вход, замок и пересборка — по одному',
+  spy.auth === 1 && spy.lock === 1 && spy.rebuild === 1, spy);
+check('одиночная выдача по заказу ставит заказу «Issued»', mCard(soloOrder).order.status === 'Issued');
+
+global.checkAuth = realCheckAuth;
+global.rebuildAct = realRebuild;
+global.LockService.getScriptLock = realLock;
+
 console.log('\n== выдача количеством в счёт заказа ==');
 // «Выдано N из M» у позиции количеством: 10 мешков — это 10 в строке, а не 1.
 check('категория GEL учитывается количеством', categoryByQty('GEL') === true);

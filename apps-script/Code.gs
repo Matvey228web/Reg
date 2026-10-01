@@ -2234,7 +2234,14 @@ function handleItemCreate(payload, token) {
 
 function handleTransactionCheckout(payload, token) {
   var staffRow = checkAuth(token);
-  var res = checkoutUnderLock(payload, staffRow);
+  var res;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    res = checkoutUnderLock(payload, staffRow);
+  } finally {
+    lock.releaseLock();
+  }
   // Сверх заявки — акт заказа уже не совпадает с тем, что на руках.
   // Пересобираем после снятия замка (документ — это секунды), и неудача
   // выдачу не отменяет: предмет уже записан как выданный.
@@ -2257,90 +2264,95 @@ function rebuildActQuietly(orderId, masterName) {
   }
 }
 
-function checkoutUnderLock(payload, staffRow) {
+// Тело выдачи одного предмета, без замка: замок берёт вызывающий — одиночная
+// выдача на один предмет, выдача строки заказа (handleOrderIssue) на все
+// предметы строки сразу. Сделано как checkinUnderLock у приёма.
+//
+// order — строка заказа, уже найденная и проверенная вызывающим под тем же
+// замком. Тогда заказ не перечитывается и статус «Issued» здесь не ставится:
+// его ставит вызывающий один раз на весь запрос. Без order — как раньше:
+// заказ ищется по payload.order_id, статус ставится тут же.
+function checkoutUnderLock(payload, staffRow, order) {
   var itemId = String(payload.item_id || "").trim();
-  var lock = LockService.getScriptLock();
-  lock.waitLock(LOCK_TIMEOUT_MS);
-  try {
-    var eqSheet = getSheet(SHEETS.EQUIPMENT);
-    var item = findRowByValue(eqSheet, "item_id", itemId);
-    if (!item) throw apiError(404, "Предмет не найден");
+  var eqSheet = getSheet(SHEETS.EQUIPMENT);
+  var item = findRowByValue(eqSheet, "item_id", itemId);
+  if (!item) throw apiError(404, "Предмет не найден");
 
-    // Позиция с учётом количеством выдаётся частями: на складе остаётся
-    // остаток, и «уже выдан» к ней неприменимо — применимо «столько нет».
-    var byQty = categoryByQty(item.category);
-    var total = itemQty(item);
-    var out = Number(item.qty_out || 0);
-    var takeQty = byQty ? Math.floor(Number(payload.qty || 1)) : 1;
-    if (byQty) {
-      if (!takeQty || takeQty < 1) throw apiError(400, "Укажите количество — целое число от одного");
-      if (item.status === "In Repair" || item.status === "Retired") {
-        throw apiError(409, "Позиция снята с выдачи");
-      }
-      if (out + takeQty > total) {
-        throw apiError(409, "На складе свободно " + (total - out) + " из " + total + " — больше выдать нельзя");
-      }
-    } else if (item.status !== "Available") {
-      throw apiError(409, "Предмет уже выдан или недоступен");
+  // Позиция с учётом количеством выдаётся частями: на складе остаётся
+  // остаток, и «уже выдан» к ней неприменимо — применимо «столько нет».
+  var byQty = categoryByQty(item.category);
+  var total = itemQty(item);
+  var out = Number(item.qty_out || 0);
+  var takeQty = byQty ? Math.floor(Number(payload.qty || 1)) : 1;
+  if (byQty) {
+    if (!takeQty || takeQty < 1) throw apiError(400, "Укажите количество — целое число от одного");
+    if (item.status === "In Repair" || item.status === "Retired") {
+      throw apiError(409, "Позиция снята с выдачи");
     }
-
-    // Выдача в счёт заказа: срок возврата берём из заказа, а сама выдача
-    // списывается с подходящей строки состава.
-    // parts — на какие строки состава легла выдача: одна запись журнала на
-    // каждую. Вне заказа — одна запись без строки.
-    var orderId = "", parts = [{ line: "", qty: takeQty }];
-    var expectedReturn = payload.expected_return_at || "";
-    if (payload.order_id) {
-      var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", String(payload.order_id));
-      if (!order) throw apiError(404, "Заказ не найден");
-      if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
-      orderId = Number(order.order_id);
-      if (!expectedReturn) expectedReturn = String(order.return_date || "");
-      parts = claimOrderLine(orderId, item, takeQty);
-      updateRow(getSheet(SHEETS.ORDERS), order.__row, { status: "Issued" });
+    if (out + takeQty > total) {
+      throw apiError(409, "На складе свободно " + (total - out) + " из " + total + " — больше выдать нельзя");
     }
-
-    var txSheet = getSheet(SHEETS.TRANSACTIONS);
-    var txId = "", orderLine = "", now = new Date().toISOString();
-    parts.forEach(function (part) {
-      var id = nextId("transaction_id", maxIdIn(txSheet, "transaction_id"));
-      if (!txId) txId = id;
-      // Хоть часть легла вне состава — акт уже не совпадает с выданным.
-      if (!orderLine || part.line === "off-order") orderLine = part.line;
-      appendRow(txSheet, {
-        transaction_id: id,
-        item_id: itemId,
-        client_id: payload.client_id,
-        order_id: orderId,
-        order_line: part.line,
-        staff_out: staffRow.staff_id,
-        staff_out_name: staffRow.full_name,
-        staff_in: "",
-        staff_in_name: "",
-        checked_out_at: now,
-        expected_return_at: expectedReturn,
-        checked_in_at: "",
-        status: "Open",
-        notes: payload.notes || "",
-        qty: part.qty,
-        qty_in: 0,
-      });
-    });
-    if (byQty) {
-      // Пока на складе что-то осталось, позиция остаётся доступной: иначе
-      // выдача одного мешка закрыла бы все двадцать.
-      var newOut = out + takeQty;
-      updateRow(eqSheet, item.__row, {
-        qty_out: newOut,
-        status: newOut >= total ? "Rented" : "Available",
-      });
-    } else {
-      updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
-    }
-    return { transaction_id: txId, order_line: orderLine, qty: takeQty, order_id: orderId };
-  } finally {
-    lock.releaseLock();
+  } else if (item.status !== "Available") {
+    throw apiError(409, "Предмет уже выдан или недоступен");
   }
+
+  // Выдача в счёт заказа: срок возврата берём из заказа, а сама выдача
+  // списывается с подходящей строки состава.
+  // parts — на какие строки состава легла выдача: одна запись журнала на
+  // каждую. Вне заказа — одна запись без строки.
+  var orderId = "", parts = [{ line: "", qty: takeQty }];
+  var expectedReturn = payload.expected_return_at || "";
+  var settleHere = !order;
+  if (!order && payload.order_id) {
+    order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", String(payload.order_id));
+    if (!order) throw apiError(404, "Заказ не найден");
+    if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
+  }
+  if (order) {
+    orderId = Number(order.order_id);
+    if (!expectedReturn) expectedReturn = String(order.return_date || "");
+    parts = claimOrderLine(orderId, item, takeQty);
+    if (settleHere) updateRow(getSheet(SHEETS.ORDERS), order.__row, { status: "Issued" });
+  }
+
+  var txSheet = getSheet(SHEETS.TRANSACTIONS);
+  var txId = "", orderLine = "", now = new Date().toISOString();
+  parts.forEach(function (part) {
+    var id = nextId("transaction_id", maxIdIn(txSheet, "transaction_id"));
+    if (!txId) txId = id;
+    // Хоть часть легла вне состава — акт уже не совпадает с выданным.
+    if (!orderLine || part.line === "off-order") orderLine = part.line;
+    appendRow(txSheet, {
+      transaction_id: id,
+      item_id: itemId,
+      client_id: payload.client_id,
+      order_id: orderId,
+      order_line: part.line,
+      staff_out: staffRow.staff_id,
+      staff_out_name: staffRow.full_name,
+      staff_in: "",
+      staff_in_name: "",
+      checked_out_at: now,
+      expected_return_at: expectedReturn,
+      checked_in_at: "",
+      status: "Open",
+      notes: payload.notes || "",
+      qty: part.qty,
+      qty_in: 0,
+    });
+  });
+  if (byQty) {
+    // Пока на складе что-то осталось, позиция остаётся доступной: иначе
+    // выдача одного мешка закрыла бы все двадцать.
+    var newOut = out + takeQty;
+    updateRow(eqSheet, item.__row, {
+      qty_out: newOut,
+      status: newOut >= total ? "Rented" : "Available",
+    });
+  } else {
+    updateRow(eqSheet, item.__row, { status: "Rented", current_transaction_id: txId });
+  }
+  return { transaction_id: txId, order_line: orderLine, qty: takeQty, order_id: orderId };
 }
 
 // Заказ закрыт, когда по нему на руках ничего нет. Отдельно от строки
@@ -5881,80 +5893,106 @@ function escapeForReplace(text) {
 // весь заказ собран заранее — и тогда упираться в скан значит стоять.
 //
 // Предметы выбираются сами: свободные, этой же модели, по порядку номеров.
-// Дальше всё идёт через ту же выдачу, что и со сканера, — с теми же
-// проверками состояния, количества и списания со строки заказа.
+// Дальше всё идёт через ту же выдачу, что и со сканера (checkoutUnderLock), —
+// с теми же проверками состояния, количества и списания со строки заказа.
+//
+// Вход, замок и чтение листов — один раз на всю строку, как у приёма пачкой
+// (handleTransactionCheckinBatch). Раньше каждый предмет шёл отдельным
+// handleTransactionCheckout: вход, замок и листы заново, 6–9 секунд на штуку,
+// а свободные предметы выбирались до замка — два быстрых нажатия (или два
+// телефона) видели одних и тех же свободных и выдавали строку дважды. Теперь
+// и выбор свободных, и остаток по строке считаются под замком: второй запрос
+// ждёт первый и видит уже выданное.
 function handleOrderIssue(payload, token) {
-  checkAuth(token);
+  var staffRow = checkAuth(token);
   var orderId = String(payload.order_id || "");
-  var order = findRowByValue(getSheet(SHEETS.ORDERS), "order_id", orderId);
-  if (!order) throw apiError(404, "Заказ не найден");
-  if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
-
   var lineNo = Number(payload.line_no || 0);
-  var line = null;
-  readRows(getSheet(SHEETS.ORDER_ITEMS)).forEach(function (r) {
-    if (String(r.order_id) === orderId && Number(r.line_no) === lineNo) line = r;
-  });
-  if (!line) throw apiError(404, "Такой строки в заказе нет");
-  if (!line.category || line.model_code === "") {
-    throw apiError(409, "Позиция не сопоставлена с моделью. Сопоставьте её в заказе, " +
-      "иначе выдавать нечего: система не знает, что это за вещь");
-  }
+  var notes = "Выдано по заявке без сканирования";
+  var issued = [], offOrder = false, rest = 0;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var orderSheet = getSheet(SHEETS.ORDERS);
+    var order = findRowByValue(orderSheet, "order_id", orderId);
+    if (!order) throw apiError(404, "Заказ не найден");
+    if (order.status === "Cancelled") throw apiError(409, "Заказ отменён, выдавать по нему нельзя");
 
-  var category = String(line.category);
-  var model = pad2(Number(line.model_code));
-  var left = Number(line.qty || 1) - Number(line.issued_qty || 0);
-  if (left < 1) throw apiError(409, "По этой строке уже всё выдано");
-  // Количество не задано — выдаём столько, сколько свободно, но не больше
-  // остатка по строке. Отказ «свободна одна, а нужно три» заставлял бы
-  // складмена считать самому, хотя выдать одну он всё равно хочет.
-  var asked = payload.qty === undefined || payload.qty === null || payload.qty === "";
-  var want = asked ? left : Math.floor(Number(payload.qty));
-  if (!want || want < 1) throw apiError(400, "Количество — целое число от одного");
-  if (want > left) throw apiError(409, "По этой строке осталось выдать " + left);
-
-  // Позиция «количеством» — одна строка на складе, выдаётся сразу нужным
-  // числом. Поштучная — столько выдач, сколько предметов.
-  var byQty = categoryByQty(category);
-  var free = readRows(getSheet(SHEETS.EQUIPMENT)).filter(function (e) {
-    if (String(e.category) !== category) return false;
-    if (e.model_code === "" || pad2(Number(e.model_code)) !== model) return false;
-    return byQty ? itemQty(e) - Number(e.qty_out || 0) > 0 : e.status === "Available";
-  });
-  free.sort(function (a, b) { return String(a.item_id) < String(b.item_id) ? -1 : 1; });
-
-  if (!free.length) {
-    throw apiError(409, "Свободных «" + String(line.raw_name || model) +
-      "» на складе нет — ни одной");
-  }
-
-  var issued = [];
-  if (byQty) {
-    var spare = itemQty(free[0]) - Number(free[0].qty_out || 0);
-    if (asked) want = Math.min(want, spare);
-    if (spare < want) throw apiError(409, "Свободно только " + spare + " из " + want);
-    handleTransactionCheckout({
-      item_id: free[0].item_id, order_id: orderId, qty: want,
-      notes: "Выдано по заявке без сканирования",
-    }, token);
-    issued.push({ item_id: free[0].item_id, qty: want });
-  } else {
-    if (asked) want = Math.min(want, free.length);
-    if (free.length < want) {
-      throw apiError(409, "Свободно только " + free.length + " из " + want);
+    var line = null;
+    readRows(getSheet(SHEETS.ORDER_ITEMS)).forEach(function (r) {
+      if (String(r.order_id) === orderId && Number(r.line_no) === lineNo) line = r;
+    });
+    if (!line) throw apiError(404, "Такой строки в заказе нет");
+    if (!line.category || line.model_code === "") {
+      throw apiError(409, "Позиция не сопоставлена с моделью. Сопоставьте её в заказе, " +
+        "иначе выдавать нечего: система не знает, что это за вещь");
     }
-    for (var i = 0; i < want; i++) {
-      handleTransactionCheckout({
-        item_id: free[i].item_id, order_id: orderId,
-        notes: "Выдано по заявке без сканирования",
-      }, token);
-      issued.push({ item_id: free[i].item_id, qty: 1 });
-    }
-  }
 
-  // Сколько осталось по строке после этой выдачи — чтобы приложение сказало
-  // правду, а не «выдано» на строке, где ещё две единицы.
-  var rest = left - want;
+    var category = String(line.category);
+    var model = pad2(Number(line.model_code));
+    var left = Number(line.qty || 1) - Number(line.issued_qty || 0);
+    if (left < 1) throw apiError(409, "По этой строке уже всё выдано");
+    // Количество не задано — выдаём столько, сколько свободно, но не больше
+    // остатка по строке. Отказ «свободна одна, а нужно три» заставлял бы
+    // складмена считать самому, хотя выдать одну он всё равно хочет.
+    var asked = payload.qty === undefined || payload.qty === null || payload.qty === "";
+    var want = asked ? left : Math.floor(Number(payload.qty));
+    if (!want || want < 1) throw apiError(400, "Количество — целое число от одного");
+    if (want > left) throw apiError(409, "По этой строке осталось выдать " + left);
+
+    // Позиция «количеством» — одна строка на складе, выдаётся сразу нужным
+    // числом. Поштучная — столько выдач, сколько предметов.
+    var byQty = categoryByQty(category);
+    var free = readRows(getSheet(SHEETS.EQUIPMENT)).filter(function (e) {
+      if (String(e.category) !== category) return false;
+      if (e.model_code === "" || pad2(Number(e.model_code)) !== model) return false;
+      return byQty ? itemQty(e) - Number(e.qty_out || 0) > 0 : e.status === "Available";
+    });
+    free.sort(function (a, b) { return String(a.item_id) < String(b.item_id) ? -1 : 1; });
+
+    if (!free.length) {
+      throw apiError(409, "Свободных «" + String(line.raw_name || model) +
+        "» на складе нет — ни одной");
+    }
+
+    var take = [];
+    if (byQty) {
+      var spare = itemQty(free[0]) - Number(free[0].qty_out || 0);
+      if (asked) want = Math.min(want, spare);
+      if (spare < want) throw apiError(409, "Свободно только " + spare + " из " + want);
+      take.push({ item_id: free[0].item_id, qty: want });
+    } else {
+      if (asked) want = Math.min(want, free.length);
+      if (free.length < want) {
+        throw apiError(409, "Свободно только " + free.length + " из " + want);
+      }
+      for (var i = 0; i < want; i++) take.push({ item_id: free[i].item_id, qty: 1 });
+    }
+
+    // Статус заказа — один раз на запрос, и даже если выдача оборвалась на
+    // середине: то, что уже выдано, лежит в журнале, и заказ с вещами на
+    // руках не может оставаться «новым».
+    try {
+      take.forEach(function (t) {
+        var res = checkoutUnderLock({
+          item_id: t.item_id, order_id: orderId, qty: t.qty, notes: notes,
+        }, staffRow, order);
+        if (res.order_line === "off-order") offOrder = true;
+        issued.push({ item_id: t.item_id, qty: t.qty });
+      });
+    } finally {
+      if (issued.length) updateRow(orderSheet, order.__row, { status: "Issued" });
+    }
+
+    // Сколько осталось по строке после этой выдачи — чтобы приложение сказало
+    // правду, а не «выдано» на строке, где ещё две единицы.
+    rest = left - want;
+  } finally {
+    lock.releaseLock();
+  }
+  // Как у одиночной выдачи: акт пересобирается после замка и один раз на
+  // запрос. По строке заказа вне состава выдача лечь не должна, но если
+  // легла (строки той же модели уже заполнены) — акт должен это показать.
+  if (offOrder) rebuildActQuietly(Number(orderId), staffRow.full_name);
   return { order_id: Number(orderId), line_no: lineNo, issued: issued, left: rest };
 }
 
