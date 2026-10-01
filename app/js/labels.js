@@ -418,7 +418,7 @@ const LabelsScreen = (() => {
     const frameIn = edge + stroke;
     const box = { x: frameIn, y: frameIn, w: canvas.width - frameIn * 2, h: canvas.height - frameIn * 2 };
     const ribbonText = size.caption && captionText ? String(captionText).trim().toUpperCase() : "";
-    const ribbon = ribbonText ? fitRibbon(ctx, ribbonText, box, mm(size.org * 0.8, k), k) : null;
+    const ribbon = ribbonText ? fitRibbon(ctx, ribbonText, box, mm(size.org * 0.68, k), k) : null;
     const band = ribbon ? ribbon.band : 0;
 
     // Скругление рамки — под ленту: средняя линия ленты идёт параллельно рамке,
@@ -605,11 +605,13 @@ const LabelsScreen = (() => {
   // раздаётся поровну в разрядку, так что стык нигде не виден.
   //
   // Кегль подбираем так, чтобы подпись целиком влезла хотя бы на короткую
-  // сторону. Жирный — у обычного начертания на мелком кегле штрихи тоньше
-  // полутора точек, и термопринтер их теряет. Буквы ставим по одной: свойства
+  // сторону. Начертание — курсив средней жирности в разрядку: лента должна
+  // читаться фоном и не сливаться с названием и номером (жирная прямая
+  // смешивалась с ними в кашу). Тоньше 500 не берём — на мелком кегле
+  // термопринтер теряет штрихи тоньше полутора точек. Буквы ставим по одной: свойства
   // letterSpacing у холста в старом Safari нет.
   function ribbonFont(px) {
-    return "bold " + px + "px " + FONT_SANS;
+    return "italic 500 " + px + "px " + FONT_SANS;
   }
 
   function fitRibbon(ctx, text, box, startPx, k) {
@@ -685,7 +687,7 @@ const LabelsScreen = (() => {
     const slot = path.total / n;
     const inner = glyphs.length - 1;
     let track = inner ? (slot - unitW - gapNat) / inner : 0;
-    track = Math.max(-px * 0.05, Math.min(px * 0.25, track));
+    track = Math.max(-px * 0.05, Math.min(px * 0.4, track));
     const runW = unitW + track * inner;
     const gapW = slot - runW;
 
