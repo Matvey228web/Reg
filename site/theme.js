@@ -16,7 +16,7 @@
   var VERSION = "20261001j";
 
   var CALENDAR = [
-    { id: "cinema", label: "День кино", from: "12-27", to: "12-29", color: "#120a0a",
+    { id: "cinema", label: "День кино", from: "12-29", to: "12-29", color: "#120a0a",
       hero: { title: "С Днём кино!", sub: "Свет, камера, мотор 🎬" } },
     { id: "graduation", label: "Выпускной", from: "06-15", to: "06-30", color: "#0b1226",
       hero: { title: "Поздравляем выпускников!", sub: "Первый большой проект позади 🎓" } },
