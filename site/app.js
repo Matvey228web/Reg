@@ -28,9 +28,9 @@
     var n = Site.qtyOf(k);
     if (!n) return '<button type="button" class="add" data-act="add">В корзину</button>';
     return '<div class="stepper stepper--wide' + (fresh ? " is-new" : "") + '">' +
-      '<button type="button" data-act="minus" aria-label="Меньше">−</button>' +
+      '<button type="button" data-act="minus" aria-label="Меньше">' + Site.icon("minus") + "</button>" +
       '<span class="stepper-num">' + n + "</span>" +
-      '<button type="button" data-act="plus" aria-label="Больше">+</button>' +
+      '<button type="button" data-act="plus" aria-label="Больше">' + Site.icon("plus") + "</button>" +
     "</div>";
   }
 
@@ -83,8 +83,8 @@
           // сломанная разметка и случайные переходы вместо нажатия.
           return '<div class="cell">' +
             '<a class="card" href="item.html?m=' + k + '">' +
-              '<div class="shot">' +
-                photoTag(m, ' loading="lazy"') + Site.shotIcon() +
+              '<div class="shot"' + Site.shotAttr(m) + ">" +
+                photoTag(m, ' loading="lazy"') + Site.shotIcon(m) +
               "</div>" +
               '<div class="card-body"><div class="card-name">' +
                 esc(m.model_name) + "</div></div>" +
@@ -208,7 +208,12 @@
           return;
         }
       }
-      paintAdd(k, act === "add");
+      // Число меняется на месте и «прокатывается»: перерисовка ячейки заново
+      // съела бы старое значение, а с ним и движение. Появление счётчика
+      // (было ноль) — по-прежнему перерисовка с наплывом заливки.
+      var num = box.querySelector(".stepper-num");
+      if (num && was > 0) Site.tick(num, Site.qtyOf(k), was);
+      else paintAdd(k, act === "add");
     });
   }
 
