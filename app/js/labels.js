@@ -655,7 +655,10 @@ const LabelsScreen = (() => {
     ctx.font = ribbonFont(px);
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#000000";
+    // Полупрозрачная: на экране и в файле лента уходит в фон. Не светлее 55%:
+    // приложения принтеров переводят картинку в чёрно-белую по порогу
+    // середины, и так серый на печати остаётся сплошным, а не пропадает.
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     const glyphs = Array.from(text);
     const adv = glyphs.map((g) => ctx.measureText(g).width);
     const unitW = adv.reduce((a, b) => a + b, 0);
