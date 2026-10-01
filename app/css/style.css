@@ -304,6 +304,12 @@ html, body {
 .icon-btn::after { content: ""; position: absolute; inset: -4px; }
 .icon-btn:active { background: var(--surface-strong); }
 
+/* Заголовок экрана с действием справа (карандаш на карточке вещи). Отступы
+   заголовка — у самого h1, строка только ставит кнопку на его высоту. */
+.screen-head { display: flex; align-items: flex-start; gap: var(--s3); }
+.screen-head h1 { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.screen-head .icon-btn { margin-top: calc(var(--s1) + 3px); }
+
 .screen { display: none; padding: var(--s3) var(--gutter) 0; }
 .screen--active { display: block; animation: screen-in 0.18s ease-out; }
 

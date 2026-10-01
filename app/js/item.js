@@ -36,6 +36,8 @@ const ItemScreen = (() => {
   async function load() {
     const content = document.getElementById("item-content");
     document.getElementById("item-title").textContent = currentItemId;
+    // Пока карточки нет, править нечего — карандаш покажет render().
+    document.getElementById("item-edit-toggle").style.display = "none";
     history = null;
     const seq = ++historySeq;
 
@@ -97,23 +99,39 @@ const ItemScreen = (() => {
       </div>`;
   }
 
-  // Исправление номеров — администратору. Опечатку в заводском или
-  // инвентарном номере находят уже после того, как вещь заведена и уехала в
-  // таблицу, и до сих пор единственным выходом было править ячейку руками —
-  // мимо всех проверок, в том числе проверки на дубль.
+  // Правка карточки — администратору, по карандашу в заголовке. Пришла на
+  // место кнопки «Исправить номера» и сделана с неё же: те же поля формы, тот
+  // же разбор ответа. Бэкенд — /item/update (handleItemUpdate в Code.gs), он
+  // же и проверяет права: здесь только прячем то, что нажать всё равно нельзя.
   //
-  // Номер вещи (XXYYZZ) здесь не правится: он собран из категории и модели, и
-  // меняется только переносом модели, вместе с перенумерацией.
+  // Галочка «ко всем вещам модели» правит то, что принадлежит модели, —
+  // название и категорию. Номера, состояние и количество у каждой вещи свои,
+  // поэтому с галочкой эти поля выключены.
   //
-  // У позиций с учётом количеством формы нет вовсе: там одна строка на всю
-  // полку, личных номеров у неё не бывает.
-  function numbersForm(item) {
+  // Категорию меняет только главный администратор: смена категории меняет
+  // номер вещи (XXYYZZ начинается с категории), а значит, и наклейку.
+  // Статус не правится: его ведут выдача, приём и дефекты.
+  function editForm(item) {
     const me = Auth.getSession() || {};
-    if (me.role !== "Admin" || item.by_qty) return "";
+    if (me.role !== "Admin") return "";
+    const cats = categoryList().filter((c) => !!c.by_qty === !!item.by_qty);
+    if (!cats.some((c) => c.code === item.category)) {
+      cats.unshift({ code: item.category, label: categoryLabel(item.category) });
+    }
+    const minQty = Math.max(1, Number(item.qty_out || 0));
     return `
-      <button class="btn btn--secondary" id="item-numbers-toggle">Исправить номера</button>
-      <div id="item-numbers-form" style="display:none;">
+      <div id="item-edit-form" style="display:none;">
         <div class="form-group">
+        <div class="field">
+          <label for="item-edit-name">Название</label>
+          <input type="text" id="item-edit-name" value="${escapeHtml(item.name || "")}" />
+        </div>
+        ${item.by_qty ? `
+        <div class="field">
+          <label for="item-edit-qty">Всего, шт.</label>
+          <input type="number" id="item-edit-qty" inputmode="numeric" min="${minQty}" step="1"
+                 value="${Number(item.qty || 1)}" />
+        </div>` : `
         <div class="field">
           <label for="item-serial">Заводской №</label>
           <input type="text" id="item-serial" value="${escapeHtml(item.serial_number || "")}"
@@ -125,66 +143,160 @@ const ItemScreen = (() => {
           <input type="text" id="item-inventory" value="${escapeHtml(item.inventory_number || "")}"
                  placeholder="как в описи" autocapitalize="characters" autocorrect="off"
                  spellcheck="false" />
+        </div>`}
+        <div class="field field--stacked">
+          <label for="item-edit-notes">Состояние</label>
+          <textarea id="item-edit-notes">${escapeHtml(item.condition_notes || "")}</textarea>
+        </div>
+        <div class="field">
+          <label for="item-edit-category">Категория</label>
+          <select id="item-edit-category" ${me.is_owner ? "" : "disabled"}>
+            ${cats.map((c) => `<option value="${escapeHtml(c.code)}" ${c.code === item.category ? "selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="toggle-row">
+          <label for="item-edit-all">Применить ко всем вещам этой модели</label>
+          <input type="checkbox" id="item-edit-all" />
         </div>
         </div>
-        <p class="hint">Номер вещи ${escapeHtml(item.item_id)} не изменится. Пустое поле
-        стирает номер. Занятый номер система не примет: по ним ищут технику.</p>
-        <div id="item-numbers-error"></div>
-        <button class="btn" id="item-numbers-submit">Сохранить номера</button>
+        ${me.is_owner ? "" : `<p class="hint">Категорию меняет только главный администратор.</p>`}
+        <p class="hint" id="item-edit-hint"></p>
+        <div id="item-edit-error"></div>
+        <button class="btn" id="item-edit-submit">Сохранить</button>
       </div>`;
   }
 
-  function bindNumbers(item) {
-    const toggle = document.getElementById("item-numbers-toggle");
-    if (!toggle) return;
-    toggle.addEventListener("click", () => {
-      const form = document.getElementById("item-numbers-form");
-      form.style.display = form.style.display === "none" ? "block" : "none";
+  // Подсказка и выключенные поля — от галочки. Без неё у полки категория не
+  // меняется: строка у полки одна на модель, переносится только вся модель.
+  function syncEdit(item) {
+    const all = document.getElementById("item-edit-all").checked;
+    ["item-serial", "item-inventory", "item-edit-notes", "item-edit-qty"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = all;
     });
-    document.getElementById("item-numbers-submit").addEventListener("click", async () => {
-      const serial = document.getElementById("item-serial").value.trim();
-      const inventory = document.getElementById("item-inventory").value.trim();
-      // Сверяем здесь же: запрос к таблице — это 5–8 секунд, и тратить их,
-      // чтобы услышать «ничего не изменилось», незачем.
-      if (serial === String(item.serial_number || "") &&
-          inventory === String(item.inventory_number || "")) {
-        TG.showAlert("Номера не изменились");
-        return;
-      }
-      const btn = document.getElementById("item-numbers-submit");
-      btn.disabled = true;
-      showBoxError("item-numbers-error", "");
-      try {
-        const res = await apiPost("/item/numbers", {
-          item_id: item.item_id, serial_number: serial, inventory_number: inventory,
-        });
-        TG.hapticSuccess();
-        // Каталог ищет и по этим номерам — правим прямо в кэше, чтобы поиск не
-        // врал до следующего обновления и чтобы не перечитывать весь склад.
-        Cache.patch("equipment", "item_id", item.item_id, {
-          serial_number: res.serial_number, inventory_number: res.inventory_number,
-        });
-        TG.showAlert(numbersResultText(res));
-        // Новые номера пришли в ответе — перерисовываем карточку из них, не
-        // перечитывая предмет и историю.
-        render({ ...item, serial_number: res.serial_number, inventory_number: res.inventory_number });
-      } catch (err) {
-        TG.hapticError();
-        showBoxError("item-numbers-error", err.message);
-        TG.showAlert(err.message);
-      } finally {
-        btn.disabled = false;
-      }
-    });
+    const me = Auth.getSession() || {};
+    document.getElementById("item-edit-category").disabled = !me.is_owner || (!!item.by_qty && !all);
+    document.getElementById("item-edit-hint").textContent = all
+      ? "Название сменится в справочнике и у всех вещей модели, категория — у всей модели " +
+        "с перенумерацией. Номера, состояние и количество у каждой вещи свои — с галочкой они не меняются."
+      : (item.by_qty
+        ? "Правится только эта позиция. Категорию полки меняют для всей модели — включите галочку."
+        : "Правится только эта вещь. Пустое поле номера стирает номер; занятый номер система не примет.");
   }
 
-  function numbersResultText(res) {
-    const LABELS = { serial_number: "Заводской", inventory_number: "Инвентарный" };
-    const lines = Object.keys(res.changed || {}).map((f) => {
+  function bindEdit(item) {
+    const form = document.getElementById("item-edit-form");
+    if (!form) return;
+    const all = document.getElementById("item-edit-all");
+    all.addEventListener("change", () => syncEdit(item));
+    syncEdit(item);
+    document.getElementById("item-edit-submit").addEventListener("click", () => submitEdit(item));
+  }
+
+  function submitEdit(item) {
+    const all = document.getElementById("item-edit-all").checked;
+    const val = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
+    const body = { item_id: item.item_id };
+    const name = val("item-edit-name");
+    if (!name) { TG.showAlert("Название не может быть пустым"); return; }
+    if (name !== String(item.name || "")) body.name = name;
+    const category = val("item-edit-category");
+    if (category && category !== item.category) body.category = category;
+    if (all) {
+      body.all_model = true;
+    } else {
+      const fields = { serial_number: "item-serial", inventory_number: "item-inventory",
+                       condition_notes: "item-edit-notes" };
+      Object.keys(fields).forEach((f) => {
+        const v = val(fields[f]);
+        if (v !== null && v !== String(item[f] || "")) body[f] = v;
+      });
+      const qtyRaw = val("item-edit-qty");
+      if (qtyRaw !== null) {
+        const qty = Number(qtyRaw);
+        const min = Math.max(1, Number(item.qty_out || 0));
+        if (!Number.isInteger(qty) || qty < min) {
+          TG.showAlert(Number(item.qty_out || 0) > qty
+            ? `На руках сейчас ${Number(item.qty_out)} шт. — меньше этого количество не поставить.`
+            : "Количество — целое число от одного");
+          return;
+        }
+        if (qty !== Number(item.qty || 1)) body.qty = qty;
+      }
+    }
+    // Сверяем здесь же: запрос к таблице — это 5–8 секунд, и тратить их,
+    // чтобы услышать «ничего не изменилось», незачем.
+    if (Object.keys(body).filter((k) => k !== "item_id" && k !== "all_model").length === 0) {
+      TG.showAlert("Ничего не изменилось");
+      return;
+    }
+    if (!body.category) { sendEdit(item, body); return; }
+    TG.showConfirm(all
+      ? "У всех вещей этой модели сменятся номера: старые наклейки с QR перестанут работать, " +
+        "их нужно перепечатать. Продолжить?"
+      : "У вещи сменится номер: старая наклейка с QR перестанет работать, её нужно перепечатать. Продолжить?",
+    (yes) => { if (yes) sendEdit(item, body); });
+  }
+
+  async function sendEdit(item, body) {
+    const btn = document.getElementById("item-edit-submit");
+    btn.disabled = true;
+    showBoxError("item-edit-error", "");
+    try {
+      const res = await apiPost("/item/update", body);
+      TG.hapticSuccess();
+      const moved = res.item_id !== res.old_item_id;
+      // Кэш каталога правим, а не сбрасываем: поиск идёт по названиям и
+      // номерам, и до следующего обновления он не должен врать.
+      if (moved && res.all_model) {
+        // Перенумерована вся модель — как после /model/move в models.js:
+        // правок слишком много, каталог сбрасываем целиком.
+        Cache.clear("equipment");
+      } else {
+        // Перенос одной вещи — та же строка под новым номером: patch по
+        // старому номеру кладёт поверх неё строку из ответа вместе с item_id.
+        Cache.patch("equipment", "item_id", res.old_item_id, res.item);
+        if (res.all_model && body.name) {
+          (Cache.items("equipment") || [])
+            .filter((r) => r.category === item.category && String(r.model_code) === String(item.model_code))
+            .forEach((r) => Cache.patch("equipment", "item_id", r.item_id, { name: res.item.name }));
+        }
+      }
+      // Справочник моделей: название модели сменилось, или вещь переехала в
+      // другую категорию (там завелась модель, здесь могла опустеть).
+      if ((res.all_model && body.name) || body.category) Cache.clear("models");
+
+      if (moved) {
+        // Карточку открываем под новым номером: старого больше нет. Назад —
+        // не на старый номер, поэтому replace, а не navigate.
+        Router.replace("item", { itemId: res.item_id });
+        TG.showConfirm(`Новый номер вещи — ${res.item_id}. Старая наклейка больше не работает. ` +
+          "Напечатать новую этикетку?",
+          (yes) => { if (yes) Router.navigate("labels", { itemId: res.item_id }); });
+        return;
+      }
+      TG.showAlert(editResultText(res));
+      render({ ...item, ...res.item });
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("item-edit-error", err.message);
+      TG.showAlert(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Окно Telegram берёт 256 знаков — только то, что поменялось.
+  function editResultText(res) {
+    const LABELS = { name: "Название", serial_number: "Заводской №", inventory_number: "Инвентарный №",
+                     condition_notes: "Состояние", qty: "Всего" };
+    const lines = Object.keys(res.changed || {}).filter((f) => LABELS[f]).map((f) => {
       const c = res.changed[f];
-      return LABELS[f] + " №: " + (c.was ? `${c.was} → ` : "") + (c.now || "стёрт");
+      if (f === "condition_notes") return LABELS[f] + ": " + (c.now ? "обновлено" : "стёрто");
+      return LABELS[f] + ": " + (c.now || "стёрт");
     });
-    return lines.length ? "Исправлено.\n\n" + lines.join("\n") : "Номера не изменились";
+    if (res.renamed) lines.push(`Переименовано вещей модели: ${res.renamed}`);
+    return lines.length ? "Сохранено.\n\n" + lines.join("\n") : "Ничего не изменилось";
   }
 
   // История рисуется отдельно от карточки: когда карточка взята из кэша, она
@@ -236,7 +348,13 @@ const ItemScreen = (() => {
     document.getElementById("item-title").textContent = item.name;
     const content = document.getElementById("item-content");
 
+    // Карандаш в заголовке — только администратору; форма правки открывается
+    // над карточкой, прямо под ним.
+    const me = Auth.getSession() || {};
+    document.getElementById("item-edit-toggle").style.display = me.role === "Admin" ? "" : "none";
+
     content.innerHTML = `
+      ${editForm(item)}
       <div class="card">
         <div class="card-title">${statusBadge(item.status)}</div>
         <div class="card-sub">${escapeHtml(categoryLabel(item.category))} · ${escapeHtml(item.item_id)}</div>
@@ -293,7 +411,6 @@ const ItemScreen = (() => {
           </div>
           <button class="btn" id="item-defect-submit">Сохранить дефект</button>
         </div>
-        ${numbersForm(item)}
       </div>
     `;
 
@@ -373,7 +490,7 @@ const ItemScreen = (() => {
       }
     });
 
-    bindNumbers(item);
+    bindEdit(item);
     renderHistory();
   }
 
@@ -384,6 +501,13 @@ const ItemScreen = (() => {
 
   function init() {
     Router.register("item", { onShow });
+    // Кнопка в заголовке живёт дольше карточки — слушатель вешаем один раз,
+    // а форму ищем в момент нажатия.
+    document.getElementById("item-edit-toggle").addEventListener("click", () => {
+      const form = document.getElementById("item-edit-form");
+      if (!form) return;
+      form.style.display = form.style.display === "none" ? "block" : "none";
+    });
   }
 
   return { init };

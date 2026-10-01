@@ -1968,6 +1968,147 @@ check('без входа номера не исправить', num.ok === false
 numRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0];
 check('после всех отказов номер остался прежним', numRow && numRow.serial_number === 'АБ', numRow);
 
+console.log('\n== правка карточки вещи (/item/update) ==');
+// Сделано как блок «исправление номеров» выше и на тех же вещах. Главное:
+// поля применяются только присланные, галочка «ко всем вещам модели» правит
+// справочник и все вещи модели, а смену категории делает только главный
+// администратор — и тогда у вещи новый номер, а журналы переписаны на него.
+let upd = call('/item/update', {
+  item_id: numId, name: '  Номерная Тест (Б)  ', serial_number: 'SN-UPD',
+  inventory_number: 'ИНВ-UPD', condition_notes: 'Царапина на корпусе',
+}, numToken);
+check('админ правит название, номера и состояние', upd.ok === true &&
+  upd.data.item.name === 'Номерная Тест (Б)' && upd.data.item.serial_number === 'SN-UPD' &&
+  upd.data.item.inventory_number === 'ИНВ-UPD' &&
+  upd.data.item.condition_notes === 'Царапина на корпусе', upd);
+check('ответ — строка каталога (с qty_free и model_code)', upd.ok &&
+  upd.data.item.qty_free === 1 && upd.data.item.item_id === numId && !!upd.data.item.model_code, upd.data);
+check('номер вещи не изменился', upd.ok && upd.data.item_id === numId && upd.data.moved === null, upd.data);
+check('без галочки соседняя вещь модели не переименована',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Тест');
+check('без галочки справочник моделей не тронут',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест'));
+
+upd = call('/item/update', { item_id: numId, serial_number: 'SN-ЗАНЯТ' }, numToken);
+check('занятый номер — 409', upd.ok === false && upd.status === 409 && upd.error.indexOf(numOther) !== -1, upd);
+upd = call('/item/update', { item_id: numId }, numToken);
+check('без полей — 400', upd.ok === false && upd.status === 400, upd);
+upd = call('/item/update', { item_id: numId, name: '   ' }, numToken);
+check('пустое название — 400', upd.ok === false && upd.status === 400, upd);
+upd = call('/item/update', { item_id: '999999', name: 'X' }, numToken);
+check('несуществующая вещь — 404', upd.ok === false && upd.status === 404, upd);
+upd = call('/item/update', { item_id: numId, qty: 3 }, numToken);
+check('поштучной вещи количество не задать', upd.ok === false && upd.status === 400, upd);
+upd = call('/item/update', { item_id: numId, name: 'Чужая правка' },
+           numStaffLogin.ok ? numStaffLogin.data.token : 'нет-токена');
+check('сотруднику склада правка запрещена (403)', upd.ok === false && upd.status === 403, upd);
+upd = call('/item/update', { item_id: numId, name: 'Чужая правка' }, 'чужой-токен');
+check('без входа — 401', upd.ok === false && upd.status === 401, upd);
+
+// Количество у полки: не меньше одного и не меньше того, что на руках.
+const updBulkRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numBulkId)[0];
+updateRow(getSheet(SHEETS.EQUIPMENT), updBulkRow.__row, { qty_out: 3 });
+upd = call('/item/update', { item_id: numBulkId, qty: 2 }, numToken);
+check('количество меньше выданного — 409 с объяснением',
+  upd.ok === false && upd.status === 409 && /На руках сейчас 3/.test(upd.error), upd);
+upd = call('/item/update', { item_id: numBulkId, qty: 0 }, numToken);
+check('ноль — 400', upd.ok === false && upd.status === 400, upd);
+upd = call('/item/update', { item_id: numBulkId, qty: '2.5' }, numToken);
+check('дробное — 400', upd.ok === false && upd.status === 400, upd);
+upd = call('/item/update', { item_id: numBulkId, qty: 8 }, numToken);
+check('количество полки поправлено', upd.ok === true && upd.data.item.qty === 8 &&
+  upd.data.item.qty_out === 3 && upd.data.item.qty_free === 5, upd);
+upd = call('/item/update', { item_id: numBulkId, serial_number: 'SN-ПОЛКА' }, numToken);
+check('полке номер не вписать', upd.ok === false && upd.status === 409, upd);
+updateRow(getSheet(SHEETS.EQUIPMENT), updBulkRow.__row, { qty_out: 0 });
+
+// Галочка: название уходит в справочник и во все вещи модели.
+upd = call('/item/update', { item_id: numId, name: 'Номерная Модель', all_model: true }, numToken);
+check('название модели сменено', upd.ok === true && upd.data.all_model === true, upd);
+check('переименованы обе вещи модели', upd.ok && upd.data.renamed === 2, upd.data);
+check('у соседней вещи новое название',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Модель');
+check('строка справочника переименована, старой нет',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Модель') &&
+  !readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест'));
+upd = call('/item/update', { item_id: numId, serial_number: 'SN-ВСЕМ', all_model: true }, numToken);
+check('с галочкой номера не принимаются', upd.ok === false && upd.status === 400, upd);
+upd = call('/item/update', { item_id: numId, name: 'Canon C70', all_model: true }, numToken);
+check('название другой модели этой категории — 409', upd.ok === false && upd.status === 409, upd);
+
+// Категория — только главному администратору.
+const updAdmin = call('/staff/create', {
+  full_name: 'Админ Правки', login: 'updadmin', pin: '8888', role: 'Admin',
+}, numToken);
+check('обычный администратор заведён', updAdmin.ok === true, updAdmin);
+const updOne = call('/auth/login', { login: 'updadmin', pin: '8888' });
+check('обычный администратор вошёл', updOne.ok === true && updOne.data.role === 'Admin' &&
+  !updOne.data.is_owner, updOne);
+upd = call('/item/update', { item_id: numId, category: 'LEN' }, updOne.ok ? updOne.data.token : '');
+check('обычному админу смена категории — 403', upd.ok === false && upd.status === 403, upd);
+upd = call('/item/update', { item_id: numId, name: 'Не должно записаться', category: 'LEN' },
+           updOne.ok ? updOne.data.token : '');
+check('и остальная правка из того же запроса не записалась',
+  upd.ok === false && readRows(getSheet(SHEETS.EQUIPMENT))
+    .filter(r => String(r.item_id) === numId)[0].name === 'Номерная Модель');
+upd = call('/item/update', { item_id: numId, category: 'CAM', name: 'Номерная Модель' },
+           updOne.ok ? updOne.data.token : '');
+check('та же категория — не смена, обычному админу можно', upd.ok === true, upd);
+
+// История у вещи, чтобы было что переписывать: выдача с приёмом и дефект.
+const updOrder = call('/order/create', {
+  order_no: '900901', student_name: 'Тестов Правка', student_phone: '+70000000001',
+  issue_date: '2026-09-01', return_date: '2026-09-10',
+}, numToken);
+check('заказ для проверки переноса создан', updOrder.ok === true, updOrder);
+call('/transaction/checkout', { item_id: numId, order_id: updOrder.data.order_id, expected_return_at: '2026-09-10' }, numToken);
+call('/transaction/checkin', { item_id: numId }, numToken);
+call('/defect/report', { item_id: numId, description: 'Перед переносом', severity: 'Minor' }, numToken);
+const updTxBefore = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.item_id) === numId).length;
+const updDfBefore = readRows(getSheet(SHEETS.DEFECTS)).filter(r => String(r.item_id) === numId).length;
+check('в журналах есть строки вещи', updTxBefore > 0 && updDfBefore > 0, [updTxBefore, updDfBefore]);
+
+// Выданную вещь не переносим.
+r = call('/transaction/checkout', { item_id: numOther, order_id: updOrder.data.order_id, expected_return_at: '2026-09-10' }, numToken);
+check('вторая вещь выдана', r.ok === true, r);
+upd = call('/item/update', { item_id: numOther, category: 'LEN' }, numToken);
+check('выданную вещь не перенести — 409', upd.ok === false && upd.status === 409 && /выдана/.test(upd.error), upd);
+upd = call('/item/update', { item_id: numId, category: 'GRP' }, numToken);
+check('в категорию с другим учётом — 409', upd.ok === false && upd.status === 409 && /способ учёта/.test(upd.error), upd);
+
+const updCamModel = upd.ok ? null : readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numId)[0].model_code;
+upd = call('/item/update', { item_id: numId, category: 'LEN' }, numToken);
+check('главный администратор перенёс одну вещь', upd.ok === true, upd);
+const updNewId = upd.ok ? upd.data.item_id : '';
+const updLenNum = categories().filter(c => c.code === 'LEN')[0].num;
+check('у вещи новый номер в новой категории', updNewId !== numId && updNewId.slice(0, 2) === updLenNum &&
+  upd.data.old_item_id === numId && upd.data.item.item_id === updNewId && upd.data.item.category === 'LEN', upd.data);
+check('старого номера в каталоге нет',
+  !readRows(getSheet(SHEETS.EQUIPMENT)).some(r => String(r.item_id) === numId));
+check('журнал выдач переписан на новый номер',
+  readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.item_id) === updNewId).length === updTxBefore &&
+  !readRows(getSheet(SHEETS.TRANSACTIONS)).some(r => String(r.item_id) === numId));
+check('дефекты переписаны на новый номер',
+  readRows(getSheet(SHEETS.DEFECTS)).filter(r => String(r.item_id) === updNewId).length === updDfBefore);
+check('в новой категории заведена модель с тем же названием',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'LEN' && r.model_name === 'Номерная Модель'));
+check('в старой модели осталась вторая вещь — её строка на месте', upd.ok && upd.data.moved.model_removed === false &&
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && pad2(Number(r.model_code)) === pad2(Number(updCamModel))));
+
+call('/transaction/checkin', { item_id: numOther }, numToken);
+upd = call('/item/update', { item_id: numOther, category: 'LEN' }, numToken);
+check('после приёма вторая вещь переносится', upd.ok === true, upd);
+check('она попала в ту же модель', upd.ok && upd.data.item.model_code === updNewId.slice(2, 4), upd.data);
+check('опустевшая модель удалена из справочника', upd.ok && upd.data.moved.model_removed === true &&
+  !readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && pad2(Number(r.model_code)) === pad2(Number(updCamModel))));
+
+// Полка переносится только целиком — тем же путём, что /model/move.
+upd = call('/item/update', { item_id: numBulkId, category: 'GEL' }, numToken);
+check('полку по одной не перенести — 409', upd.ok === false && upd.status === 409, upd);
+upd = call('/item/update', { item_id: numBulkId, category: 'GEL', all_model: true }, numToken);
+check('с галочкой полка переехала вместе с моделью', upd.ok === true && upd.data.item.category === 'GEL' &&
+  upd.data.item_id !== numBulkId && upd.data.moved && upd.data.moved.moved === 1, upd);
+
 console.log('\n== разделы витрины: КИНО и ФОТО ==');
 // Раздел — свойство модели, а не категории: объектив служит и кино, и фото.
 // Проверяем главное: незнакомое значение не записывается, пустое законно, и
