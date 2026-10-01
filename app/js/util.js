@@ -122,6 +122,69 @@ function skeleton(count = 4) {
     `</div>`;
 }
 
+// Кнопка «занята»: сразу после нажатия, ещё до ответа таблицы (6–12 секунд на
+// запись). Без этого кнопка выглядела нетронутой, и её жали второй раз —
+// а «Отметить решённым» на ремонте не отзывалась вообще никак. Сделано как
+// setSubmitting в scan.js: выключить, запомнить подпись, написать, что идёт.
+// Занятой становится только нажатая кнопка — соседние остаются живыми.
+//
+// Возвращает restore(): вернуть кнопку как была (или с новой подписью).
+// Повторный вызов restore безвреден, и кнопка, которую уже перерисовали,
+// тоже: правим отцепленный элемент, никто его не увидит.
+function busyButton(btn, text) {
+  if (!btn) return () => {};
+  const label = btn.classList.contains("btn--busy")
+    ? (btn.dataset.label || btn.textContent)
+    : btn.textContent;
+  btn.dataset.label = label;
+  btn.disabled = true;
+  btn.classList.add("btn--busy");
+  btn.setAttribute("aria-busy", "true");
+  btn.textContent = text || "Сохраняем…";
+  let done = false;
+  return function restore(newText) {
+    if (done) return;
+    done = true;
+    btn.disabled = false;
+    btn.classList.remove("btn--busy");
+    btn.removeAttribute("aria-busy");
+    btn.textContent = newText || label;
+    delete btn.dataset.label;
+  };
+}
+
+// Строка «Сохранено» на месте действия вместо окна Telegram. Окно надо
+// закрывать отдельным тапом, а после каждой удачной записи это лишний шаг;
+// ошибки по-прежнему показываются в error-box (showBoxError) — их надо
+// прочитать. Строка сама исчезает через несколько секунд.
+//
+// before — id элемента, перед которым завести место под строку, если его ещё
+// нет в разметке: так экрану не нужна отдельная правка index.html.
+function showStatusLine(target, text, { before } = {}) {
+  const el = typeof target === "string"
+    ? (before && text ? ensureSlot(target, before) : document.getElementById(target))
+    : target;
+  if (!el) return;
+  clearTimeout(el._statusTimer);
+  el.innerHTML = text
+    ? `<div class="status-line" role="status">${escapeHtml(text)}</div>`
+    : "";
+  if (text) el._statusTimer = setTimeout(() => { el.innerHTML = ""; }, 5000);
+}
+
+// Место под строку состояния или ошибку: есть в разметке — оно, нет —
+// заводим пустой блок перед beforeId.
+function ensureSlot(id, beforeId) {
+  let el = document.getElementById(id);
+  if (el) return el;
+  const anchor = document.getElementById(beforeId);
+  if (!anchor || !anchor.parentNode) return null;
+  el = document.createElement("div");
+  el.id = id;
+  anchor.parentNode.insertBefore(el, anchor);
+  return el;
+}
+
 // Отдать картинку человеку и сказать, чем кончилось. Сам выбор пути — в
 // QR.deliverCanvas: в браузере скачивание, внутри Telegram системный лист
 // «Поделиться», а если его нет — картинка во весь экран.

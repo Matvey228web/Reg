@@ -353,9 +353,10 @@ const SettingsScreen = (() => {
         <div id="settings-maintenance-result"></div>
         <button class="btn btn--secondary" id="settings-archive">Выгрузить журнал в файл</button>
         <button class="btn btn--secondary" id="settings-trim" style="margin-top:8px;">Подрезать таблицу</button>
+        ${data.maintenance && data.maintenance.schema_outdated === false ? "" : `
         <button class="btn btn--secondary" id="settings-setup" style="margin-top:8px;">Создать недостающие вкладки</button>
-        <p class="hint">После обновления склада: заводит новые вкладки и колонки таблицы. Данные не трогает,
-          повторный запуск безопасен.</p>
+        <p class="hint">Таблица отстаёт от обновления склада: нажмите один раз — появятся новые вкладки
+          и колонки. Данные не трогает. После нажатия кнопка пропадёт до следующего такого обновления.</p>`}
         <p class="hint">Перезаливка каталога осталась в редакторе Apps Script: она слишком долгая
           для запроса по сети.</p>
       </div>
@@ -476,44 +477,86 @@ const SettingsScreen = (() => {
       </div>`).join("");
 
     box.querySelectorAll("[data-cat-save]").forEach((btn) => {
-      btn.addEventListener("click", () => saveCategory(btn.dataset.catSave));
+      btn.addEventListener("click", () => saveCategory(btn.dataset.catSave, btn));
     });
   }
 
-  async function saveCategory(code) {
+  async function saveCategory(code, btn) {
     const input = document.querySelector(`[data-cat-label="${code}"]`);
     const label = input.value.trim();
-    if (!label) { TG.showAlert("Название не может быть пустым"); return; }
+    showBoxError("settings-cat-list-error", "");
+    if (!label) {
+      showCategoryError("Название не может быть пустым");
+      return;
+    }
     const byQty = document.querySelector(`[data-cat-qty="${code}"]`).checked;
+    const restore = busyButton(btn);
     try {
       await apiPost("/category/update", { code, label, by_qty: byQty });
       TG.hapticSuccess();
-      await reloadAndRefreshSession();
+      // Что записалось, мы и так знаем — без второго чтения всех настроек.
+      applyCategories((data.categories || []).map((c) =>
+        c.code === code ? { ...c, label, by_qty: byQty } : c));
+      showStatusLine("settings-cat-status", "Категория сохранена", { before: "settings-categories" });
     } catch (err) {
       TG.hapticError();
-      TG.showAlert(err.message);
+      restore();
+      showCategoryError(err.message);
     }
+  }
+
+  function showCategoryError(message) {
+    const slot = ensureSlot("settings-cat-list-error", "settings-categories");
+    if (slot) showBoxError("settings-cat-list-error", message);
   }
 
   async function addCategory() {
     const code = document.getElementById("settings-cat-code").value.trim().toUpperCase();
     const label = document.getElementById("settings-cat-label").value.trim();
     showBoxError("settings-cat-error", "");
-    const btn = document.getElementById("settings-cat-submit");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("settings-cat-submit"), "Добавляем…");
     try {
-      await apiPost("/category/create", {
+      // Ответ — сама новая категория с номером (handleCategoryCreate).
+      const created = await apiPost("/category/create", {
         code, label,
         by_qty: document.getElementById("settings-cat-new-qty").checked,
       });
       TG.hapticSuccess();
-      await reloadAndRefreshSession();
+      if (created && created.code) {
+        applyCategories((data.categories || []).concat([created]));
+      } else {
+        await reloadAndRefreshSession();
+      }
+      showStatusLine("settings-cat-status", "Категория добавлена: " + label,
+        { before: "settings-categories" });
     } catch (err) {
       TG.hapticError();
       showBoxError("settings-cat-error", err.message);
-    } finally {
-      btn.disabled = false;
+      restore();
     }
+  }
+
+  // Справочник категорий поправили своими руками: в экран, в кэш (не трогая
+  // его возраст) и в сессию — по ней рисуются фильтры каталога.
+  function applyCategories(categories) {
+    data = { ...data, categories };
+    keep();
+    const session = Auth.getSession();
+    if (session) Auth.setSession({ ...session, categories });
+    render();
+  }
+
+  // Свою правку — в кэш, не трогая его возраст: остальная часть настроек
+  // (сводка, справочники) свежее от неё не стала. Cache.setOne объявил бы
+  // свежим всё сразу.
+  function keep() {
+    if (!Cache.replace(CACHE, [data])) Cache.setOne(CACHE, data);
+  }
+
+  // «Сохранено» — строкой над местом ошибки того же подраздела, а не окном.
+  function saved(errId, text) {
+    showBoxError(errId, "");
+    showStatusLine(errId + "-ok", text, { before: errId });
   }
 
   // Приём заявок с сайта сохраняем отдельно от сроков входа: это выключатель
@@ -522,10 +565,8 @@ const SettingsScreen = (() => {
   // Акт: подписи и папка. Шаблон — отдельной кнопкой, потому что это создание
   // документа в Диске, а не правка настройки.
   async function saveAct() {
-    const btn = document.getElementById("settings-act-save");
+    const restore = busyButton(document.getElementById("settings-act-save"));
     showBoxError("settings-act-error", "");
-    btn.disabled = true;
-    btn.textContent = "Сохраняем…";
     try {
       const res = await apiPost("/settings/set", {
         settings: {
@@ -534,19 +575,18 @@ const SettingsScreen = (() => {
         },
       });
       data.settings = res.settings;
-      Cache.setOne(CACHE, data);
+      keep();
       TG.hapticSuccess();
-      TG.showAlert("Сохранено");
       // Ссылка «открыть и править» и подпись про шаблон зависят от того, что
       // сохранили: перерисовываем, чтобы не врать до следующего входа.
+      // Только render(): он сам зовёт bind(), а второй bind() вешал на каждую
+      // кнопку экрана второй слушатель — следующее нажатие слало два запроса.
       render();
-      bind();
+      saved("settings-act-error", "Сохранено");
     } catch (err) {
       TG.hapticError();
       showBoxError("settings-act-error", err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Сохранить";
+      restore();
     }
   }
 
@@ -560,22 +600,26 @@ const SettingsScreen = (() => {
       if (!go) return;
     }
     showBoxError("settings-act-error", "");
-    btn.disabled = true;
-    btn.textContent = "Создаём…";
+    const restore = busyButton(btn, "Создаём…");
     try {
       const res = await apiPost("/act/template", again ? { replace: true } : {});
       data.settings.act_template_id = res.template_id;
-      // Кэш здесь надо сбросить, а не подправить: шаблон меняет и подписи на
-      // экране, и то, что вернёт бэкенд, — пусть load() сходит за настоящим.
-      Cache.clear(CACHE);
       TG.hapticSuccess();
-      TG.showAlert("Шаблон создан. Он в вашем Google Диске, правьте как обычный документ.");
-      load();
+      // Номер шаблона известен — рисуем с ним сразу, в том же подразделе.
+      render();
+      saved("settings-act-error", "Шаблон создан. Он в вашем Google Диске, правьте как обычный документ.");
+      // Шаблон меняет и подписи на экране, и то, что вернёт бэкенд, — за
+      // настоящим идём молча, не выбрасывая человека из подраздела.
+      Cache.stale(CACHE);
+      apiPost("/settings/get", {}, { fresh: true }).then((fresh) => {
+        Cache.setOne(CACHE, fresh);
+        data = fresh;
+        if (!isTyping("#settings-content")) render();
+      }).catch(() => {});
     } catch (err) {
       TG.hapticError();
       showActError(err.message);
-      btn.disabled = false;
-      btn.textContent = again ? "Пересоздать шаблон" : "Создать шаблон";
+      restore();
     }
   }
 
@@ -596,10 +640,8 @@ const SettingsScreen = (() => {
   }
 
   async function savePublicOrders() {
-    const btn = document.getElementById("settings-public-save");
+    const restore = busyButton(document.getElementById("settings-public-save"));
     showBoxError("settings-public-error", "");
-    btn.disabled = true;
-    btn.textContent = "Сохраняем…";
     try {
       const res = await apiPost("/settings/set", {
         settings: {
@@ -609,17 +651,16 @@ const SettingsScreen = (() => {
         },
       });
       data.settings = res.settings;
-      Cache.setOne(CACHE, data);
+      keep();
       TG.hapticSuccess();
-      TG.showAlert(Number(res.settings.public_orders) === 1
+      saved("settings-public-error", Number(res.settings.public_orders) === 1
         ? "Сайт теперь отправляет заявки сам"
         : "Заявки с сайта выключены");
     } catch (err) {
       TG.hapticError();
       showBoxError("settings-public-error", err.message);
     } finally {
-      btn.disabled = false;
-      btn.textContent = "Сохранить";
+      restore();
     }
   }
 
@@ -633,25 +674,22 @@ const SettingsScreen = (() => {
       payload[f.key] = f.text ? raw : Number(raw);
     });
     showBoxError(errId, "");
-    const btn = document.getElementById(btnId);
-    btn.disabled = true;
-    btn.textContent = "Сохраняем…";
+    const restore = busyButton(document.getElementById(btnId));
     try {
       const res = await apiPost("/settings/set", { settings: payload });
       data.settings = res.settings;
-      Cache.setOne(CACHE, data);
+      keep();
       // Главная читает адрес сайта из сессии — без этого кнопка появилась бы
       // только после следующего входа.
       const me = Auth.getSession();
       if (me) Auth.setSession({ ...me, settings: res.settings });
       TG.hapticSuccess();
-      TG.showAlert("Настройки сохранены");
+      saved(errId, "Настройки сохранены");
     } catch (err) {
       TG.hapticError();
       showBoxError(errId, err.message);
     } finally {
-      btn.disabled = false;
-      btn.textContent = "Сохранить";
+      restore();
     }
   }
 
@@ -659,9 +697,8 @@ const SettingsScreen = (() => {
   // способ — открыть в браузере getUpdates с токеном в адресе — заодно уносил
   // токен в историю браузера. Спрашиваем у бэкенда: он ходит в Telegram сам.
   async function findChats() {
-    const btn = document.getElementById("settings-bot-find");
     const out = document.getElementById("settings-bot-result");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("settings-bot-find"), "Ищем…");
     out.innerHTML = skeleton(2);
     try {
       const res = await apiPost("/notify/chats", {});
@@ -688,7 +725,7 @@ const SettingsScreen = (() => {
       TG.hapticError();
       out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(err.message)}</div></div>`;
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
@@ -713,12 +750,11 @@ const SettingsScreen = (() => {
   // Выбранный чат сохраняем сразу: заставлять человека переписывать число
   // руками в другой подраздел — ровно та работа, от которой мы его избавляем.
   async function pickChat(chatId, btn) {
-    btn.disabled = true;
-    btn.textContent = "Сохраняем…";
+    const restore = busyButton(btn);
     try {
       const res = await apiPost("/settings/set", { settings: { notify_chat_id: chatId } });
       data.settings = res.settings;
-      Cache.setOne(CACHE, data);
+      keep();
       const me = Auth.getSession();
       if (me) Auth.setSession({ ...me, settings: res.settings });
       // Сразу здороваемся: выбор чата и есть проверка связи. Человек нажал
@@ -727,23 +763,29 @@ const SettingsScreen = (() => {
       //
       // Приветствие не ушло — чат всё равно сохранён, и говорим об этом
       // прямо: терять сохранённую настройку из-за молчащего Telegram нельзя.
+      if (btn.isConnected) btn.textContent = "Здороваемся…";
       let hello = "";
       try {
         await apiPost("/notify/hello", { chat_id: chatId });
       } catch (err) {
-        hello = "\n\nПоздороваться не вышло: " + err.message;
+        hello = "Поздороваться не вышло: " + err.message;
       }
       TG.hapticSuccess();
-      TG.showAlert(hello
-        ? "Чат склада сохранён." + hello
-        : "Чат склада сохранён, бот поздоровался — посмотрите в чате.");
+      // render() сам зовёт bind(); второй bind() удваивал слушатели.
       render();
-      bind();
       showPanel("bot");
+      // Итог — карточкой в том же подразделе, а не окном: причину отказа
+      // Telegram надо прочитать, а окно закрывают не читая.
+      const out = document.getElementById("settings-bot-result");
+      if (out) {
+        out.innerHTML = hello
+          ? `<div class="card"><div class="card-sub">Чат склада сохранён.</div></div>` +
+            `<div class="error-box">${escapeHtml(hello)}</div>`
+          : `<div class="card"><div class="card-sub">Чат склада сохранён, бот поздоровался — посмотрите в чате.</div></div>`;
+      }
     } catch (err) {
       TG.hapticError();
-      btn.disabled = false;
-      btn.textContent = "Это чат склада";
+      restore();
       showBoxError("settings-error", err.message);
     }
   }
@@ -754,9 +796,8 @@ const SettingsScreen = (() => {
   // единственное место, где видно, жива ли связка: Telegram сам говорит,
   // сколько событий ждёт доставки и что не получилось в последний раз.
   async function botLink(mode) {
-    const btn = document.getElementById("settings-bot-link");
     const out = document.getElementById("settings-bot-result");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("settings-bot-link"), "Спрашиваем Telegram…");
     out.innerHTML = skeleton(1);
     try {
       const res = await apiPost("/notify/webhook", { mode: mode || "status" });
@@ -768,7 +809,7 @@ const SettingsScreen = (() => {
       out.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       TG.hapticError();
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
@@ -791,9 +832,8 @@ const SettingsScreen = (() => {
   // показали, что ответил Telegram. Отказ здесь ожидаем (нет токена, бота не
   // добавили в чат), поэтому объясняем причину, а не прячем её.
   async function bot(endpoint, btnId) {
-    const btn = document.getElementById(btnId);
     const out = document.getElementById("settings-bot-result");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById(btnId), "Отправляем…");
     out.innerHTML = skeleton(1);
     try {
       const res = await apiPost(endpoint, {
@@ -805,24 +845,29 @@ const SettingsScreen = (() => {
       out.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       TG.hapticError();
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
   async function maintenance(action, btnId) {
-    const btn = document.getElementById(btnId);
     const out = document.getElementById("settings-maintenance-result");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById(btnId), "Выполняем…");
     out.innerHTML = skeleton(1);
     try {
       const res = await apiPost("/maintenance", { action });
       out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(res.message)}</div></div>`;
       TG.hapticSuccess();
+      // Таблица догнала схему — кнопка больше не нужна; итог остаётся на экране.
+      if (action === "setup" && data && data.maintenance) {
+        data.maintenance.schema_outdated = false;
+        const btn = document.getElementById(btnId);
+        if (btn) { btn.nextElementSibling && btn.nextElementSibling.remove(); btn.remove(); }
+      }
     } catch (err) {
       out.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
       TG.hapticError();
     } finally {
-      btn.disabled = false;
+      restore();
     }
   }
 
@@ -877,8 +922,9 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => maintenance("archive", "settings-archive"));
     document.getElementById("settings-trim")
       .addEventListener("click", () => maintenance("trim", "settings-trim"));
-    document.getElementById("settings-setup")
-      .addEventListener("click", () => maintenance("setup", "settings-setup"));
+    // Кнопки нет, когда таблица догнала схему (schema_outdated в /settings/get).
+    const setupBtn = document.getElementById("settings-setup");
+    if (setupBtn) setupBtn.addEventListener("click", () => maintenance("setup", "settings-setup"));
   }
 
   function init() {

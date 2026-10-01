@@ -62,6 +62,7 @@ const Auth = (() => {
     const submitBtn = document.getElementById("login-submit");
     submitBtn.disabled = true;
     submitBtn.textContent = "Входим…";
+    submitBtn.classList.add("btn--busy");
     try {
       const data = await apiPost("/auth/login", {
         login,
@@ -72,12 +73,15 @@ const Auth = (() => {
       setSession(data);
       document.getElementById("pin-input").value = "";
       Router.reset("home");
+      Cache.warm();   // как при запуске в app.js
+      TG.hapticSuccess();
     } catch (err) {
       TG.hapticError();
       showError(err.message || "Не удалось войти");
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = "Войти";
+      submitBtn.classList.remove("btn--busy");
     }
   }
 

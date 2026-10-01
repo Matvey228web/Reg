@@ -1661,7 +1661,7 @@ const MockAPI = {
             // В демо журнала Logs нет — ошибок за сутки ноль, как на чистой таблице.
             logs_24h: 0,
           },
-          maintenance: { journal_archived_at: "", journal_trimmed_at: "" },
+          maintenance: { journal_archived_at: "", journal_trimmed_at: "", schema_outdated: false },
         };
       }
 

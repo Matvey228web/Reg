@@ -13,27 +13,61 @@ const AnnouncementsScreen = (() => {
     return (a.expired ? "Срок вышел " : "Показывается до ") + `${d}.${m}.${y}`;
   }
 
-  async function loadList() {
+  const CACHE = "announcements";
+  let edits = 0;   // свои правки, сделанные пока список шёл с сервера
+
+  // Список живёт в кэше, как на «Сотрудниках» (staff.js loadList): показываем
+  // прошлый сразу, свежий подтягиваем молча.
+  async function loadList({ force = false } = {}) {
     const list = document.getElementById("ann-list");
-    list.innerHTML = skeleton(2);
+    const cached = Cache.items(CACHE);
+    if (cached) render(cached);
+    if (!force && cached && Cache.isFresh(CACHE)) return;
+    if (!cached) list.innerHTML = skeleton(2);
+    const seq = edits;
     try {
-      const res = await apiPost("/announcements/list", {});
+      // Ответ — объект со списком и пределами, поэтому не Cache.load:
+      // в кэш кладём только список.
+      const res = await apiPost("/announcements/list", {}, { fresh: force });
       limits = { ...limits, ...(res.limits || {}) };
-      items = res.items || [];
-      if (!items.length) {
-        list.innerHTML = `<p class="empty">Объявлений нет. Сайт покажет их первой строкой, как только вы добавите.</p>`;
-        return;
-      }
-      list.innerHTML = items.map(cardHtml).join("");
-      list.querySelectorAll("[data-ann-edit]").forEach((btn) => {
-        btn.addEventListener("click", () => startEdit(btn.dataset.annEdit));
-      });
-      list.querySelectorAll("[data-ann-remove]").forEach((btn) => {
-        btn.addEventListener("click", () => confirmRemove(btn.dataset.annRemove));
-      });
+      // Пока список шёл, здесь же что-то сняли или сохранили — ответ этого
+      // не видел. Оставляем то, что на экране.
+      if (seq !== edits) return;
+      Cache.set(CACHE, res.items || []);
+      render(res.items || []);
     } catch (err) {
-      list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      if (!cached) list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      else showBoxError("ann-list-error", "Не удалось обновить список: " + err.message);
     }
+  }
+
+  function render(list) {
+    items = list;
+    ensureSlot("ann-list-error", "ann-list");
+    const box = document.getElementById("ann-list");
+    if (!items.length) {
+      box.innerHTML = `<p class="empty">Объявлений нет. Сайт покажет их первой строкой, как только вы добавите.</p>`;
+      return;
+    }
+    box.innerHTML = items.map(cardHtml).join("");
+    box.querySelectorAll("[data-ann-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => startEdit(btn.dataset.annEdit));
+    });
+    box.querySelectorAll("[data-ann-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => confirmRemove(btn.dataset.annRemove, btn));
+    });
+  }
+
+  // Правка своими руками — экран и кэш без нового запроса.
+  function commit(next) {
+    edits++;
+    if (!Cache.replace(CACHE, next)) Cache.set(CACHE, next);
+    render(next);
+  }
+
+  function showDone(text) {
+    showBoxError("ann-list-error", "");
+    showStatusLine("ann-status", text, { before: "ann-list" });
   }
 
   function cardHtml(a) {
@@ -54,7 +88,9 @@ const AnnouncementsScreen = (() => {
 
   // Снятое с сайта пропадает сразу, но строка в таблице остаётся: записи не
   // удаляем. Поэтому спрашиваем коротко, без страшных слов.
-  function confirmRemove(id) {
+  // Снимаем оптимистично, как setSection в models.js: карточка уходит сразу,
+  // откажет таблица — возвращается на место с причиной над списком.
+  function confirmRemove(id, btn) {
     const a = items.find((x) => x.announcement_id === id);
     if (!a) return;
     TG.confirmDestructive(
@@ -63,14 +99,19 @@ const AnnouncementsScreen = (() => {
       "Снять",
       async (yes) => {
         if (!yes) return;
+        const before = items;
+        busyButton(btn, "Снимаем…");
+        commit(items.filter((x) => x.announcement_id !== id));
+        if (editingId === id) resetForm();
+        TG.hapticSuccess();
+        showDone("Снято с сайта: " + a.title);
         try {
           await apiPost("/announcement/remove", { announcement_id: id });
-          TG.hapticSuccess();
-          if (editingId === id) resetForm();
-          loadList();
         } catch (err) {
           TG.hapticError();
-          TG.showAlert(err.message);
+          commit(before);
+          showStatusLine("ann-status", "");
+          showBoxError("ann-list-error", "Не сняли «" + a.title + "»: " + err.message);
         }
       });
   }
@@ -113,18 +154,36 @@ const AnnouncementsScreen = (() => {
       showBoxError("ann-error", "Заполните заголовок и текст");
       return;
     }
-    const btn = document.getElementById("ann-submit");
-    btn.disabled = true;
+    const restore = busyButton(document.getElementById("ann-submit"),
+      editingId ? "Сохраняем…" : "Публикуем…");
+    const id = editingId;
     try {
-      await apiPost("/announcement/save", { announcement_id: editingId, title, text, until });
+      const res = await apiPost("/announcement/save", { announcement_id: id, title, text, until });
       TG.hapticSuccess();
+      restore();
       resetForm();
-      loadList();
+      // Что записалось, известно и так (handleAnnouncementSave): абзацы —
+      // непустые строки без отступов. Новое — первым, как в /announcements/list.
+      const row = {
+        title, until,
+        text: text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join("\n"),
+        expired: !!until && until < new Date().toISOString().substring(0, 10),
+      };
+      if (id) {
+        commit(items.map((a) => a.announcement_id === id ? { ...a, ...row } : a));
+        showDone("Сохранено");
+      } else {
+        const me = Auth.getSession() || {};
+        commit([{
+          ...row, announcement_id: String(res && res.announcement_id),
+          created_at: new Date().toISOString(), created_by_name: me.full_name || "",
+        }].concat(items));
+        showDone("Опубликовано — сайт покажет его первой строкой");
+      }
     } catch (err) {
       TG.hapticError();
+      restore();
       showBoxError("ann-error", err.message);
-    } finally {
-      btn.disabled = false;
     }
   }
 
@@ -140,6 +199,7 @@ const AnnouncementsScreen = (() => {
     });
     document.getElementById("ann-cancel").addEventListener("click", resetForm);
     document.getElementById("ann-submit").addEventListener("click", submit);
+    Pull.register("announcements", () => loadList({ force: true }));
     Router.register("announcements", { onShow });
   }
 
