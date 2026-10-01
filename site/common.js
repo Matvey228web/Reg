@@ -370,6 +370,37 @@ document.addEventListener("DOMContentLoaded", function () {
   }).catch(function () { /* нет снимка — подвал остаётся без списка */ });
 });
 
+// Объявления склада: первой строкой на каждой странице. Завхоз пишет их в чат,
+// а сюда они попадают правкой announcements.json — как и снимок каталога, это
+// статика рядом со страницей, и сайт от бэкенда не зависит. Срок (from/until)
+// проверяется здесь, в браузере: просроченное исчезает без выкладки.
+// ?ann=all показывает всё без оглядки на даты — для проверки.
+document.addEventListener("DOMContentLoaded", function () {
+  var box = Site.$("notice");
+  if (!box) return;
+  var all = /[?&]ann=all\b/.test(location.search);
+  var d = new Date();
+  var today = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" +
+    ("0" + d.getDate()).slice(-2);
+  fetch("announcements.json", { cache: "no-cache" })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      var shown = (data.items || []).filter(function (a) {
+        return all || ((!a.from || a.from <= today) && (!a.until || a.until >= today));
+      });
+      if (!shown.length) return;
+      box.innerHTML = shown.map(function (a) {
+        return '<details class="notice-item" open><summary><span class="notice-tag">Внимание</span>' +
+          '<span class="notice-title">' + Site.escapeHtml(a.title) + "</span></summary>" +
+          '<div class="notice-body">' + (a.lines || []).map(function (line) {
+            return "<p>" + Site.escapeHtml(line) + "</p>";
+          }).join("") + "</div></details>";
+      }).join("");
+      box.hidden = false;
+    })
+    .catch(function () { /* нет файла или он битый — объявлений просто нет */ });
+});
+
 // Возврат кнопкой «назад» страницу заново не выполняет: браузер достаёт её из
 // своего кэша ровно такой, какой она была. Набранное в карточке на витрину при
 // этом не попадает — счётчик остаётся нулём, а карточки пустыми.
