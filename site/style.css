@@ -1,6 +1,44 @@
 /* Публичный каталог проката. Тёмная тема, прямые углы, плотная решётка.
  * Со складским приложением общего языка форм нет намеренно. */
 
+/* Шрифты лежат файлами в сайте, а не берутся с чужого сервера: сайт не должен
+   зависеть от Google и Cloudflare. Oswald — заголовки, подписи и кнопки (узкий
+   плакатный гротеск, как титры), Golos Text — основной текст. Оба открытые (OFL),
+   вариативные: одним файлом все нужные начертания. unicode-range: браузер
+   скачает только кириллицу и латиницу, которые реально есть на странице. */
+@font-face {
+  font-family: "Oswald";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 700;
+  src: url(fonts/oswald-cyrillic-wght-normal.woff2) format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Oswald";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 700;
+  src: url(fonts/oswald-latin-wght-normal.woff2) format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 700;
+  src: url(fonts/golos-text-cyrillic-wght-normal.woff2) format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 700;
+  src: url(fonts/golos-text-latin-wght-normal.woff2) format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
 :root {
   color-scheme: dark;
 
@@ -14,6 +52,10 @@
 
   --pad: 16px;
   --cap: 11px;
+
+  --font-body: "Golos Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  --font-display: Oswald, "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -27,8 +69,7 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        "Helvetica Neue", Arial, sans-serif;
+  font: 16px/1.45 var(--font-body);
   -webkit-text-size-adjust: 100%;
 }
 
@@ -760,4 +801,14 @@ footer a { color: var(--dim); }
   color: var(--dim);
   opacity: .45;
   user-select: none;
+}
+
+/* Плакатный шрифт: заголовки, подписи капителью, кнопки и названия разделов.
+   В конце файла: у кнопок выше стоит `font: inherit`, и этот блок должен идти
+   после него. Всё, что набрано прописными с разрядкой, — Oswald; обычный текст — Golos. */
+.cap, .notice-tag, .wordmark-name, .wordmark-sub, .cart-link, .hero h1,
+.catalog > summary, .group-title, .add, .item-main h1, .btn, .page h1.title,
+.block h2, .link-danger, .section, .soon, .foot-name, .foot-h,
+.stepper--wide, .copy-btn {
+  font-family: var(--font-display);
 }
