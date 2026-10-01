@@ -172,10 +172,10 @@ const StaffScreen = (() => {
       <div class="form-group form-group--inset">
         <div class="field">
           <label>Новый PIN</label>
-          <input type="password" inputmode="numeric" pattern="[0-9]*" class="pin-reset-input" />
+          <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" class="pin-reset-input" />
         </div>
       </div>
-      <p class="hint">Для ${escapeHtml(name)}, 4–6 цифр.</p>
+      <p class="hint">Для ${escapeHtml(name)}, 6 цифр.</p>
       <button class="btn pin-reset-save" style="width:auto;">Сохранить</button>
       <button class="btn btn--secondary pin-reset-cancel" style="width:auto;">Отмена</button>
       <div class="pin-reset-error"></div>`;
@@ -188,8 +188,8 @@ const StaffScreen = (() => {
     box.querySelector(".pin-reset-save").addEventListener("click", async () => {
       const pin = input.value.trim();
       err.innerHTML = "";
-      if (!/^\d{4,6}$/.test(pin)) {
-        err.innerHTML = `<div class="error-box">PIN — от 4 до 6 цифр</div>`;
+      if (!/^\d{6}$/.test(pin)) {
+        err.innerHTML = `<div class="error-box">PIN — ровно 6 цифр</div>`;
         return;
       }
       const save = box.querySelector(".pin-reset-save");
@@ -225,6 +225,10 @@ const StaffScreen = (() => {
     showBoxError("staff-add-error", "");
     if (!full_name || !login || !pin) {
       showBoxError("staff-add-error", "Заполните имя, логин и PIN");
+      return;
+    }
+    if (!/^\d{6}$/.test(pin)) {
+      showBoxError("staff-add-error", "PIN — ровно 6 цифр");
       return;
     }
     const btn = document.getElementById("new-staff-submit");

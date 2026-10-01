@@ -196,8 +196,9 @@ var TEXT_COLUMNS = {
 // (см. SETTINGS_SPEC и getSettings) — здесь только то, с чего система стартует.
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
-// PIN — всего 4 цифры, это 10 000 вариантов: без ограничения попыток его
-// подобрали бы скриптом за минуты, а адрес бэкенда открыт всем.
+// Новый PIN — ровно 6 цифр (миллион вариантов), но старые 4-значные ещё живы
+// до смены: 10 000 вариантов без ограничения попыток подобрали бы скриптом за
+// минуты, а адрес бэкенда открыт всем.
 var MAX_LOGIN_ATTEMPTS = 5;
 var LOGIN_LOCK_MS = 15 * 60 * 1000;
 var LOCK_TIMEOUT_MS = 10000;
@@ -3031,6 +3032,10 @@ function handleStaffCreate(payload, token) {
   var login = String(payload.login || "").trim();
   var pin = String(payload.pin || "");
   if (!login || !pin) throw apiError(400, "Укажите логин и PIN");
+  // Длина проверяется только у нового PIN — и здесь, и в handleStaffSetPin.
+  // Вход (handleAuthLogin) длину не смотрит: старые 4–5-значные PIN работают
+  // до первой смены.
+  if (!/^\d{6}$/.test(pin)) throw apiError(400, "PIN — ровно 6 цифр");
 
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
@@ -4184,7 +4189,7 @@ function handleStaffDelete(payload, token) {
 function handleStaffSetPin(payload, token) {
   var me = checkAuth(token);
   var newPin = String(payload.pin || "").trim();
-  if (!/^\d{4,6}$/.test(newPin)) throw apiError(400, "PIN — от 4 до 6 цифр");
+  if (!/^\d{6}$/.test(newPin)) throw apiError(400, "PIN — ровно 6 цифр");
 
   var sheet = getSheet(SHEETS.STAFF);
   var targetId = payload.staff_id === undefined || payload.staff_id === null || payload.staff_id === ""
@@ -4753,8 +4758,10 @@ function findOrCreateModel(category, modelName) {
 //
 // Повторов немного намеренно: Utilities.computeDigest каждый раз уходит за
 // пределы JS, и цикл на десятки тысяч шагов добавил бы секунды ко входу.
-// Настоящий запас даёт не число повторов, а PIN из шести цифр вместо четырёх
-// (разрешены и те, и другие): четыре цифры не спасёт никакое хеширование.
+// Настоящий запас даёт не число повторов, а PIN из шести цифр вместо четырёх:
+// четыре цифры не спасёт никакое хеширование. Поэтому новый PIN — ровно шесть
+// цифр (раньше разрешали от 4 до 6); старые короткие принимаются при входе,
+// пока сотрудник их не сменит.
 // Померить скорость на своём проекте — benchPin() в конце файла.
 var PIN_ROUNDS = 1000;
 

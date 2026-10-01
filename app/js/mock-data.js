@@ -1395,6 +1395,11 @@ const MockAPI = {
         if (!login || !body.pin) {
           const e = new Error("Укажите логин и PIN"); e.status = 400; throw e;
         }
+        // Длина — только у нового PIN, как в Code.gs: демо-сотрудники с
+        // 4-значными PIN (ivan/1234) входят по-прежнему.
+        if (!/^\d{6}$/.test(String(body.pin))) {
+          const e = new Error("PIN — ровно 6 цифр"); e.status = 400; throw e;
+        }
         const isBootstrap = MockStore.staff.length === 0;
         if (isBootstrap) {
           // Первая запись в системе — разрешаем без токена, всегда как Admin.
@@ -1668,8 +1673,8 @@ const MockAPI = {
         const staff_id = MockStore.requireToken(token);
         const me = MockStore.staff.find((x) => x.staff_id === staff_id);
         const newPin = String(body.pin || "").trim();
-        if (!/^\d{4,6}$/.test(newPin)) {
-          const e = new Error("PIN — от 4 до 6 цифр"); e.status = 400; throw e;
+        if (!/^\d{6}$/.test(newPin)) {
+          const e = new Error("PIN — ровно 6 цифр"); e.status = 400; throw e;
         }
         const targetId = body.staff_id === undefined || body.staff_id === null || body.staff_id === ""
           ? staff_id : body.staff_id;
@@ -1758,8 +1763,8 @@ const MockAPI = {
           ? meId : body.staff_id;
         const s = MockStore.findStaffById(targetId);
         if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
-        if (!/^\d{4,6}$/.test(String(body.pin || ""))) {
-          const e = new Error("PIN — от 4 до 6 цифр"); e.status = 400; throw e;
+        if (!/^\d{6}$/.test(String(body.pin || ""))) {
+          const e = new Error("PIN — ровно 6 цифр"); e.status = 400; throw e;
         }
         if (String(targetId) === String(meId)) {
           if (String(body.current_pin || "") !== s.pin) {
