@@ -105,23 +105,16 @@ const OrderScreen = (() => {
     }
   }
 
-  // Контакт в карточке: номер текстом, рядом «Позвонить» и «Копировать».
+  // Контакт в карточке — сам текст, без кнопок рядом: нажатие на номер
+  // копирует его, нажатие на ник открывает переписку.
   //
-  // Раньше номер был только ссылкой tel: — весь, целиком. Внутри Telegram это
-  // ломалось дважды: веб-вью клиента пропускает наружу не всякую ссылку
-  // tel: (на части телефонов нажатие молча ничего не делает), а текст-ссылку
-  // нельзя выделить — долгое нажатие ловит ссылку, а не слова. Номер не
-  // набрать и не скопировать.
+  // Звонить ссылкой tel: внутри Telegram ненадёжно: веб-вью клиента на части
+  // телефонов молча её глотает. Копирование работает везде — номер в буфер,
+  // дальше его можно вставить в звонилку. Если закрыт и буфер — окно с
+  // номером, чтобы его прочитать.
   //
-  // Теперь номер — обычный выделяемый текст. «Позвонить» — по-прежнему
-  // настоящая ссылка tel: (через TG.openLink её не провести: тот берёт только
-  // http/https), и там, где клиент её пропускает, она звонит. «Копировать» —
-  // путь, который работает везде: номер в буфер, а если и буфер закрыт —
-  // окно с номером, чтобы его прочитать и набрать.
-  //
-  // Ник — так же: текстом, а под ним кнопка «Написать в Telegram» того же
-  // вида, что «Позвонить». Кнопка, а не ссылка t.me: та открылась бы браузером
-  // на странице «Open in Telegram», и до чата осталось бы ещё два нажатия.
+  // Ник открываем через TG.openTelegramLink, а не ссылкой t.me: та ушла бы в
+  // браузер на страницу «Open in Telegram», и до чата осталось бы ещё два шага.
   function dialNumber(phone) {
     let num = String(phone || "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
     if (/^8\d{10}$/.test(num)) num = "+7" + num.slice(1);
@@ -133,28 +126,24 @@ const OrderScreen = (() => {
     const nick = String(tg || "").trim().replace(/^@/, "");
     const num = dialNumber(phone);
     return (num
-      ? `<div class="contact-num">${escapeHtml(phone)}</div>
-         <div class="quick-row">
-           <a class="chip-btn" href="tel:${escapeHtml(num)}">Позвонить</a>
-           <button class="chip-btn" type="button" data-copy="${escapeHtml(num)}">Копировать</button>
-         </div>`
+      ? `<button class="contact-link" type="button" data-copy="${escapeHtml(num)}"
+           aria-label="Скопировать номер">${escapeHtml(phone)}</button>`
       : "") + (nick
-      ? `<div class="contact-num">@${escapeHtml(nick)}</div>
-         <div class="quick-row">
-           <button class="chip-btn" type="button" data-tg="${escapeHtml(nick)}">Написать в Telegram</button>
-         </div>`
+      ? `<button class="contact-link" type="button" data-tg="${escapeHtml(nick)}"
+           aria-label="Написать в Telegram">@${escapeHtml(nick)}</button>`
       : "");
   }
 
-  // Номер в буфер. Получилось — отклик и «Скопировано» на кнопке на две
-  // секунды, без окна поверх. Нет — окно с самим номером: его можно прочитать.
-  async function copyNumber(btn) {
-    const num = btn.dataset.copy;
+  // Номер в буфер. Получилось — отклик и на две секунды «Скопировано» на месте
+  // номера, без окна поверх. Нет — окно с самим номером.
+  async function copyNumber(el) {
+    const num = el.dataset.copy;
     if (await copyText(num)) {
       TG.hapticSuccess();
-      btn.textContent = "Скопировано";
-      clearTimeout(btn._copyTimer);
-      btn._copyTimer = setTimeout(() => { btn.textContent = "Копировать"; }, 2000);
+      if (!el._label) el._label = el.textContent;
+      el.textContent = "Скопировано";
+      clearTimeout(el._copyTimer);
+      el._copyTimer = setTimeout(() => { el.textContent = el._label; }, 2000);
     } else {
       TG.hapticError();
       TG.showAlert("Скопировать не вышло. Номер: " + num);
@@ -468,8 +457,7 @@ const OrderScreen = (() => {
   }
 
   function init() {
-    // Ник — обработчиком, чтобы переписку открыл сам Telegram; «Копировать» —
-    // тоже. Ссылку tel: не перехватываем: она должна уйти в систему как есть.
+    // Нажатие на номер — копирование, на ник — переписка через Telegram.
     // Вешаем один раз: #order-content живёт всё время, а render за показ идёт
     // дважды (из кэша, потом свежий) — в wire слушатели копились бы.
     document.getElementById("order-content").addEventListener("click", (e) => {
