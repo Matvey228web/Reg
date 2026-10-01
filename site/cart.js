@@ -183,6 +183,9 @@
         '<input type="text" id="trap" tabindex="-1" autocomplete="off"' +
           ' aria-hidden="true" class="trap" />' +
         '<button class="btn btn--wide" id="send">Забронировать</button>' +
+        // Одна строка вместо раздела «Условия»: главное, что студент должен
+        // понять до нажатия, — заявка ещё не бронь, её подтверждает склад.
+        '<p class="send-hint">Заявка — это не бронь</p>' +
         '<p class="hint" id="sendnote" hidden></p>' +
         (Site.storageOk() ? "" : storageWarnHtml()) +
         '<div class="preview-box">' +
