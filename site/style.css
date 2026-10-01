@@ -1,19 +1,36 @@
-/* Публичный каталог проката. Тёмная тема, прямые углы, плотная решётка.
- * Со складским приложением общего языка форм нет намеренно. */
+/* Публичный каталог проката. Светлая тема в духе Y2K / раннего веба, но
+ * стилизованно, а не копией: ледяной фон, серебристые «окна», капсулы вместо
+ * прямых углов, глянец только на главном (кнопки, логотип, счётчик, активный
+ * раздел). Два акцента: электрический синий — действие, малиновый — внимание.
+ * Всё остальное спокойный бело-серо-голубой. Системные шрифты, без картинок:
+ * глянец и точечный фон рисуются градиентами. Со складским приложением общего
+ * языка форм нет намеренно. */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  --bg: #0d0d0f;
-  --panel: #141417;
-  --line: #26262b;
-  --ink: #f2f2f3;
-  --dim: #8a8a93;
-  --accent: #e2231a;        /* заливка кнопок: белый на нём даёт 4.68 */
-  --accent-text: #ff4b3e;   /* тот же смысл текстом: на фоне даёт 5.85 */
+  --bg: #e9f1fa;
+  --panel: #ffffff;
+  --line: #b4c6dc;          /* мягкая граница и разделители */
+  --edge: #7d93b3;          /* граница полей и кнопок: на белом даёт 3.14 */
+  --ink: #12203a;
+  --dim: #4f5f79;
+  --accent: #0b57c9;        /* заливка кнопок: белый на нём даёт 6.52 */
+  --accent-text: #0a54c4;   /* тот же смысл текстом: на фоне даёт 5.99 */
+  --hot: #c4116b;           /* внимание: счётчик, «Убрать», ошибки; белый 5.77 */
+
+  /* Глянец: светлая верхняя половина, тёмная нижняя, блик по кромке. Самая
+     светлая точка #2a6ed8 всё ещё держит белый текст на 4.86. */
+  --gloss: linear-gradient(180deg, #2a6ed8 0%, #0b57c9 50%, #0a4cb4 51%, #1060d8 100%);
+  --gloss-hot: linear-gradient(180deg, #d9267f 0%, #c4116b 50%, #ad0d5c 51%, #cc1873 100%);
+  --silver: linear-gradient(180deg, #ffffff 0%, #eef4fb 48%, #d6e3f2 52%, #e4edf8 100%);
+  --lit: inset 0 1px 0 rgba(255, 255, 255, .85);
+  --lift: 0 1px 2px rgba(18, 32, 58, .12), 0 6px 14px -8px rgba(18, 32, 58, .35);
+  --glow: 0 2px 8px rgba(11, 87, 201, .35);
 
   --pad: 16px;
   --cap: 11px;
+  --r: 12px;                /* «окна» и блоки */
 }
 
 * { box-sizing: border-box; }
@@ -25,7 +42,13 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* Фон: свечение сверху, мягкая вертикаль в ледяное и редкий точечный растр.
+     Всё градиентами, ни одной картинки. */
+  background:
+    radial-gradient(1.2px 1.2px at 50% 50%, rgba(11, 87, 201, .16) 98%, transparent) 0 0 / 20px 20px,
+    radial-gradient(60% 280px at 50% 0, #ffffff, rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, #f3f8fe 0%, var(--bg) 100%);
+  background-color: var(--bg);
   color: var(--ink);
   font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
         "Helvetica Neue", Arial, sans-serif;
@@ -34,6 +57,12 @@ body {
 
 img { display: block; }
 a { color: inherit; }
+
+/* Видимое кольцо фокуса на всём, до чего доходит клавиатура. */
+a:focus-visible, button:focus-visible, summary:focus-visible,
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent-text); outline-offset: 2px;
+}
 
 .wrap { max-width: 1280px; margin: 0 auto; }
 main { flex: 1 0 auto; width: 100%; display: flex; flex-direction: column; }
@@ -55,8 +84,9 @@ footer { flex: none; }
   position: sticky;
   top: 0;
   z-index: 5;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
+  background: var(--silver);
+  border-bottom: 1px solid var(--edge);
+  box-shadow: var(--lit), 0 4px 14px -8px rgba(18, 32, 58, .4);
   padding-top: env(safe-area-inset-top);
 }
 .topbar-in {
@@ -71,12 +101,26 @@ footer { flex: none; }
 }
 
 .wordmark { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.logo-mark { width: 30px; height: 30px; color: var(--ink); flex: none; }
+/* Знак на глянцевом синем шаре: единственное место, где логотип не просто
+   чернильный. Рисуется отступом и фоном, разметка не менялась. */
+.logo-mark {
+  width: 38px; height: 38px; padding: 7px; flex: none;
+  color: #fff; background: var(--gloss);
+  border-radius: 50%;
+  border: 1px solid #08439a;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), var(--glow);
+}
 .logo-mark path { fill: currentColor; }
 .wordmark-text { display: flex; flex-direction: column; }
+/* Хромированная надпись — единственная, остальные заголовки обычные. Самая
+   светлая точка #1560d0 на фоне шапки даёт 4.91. */
 .wordmark-name {
   font-size: 15px; line-height: 16px; font-weight: 800;
   letter-spacing: .14em; margin-right: -.14em; text-transform: uppercase;
+  color: var(--accent-text);
+  background: linear-gradient(180deg, #0b3d91 0%, #1560d0 55%, #0b3d91 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .wordmark-sub {
   font-size: 10px; line-height: 12px; color: var(--dim);
@@ -86,21 +130,28 @@ footer { flex: none; }
 
 .cart-link {
   display: flex; align-items: center; gap: 8px;
-  height: 36px; padding: 0 12px;
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  height: 38px; padding: 0 14px;
+  background: var(--gloss);
+  border: 1px solid #08439a;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), var(--glow);
   color: #fff; text-decoration: none;
-  font-size: var(--cap); letter-spacing: .08em; text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .25);
+  font-size: var(--cap); font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
   flex: none;
 }
+.cart-link:active { filter: brightness(.9); }
 .cart-link svg {
   width: 16px; height: 16px;
   fill: none; stroke: currentColor; stroke-width: 1.6;
   stroke-linecap: round; stroke-linejoin: round;
 }
 .cart-count {
-  min-width: 18px; height: 18px; padding: 0 5px;
-  background: var(--accent); color: #fff;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  background: var(--gloss-hot); color: #fff;
+  border: 1px solid #fff; border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(196, 17, 107, .25);
+  text-shadow: none;
   font-size: 11px; line-height: 18px; font-weight: 700;
   text-align: center; font-variant-numeric: tabular-nums;
 }
@@ -124,8 +175,9 @@ footer { flex: none; }
    остаётся на экране. Поэтому прячем явно. */
 .controls[hidden] { display: none; }
 
+/* Стеклянная полоса: белёсая подложка поверх точечного фона. */
 .controls {
-  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, .55);
   border-bottom: 1px solid var(--line);
   padding: 12px var(--pad);
   display: grid;
@@ -140,7 +192,9 @@ footer { flex: none; }
 .controls .catalog > summary {
   height: 44px;
 }
-.controls .catalog > summary { padding: 0 14px; }
+.controls .catalog > summary { padding: 0 16px; }
+/* Поиск — капсула; остальные поля скруглены меньше. */
+.controls .searchbar input { border-radius: 999px; padding: 10px 18px; }
 
 .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .date { display: grid; gap: 5px; min-width: 0; }
@@ -162,7 +216,7 @@ footer { flex: none; }
    нажимать можно в любое место строки. */
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="time"]::-webkit-calendar-picker-indicator {
-  filter: invert(1) opacity(0.55);
+  opacity: 0.7;
   cursor: pointer;
 }
 
@@ -173,19 +227,22 @@ textarea {
   font-size: 16px;            /* ниже 16 iOS увеличивает страницу при фокусе */
   color: var(--ink);
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 0;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 3px rgba(18, 32, 58, .14);
   padding: 10px 12px;
   width: 100%;
   min-width: 0;
   -webkit-appearance: none;
   appearance: none;
 }
+input::placeholder, textarea::placeholder { color: var(--dim); opacity: 1; }
 /* Тянуть можно только по высоте: вширь поле разъедет форму. */
 textarea { resize: vertical; min-height: 76px; line-height: 1.4; display: block; }
 
 input:focus-visible, textarea:focus-visible {
-  outline: 2px solid var(--accent-text); outline-offset: -2px;
+  outline: 2px solid var(--accent-text); outline-offset: 1px;
+  box-shadow: 0 0 0 4px rgba(11, 87, 201, .18);
 }
 
 /* Каталог раскрывающимся списком: категорий полтора десятка, рядом кнопок их
@@ -198,12 +255,16 @@ input:focus-visible, textarea:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border: 1px solid var(--line);
+  background: var(--silver);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  box-shadow: var(--lit), 0 1px 2px rgba(18, 32, 58, .15);
   font-size: var(--cap);
   letter-spacing: .08em;
   text-transform: uppercase;
   font-weight: 700;
 }
+.catalog > summary:active { box-shadow: inset 0 2px 4px rgba(18, 32, 58, .25); }
 .catalog > summary::-webkit-details-marker { display: none; }
 .catalog > summary::after {
   content: "";
@@ -212,19 +273,21 @@ input:focus-visible, textarea:focus-visible {
   border-bottom: 1.5px solid currentColor;
   transform: translateY(-2px) rotate(45deg);
 }
-.catalog[open] > summary { background: var(--panel); }
+.catalog[open] > summary { background: #d6e3f2; }
 .catalog[open] > summary::after { transform: translateY(1px) rotate(225deg); }
 
 .catalog-list {
   position: absolute;
   z-index: 4;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   min-width: 240px;
   max-height: 60vh;
   overflow-y: auto;
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  box-shadow: var(--lift), 0 12px 28px -10px rgba(18, 32, 58, .4);
   display: grid;
 }
 .catalog-item {
@@ -239,6 +302,7 @@ input:focus-visible, textarea:focus-visible {
   cursor: pointer;
 }
 .catalog-item:last-child { border-bottom: 0; }
+.catalog-item:hover:not([disabled]) { background: #eef4fb; }
 .catalog-item--on { color: var(--accent-text); font-weight: 700; }
 /* Пустая в этом разделе категория видна, но приглушена: так понятно, что она
    есть, просто сейчас в ней ничего нет. */
@@ -254,33 +318,51 @@ input:focus-visible, textarea:focus-visible {
 
 /* --- Решётка --- */
 
+/* Заголовок группы — с маленькой четырёхлучевой искрой: единственный «пиксельный»
+   акцент, нарисован clip-path, без картинок. */
 .group-title {
   margin: 0;
-  padding: 18px var(--pad) 10px;
+  padding: 20px var(--pad) 10px;
+  display: flex; align-items: center; gap: 8px;
   font-size: var(--cap); line-height: 14px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase;
 }
+.group-title::before {
+  content: ""; flex: none; width: 12px; height: 12px;
+  background: var(--gloss);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+}
 .group-title span { color: var(--dim); font-weight: 400; }
 
-/* Зазор в один пиксель, а линию рисует контур самой карточки. Заливать цветом
-   линии всю сетку нельзя: в неполном ряду пустые ячейки превращаются в серые
-   пятна и читаются как сломанные карточки. */
+/* Теперь у каждой карточки своя рамка и тень, а не общая решётка: пустых
+   клеток в неполном ряду нет вовсе, серых пятен не бывает. Зазор — промежуток
+   между «окнами». */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 1px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  padding: 0 var(--pad) 8px;
 }
 
-/* Линии решётки рисует контур ячейки, а не заливка сетки: иначе в неполном
-   ряду пустые места превращаются в серые пятна и читаются как сломанные
-   карточки. */
+/* «Окно»: тонкая рамка, скругление, узкая полоса-заголовок сверху с тремя
+   точками. Полоса — чистое украшение, псевдоэлемент. */
 .cell {
   background: var(--panel);
-  box-shadow: 0 0 0 1px var(--line);
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  box-shadow: var(--lit), var(--lift);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+.cell::before {
+  content: ""; flex: none; height: 14px;
+  background:
+    radial-gradient(circle at 10px 50%, #ffffff 2px, #9fb4cf 2.6px, transparent 3.4px),
+    radial-gradient(circle at 20px 50%, #ffffff 2px, #9fb4cf 2.6px, transparent 3.4px),
+    radial-gradient(circle at 30px 50%, #ffffff 2px, #9fb4cf 2.6px, transparent 3.4px),
+    var(--silver);
+  border-bottom: 1px solid var(--line);
 }
 
 .card {
@@ -290,6 +372,7 @@ input:focus-visible, textarea:focus-visible {
   flex-direction: column;
   flex: 1;
 }
+.card:active .card-name { color: var(--accent-text); }
 
 /* Кнопка и счётчик занимают ровно одну площадь: иначе карточка прыгает в
    момент подмены, и решётка дёргается целиком. */
@@ -303,11 +386,13 @@ input:focus-visible, textarea:focus-visible {
 .add {
   font: inherit; font-size: 12px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase;
-  background: none; color: var(--ink);
-  border: 1px solid var(--line); border-radius: 0;
+  background: var(--silver); color: var(--accent-text);
+  border: 1px solid var(--accent); border-radius: 999px;
+  box-shadow: var(--lit);
   cursor: pointer;
 }
-.add:hover { border-color: var(--accent); color: var(--accent-text); }
+.add:hover { background: #fff; box-shadow: var(--lit), 0 0 0 3px rgba(11, 87, 201, .18); }
+.add:active { background: #d6e3f2; box-shadow: inset 0 2px 4px rgba(18, 32, 58, .25); }
 
 /* Заливка наплывает снизу вверх и ОСТАЁТСЯ: позиция в корзине — состояние,
    а не мигнувшее событие. Уходит только при отмене, тем же движением назад.
@@ -317,12 +402,14 @@ input:focus-visible, textarea:focus-visible {
 .card-add .stepper--wide {
   grid-template-columns: 1fr auto 1fr;
   position: relative; overflow: hidden;
-  border-color: var(--accent); color: #fff;
+  border-color: #08439a; color: #fff;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), var(--glow);
 }
 .card-add .stepper--wide button { color: #fff; }
 .card-add .stepper--wide::before {
   content: ""; position: absolute; inset: 0; z-index: 0;
-  background: var(--accent); transform: scaleY(1); transform-origin: bottom;
+  background: var(--gloss); transform: scaleY(1); transform-origin: bottom;
 }
 .card-add .stepper--wide > * { position: relative; z-index: 1; }
 
@@ -351,8 +438,11 @@ input:focus-visible, textarea:focus-visible {
   font-size: 15px; font-weight: 700; text-align: center;
   font-variant-numeric: tabular-nums;
   min-width: 34px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .25);
 }
 
+/* Фон под снимок светлый, ледяной. photos.py пока рисует поля тёмным
+   (20, 20, 23) — на светлой карточке такие снимки будут тёмными квадратами. */
 .shot {
   aspect-ratio: 4 / 3;
   /* На промежуточной ширине карточка вырастает до 400 с лишним точек, и
@@ -362,7 +452,7 @@ input:focus-visible, textarea:focus-visible {
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #0f0f12;
+  background: radial-gradient(70% 70% at 50% 40%, #ffffff, #e4edf8);
 }
 .shot img { width: 100%; height: 100%; object-fit: cover; }
 .shot-ico {
@@ -376,9 +466,10 @@ input:focus-visible, textarea:focus-visible {
 .card-name { font-size: 14px; line-height: 18px; font-weight: 600; }
 .card-free { font-variant-numeric: tabular-nums; }
 .card-free b { color: var(--ink); font-weight: 700; }
-.card-free.none { color: var(--accent-text); }
+.card-free.none { color: var(--hot); }
 
 .empty { padding: 48px var(--pad); color: var(--dim); text-align: center; }
+.empty a { color: var(--accent-text); }
 
 /* Отклик на смену раздела или категории: содержимое заходит, а не
    подменяется молча. Коротко — это подтверждение нажатия, а не представление. */
@@ -399,20 +490,25 @@ input:focus-visible, textarea:focus-visible {
   margin: 0;
   padding: 3px var(--pad);
   border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .55);
 }
 /* «← Каталог» — единственный путь назад на странице позиции, и промах по нему
    стоит дорого. Строка текста высотой 17 точек для пальца не цель: добавляем
    отступы внутрь ссылки, а не вокруг неё, чтобы росла область нажатия. */
 .crumbs a {
   display: inline-block; padding: 11px 0;
-  color: var(--dim); text-decoration: none;
+  color: var(--accent-text); text-decoration: none; font-weight: 600;
 }
 .crumbs a:active { color: var(--ink); }
 
+/* Снимок позиции — одно большое «окно» с рамкой. */
 .item-shot {
   aspect-ratio: 4 / 3;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  margin: 14px var(--pad) 0;
+  background: radial-gradient(70% 70% at 50% 40%, #ffffff, #e4edf8);
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  box-shadow: var(--lit), var(--lift);
   display: grid; place-items: center;
   overflow: hidden;
 }
@@ -440,19 +536,24 @@ input:focus-visible, textarea:focus-visible {
 .btn {
   font: inherit; font-size: 14px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase;
-  background: var(--accent); color: #fff;
-  border: 1px solid var(--accent); border-radius: 0;
+  background: var(--gloss); color: #fff;
+  border: 1px solid #08439a; border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), var(--glow);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .25);
   min-height: 46px; padding: 0 24px;
   cursor: pointer; text-decoration: none;
   display: inline-flex; align-items: center; justify-content: center;
   flex: 1;
 }
-.btn[disabled] { opacity: .45; cursor: default; }
+.btn:hover { filter: brightness(1.06); }
+.btn:active { filter: brightness(.9); box-shadow: inset 0 2px 5px rgba(0, 0, 0, .35); }
+.btn[disabled] { opacity: .45; cursor: default; filter: none; }
 /* display у кнопки перебивает браузерное [hidden] — как когда-то у блока
    поиска. Без этой строки скрытая кнопка остаётся на экране. */
 .btn[hidden] { display: none; }
 .btn--secondary {
-  background: none; color: var(--ink); border-color: var(--line);
+  background: var(--silver); color: var(--ink); border-color: var(--edge);
+  box-shadow: var(--lit); text-shadow: none;
 }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
 /* Бронь — единственное действие на странице, поэтому во всю ширину: три
@@ -463,14 +564,19 @@ input:focus-visible, textarea:focus-visible {
   display: inline-grid;
   grid-template-columns: 40px 48px 40px;
   align-items: center;
-  border: 1px solid var(--line);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 3px rgba(18, 32, 58, .14);
+  overflow: hidden;
   flex: none;
 }
 .stepper button {
   font: inherit; font-size: 19px; line-height: 1;
-  background: none; border: 0; color: var(--ink);
+  background: none; border: 0; color: var(--accent-text);
   height: 44px; cursor: pointer;
 }
+.stepper button:active { background: #d6e3f2; }
 .stepper input {
   font: inherit; font-size: 16px; text-align: center;
   font-variant-numeric: tabular-nums;
@@ -480,6 +586,8 @@ input:focus-visible, textarea:focus-visible {
 }
 .stepper input::-webkit-outer-spin-button,
 .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* В карточке счётчик залит синим: кнопки там белые. */
+.card-add .stepper--wide { background: transparent; }
 
 /* --- Заявка --- */
 
@@ -492,10 +600,28 @@ input:focus-visible, textarea:focus-visible {
   letter-spacing: -.02em;
   text-transform: uppercase;
 }
+/* Короткая глянцевая капсула под заголовком страницы. */
+.page h1.title::after {
+  content: ""; display: block; width: 64px; height: 7px; margin-top: 14px;
+  background: var(--gloss); border-radius: 999px; box-shadow: var(--glow);
+}
 
-.block { border-top: 1px solid var(--line); padding: 18px var(--pad); }
+/* Блоки заявки — окна с рамкой, а не полосы на всю ширину. */
+.block {
+  margin: 0 var(--pad) 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, .85);
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  box-shadow: var(--lit), var(--lift);
+}
+/* Заголовок блока — серебряная капсула. */
 .block h2 {
-  margin: 0 0 14px;
+  display: inline-block;
+  margin: 0 0 14px; padding: 4px 12px;
+  background: var(--silver);
+  border: 1px solid var(--line); border-radius: 999px;
+  box-shadow: var(--lit);
   font-size: var(--cap); line-height: 14px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase;
 }
@@ -509,6 +635,7 @@ input:focus-visible, textarea:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 .cart-line:first-child { border-top: 1px solid var(--line); }
+.cart-line:last-child { border-bottom: 0; }
 .cart-name { font-weight: 600; text-decoration: none; }
 .cart-line .cap { grid-column: 1; }
 .cart-line .stepper { grid-column: 2; grid-row: 1 / 3; }
@@ -517,9 +644,9 @@ input:focus-visible, textarea:focus-visible {
   font: inherit; font-size: var(--cap);
   letter-spacing: .08em; text-transform: uppercase;
   background: none; border: 0; padding: 4px 0 0;
-  color: var(--accent-text); cursor: pointer;
+  color: var(--hot); cursor: pointer;
 }
-.cart-warn { grid-column: 1 / -1; margin: 0; color: var(--accent-text); font-size: 12px; }
+.cart-warn { grid-column: 1 / -1; margin: 0; color: var(--hot); font-size: 12px; }
 
 /* «Забыть мои данные» стоит под формой, а не в строке корзины: своя высота и
    отступ сверху, чтобы не приклеивалось к комментарию и не путалось с
@@ -536,29 +663,33 @@ input:focus-visible, textarea:focus-visible {
 .row-label { justify-self: start; }
 .switch { display: inline-flex; padding: 6px; margin: -6px; cursor: pointer; }
 
-/* Переключатель прямоугольный, как и всё остальное. */
+/* Переключатель — капсула с круглой кнопкой. */
 input[type="checkbox"] {
   appearance: none; -webkit-appearance: none;
   width: 48px; height: 28px; flex: none;
-  background: var(--panel); border: 1px solid var(--line);
+  background: #d6e3f2; border: 1px solid var(--edge); border-radius: 999px;
+  box-shadow: inset 0 1px 3px rgba(18, 32, 58, .25);
   position: relative; cursor: pointer;
 }
 input[type="checkbox"]::after {
   content: ""; position: absolute; top: 3px; left: 3px;
-  width: 20px; height: 20px; background: var(--dim);
-  transition: transform .15s, background .15s;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff, #c7d6ea);
+  border: 1px solid var(--edge);
+  box-shadow: 0 1px 2px rgba(18, 32, 58, .3);
+  transition: transform .15s;
 }
-input[type="checkbox"]:checked { border-color: var(--accent); }
+input[type="checkbox"]:checked { background: var(--gloss); border-color: #08439a; }
 input[type="checkbox"]:checked::after {
-  transform: translateX(20px); background: var(--accent);
+  transform: translateX(20px); border-color: #08439a;
 }
 
 .hint { margin: 0 0 12px; color: var(--dim); font-size: 13px; line-height: 18px; }
-.hint--bad { color: var(--accent-text); }
+.hint--bad { color: var(--hot); }
 
 /* Пропущенное обязательное поле. Рамкой, а не текстом под каждым полем:
    перечисление того, чего не хватает, и так стоит у кнопки. */
-input.is-bad, textarea.is-bad { border-color: var(--accent); }
+input.is-bad, textarea.is-bad { border-color: var(--hot); box-shadow: 0 0 0 3px rgba(196, 17, 107, .18); }
 
 /* Поле-ловушка для роботов. Убрано с экрана, но не display:none — иначе его не
    заполнит и робот, а в этом весь смысл. */
@@ -567,7 +698,8 @@ input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity
 .preview-box { position: relative; }
 .preview {
   margin: 14px 0 0; padding: 14px 52px 14px 14px;
-  background: var(--panel); border: 1px solid var(--line);
+  background: #f4f8fd; border: 1px solid var(--edge); border-radius: 10px;
+  box-shadow: inset 0 1px 3px rgba(18, 32, 58, .14);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px; line-height: 18px;
   white-space: pre-wrap; word-break: break-word;
@@ -579,7 +711,8 @@ input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity
 .copy-btn {
   position: absolute; top: 23px; right: 9px;
   width: 34px; height: 34px; padding: 0;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 0;
+  background: var(--silver); border: 1px solid var(--edge); border-radius: 50%;
+  box-shadow: var(--lit);
   color: var(--dim); cursor: pointer;
   display: grid; place-items: center;
 }
@@ -588,13 +721,16 @@ input.trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity
   fill: none; stroke: currentColor; stroke-width: 1.7;
   stroke-linecap: round; stroke-linejoin: round;
 }
-.copy-btn:hover { color: var(--ink); border-color: var(--accent); }
+.copy-btn:hover { color: var(--accent-text); border-color: var(--accent); }
 .copy-btn--done { color: var(--accent-text); border-color: var(--accent-text); }
 
 /* --- Подвал --- */
 
 footer {
-  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  background: linear-gradient(180deg, #f4f8fd 0%, #d6e3f2 100%);
+  border-top: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 #fff;
   color: var(--dim);
   font-size: 12px; line-height: 18px;
 }
@@ -610,7 +746,7 @@ footer a { color: var(--dim); }
 }
 .foot-name {
   display: block;
-  font-size: 18px; font-weight: 700; letter-spacing: .02em;
+  font-size: 18px; font-weight: 800; letter-spacing: .06em;
   color: var(--ink);
 }
 .foot-note { margin: 8px 0 0; max-width: 260px; }
@@ -627,7 +763,7 @@ footer a { color: var(--dim); }
   display: inline-block; padding: 6px 0;
   color: var(--dim); text-decoration: none;
 }
-.foot-list a:active, .foot-list a:hover { color: var(--ink); }
+.foot-list a:active, .foot-list a:hover { color: var(--accent-text); }
 
 /* Учредитель и его сайт — отдельной полосой в самом низу: это не раздел
    сайта, а подпись под всем документом. */
@@ -640,12 +776,12 @@ footer a { color: var(--dim); }
 
 @media (min-width: 720px) {
   /* Карточки по-прежнему делят всю ширину — иначе справа остаётся мёртвое
-     поле, а решётка рвётся. От растяжения спасают потолок у фотографии и у
-     счётчика, а не узкая колонка. */
+     поле. От растяжения спасают потолок у фотографии и у счётчика, а не
+     узкая колонка. */
   /* Ровно три карточки в ряд. Раньше стояло auto-fill, и на мониторе в ряд
      влезало четыре и больше: названия сжимались, фотография мельчала, а
      взгляд по такой решётке уже не идёт построчно. */
-  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
   /* Подвал в четыре доли: лого пошире, три списка равными. */
   .foot { grid-template-columns: 1.4fr 1fr 1fr; gap: 40px; padding: 40px var(--pad) 32px; }
   /* «Каталог» и поиск в один ряд. Раньше в первой колонке стоял блок дат, его
@@ -654,9 +790,11 @@ footer a { color: var(--dim); }
   .catalog { grid-column: 1; grid-row: 1; }
   .searchbar { grid-column: 2; grid-row: 1; }
   .chips { grid-column: 1 / -1; }
-  .item-shot { aspect-ratio: 16 / 9; }
+  .item-shot { aspect-ratio: 16 / 9; max-width: 640px; }
   .item-main { max-width: 640px; }
   .item-add .btn { flex: 0 0 auto; }
+  /* Заявка на широком экране — колонка, а не растянутые на 1280 окна. */
+  .page .block, .page h1.title { max-width: 720px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -666,11 +804,13 @@ footer a { color: var(--dim); }
 /* --- Разделы витрины --- */
 
 /* Разделы — не фильтр, а развилка: подача другая, чтобы не путались с чипами
-   категорий. Крупнее, и выбранный подчёркнут красным. */
+   категорий. Полупрозрачные вкладки; выбранная становится белой и получает
+   синюю кромку сверху. */
 .sections {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--line);
+  gap: 6px;
+  padding: 10px var(--pad) 0;
+  border-bottom: 1px solid var(--edge);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -678,17 +818,27 @@ footer a { color: var(--dim); }
 
 .section {
   flex: none;
-  padding: 18px var(--pad) 15px;
+  padding: 13px 18px 11px;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--dim);
   text-decoration: none;
-  border-bottom: 3px solid transparent;
+  background: rgba(255, 255, 255, .45);
+  border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 12px 12px 0 0;
   white-space: nowrap;
 }
-.section--on { color: var(--ink); border-bottom-color: var(--accent); }
+.section:hover { background: rgba(255, 255, 255, .8); }
+.section--on {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--edge);
+  box-shadow: inset 0 3px 0 var(--accent);
+  /* Налезает на нижнюю линию и сливается с содержимым. */
+  margin-bottom: -1px; padding-bottom: 12px;
+}
 
 /* --- Раздел, которого ещё нет --- */
 
