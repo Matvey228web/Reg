@@ -88,6 +88,10 @@ html[data-theme="light"] {
 
 * { box-sizing: border-box; }
 
+/* Быстрые нажатия «+» и «−»: без этого iOS принимает два тапа подряд за двойной
+   тап-масштаб, увеличивает страницу и проглатывает нажатие. */
+html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
 body {
   margin: 0;
   /* Подвал прижат к низу: на коротких страницах (пустой раздел, ошибка)
@@ -197,7 +201,7 @@ footer { flex: none; }
   --lk-num-up: -.5px;      /* подъём «40», если не лёг на базовые линии */
   --lk-num-color: var(--dim);
 
-  display: flex; align-items: center; gap: 9px; text-decoration: none;
+  display: flex; align-items: center; gap: 6px; text-decoration: none;
   margin-right: auto; min-width: 0;
 }
 .logo-mark { width: 30px; height: 30px; color: var(--ink); flex: none; }
@@ -213,7 +217,9 @@ footer { flex: none; }
   letter-spacing: var(--lk-sub-track); margin-right: calc(-1 * var(--lk-sub-track));
   text-transform: uppercase; white-space: nowrap;
 }
+.wordmark--foot { display: inline-flex; margin-right: 0; }
 .wordmark-num {
+  margin-left: -2px;      /* «40» плотнее к тексту */
   font-size: var(--lk-num-size); line-height: 1; font-weight: 600;
   color: var(--lk-num-color); position: relative; top: var(--lk-num-up);
   font-variant-numeric: tabular-nums;
@@ -819,12 +825,6 @@ footer a { color: var(--dim); }
   gap: 24px;
   padding: 28px var(--pad) 24px;
 }
-.foot-name {
-  display: block;
-  font-size: 18px; font-weight: 700; letter-spacing: .02em;
-  color: var(--ink);
-}
-.foot-note { margin: 8px 0 0; max-width: 260px; }
 .foot-h {
   margin: 0 0 12px;
   font-size: 13px; font-weight: 700; letter-spacing: .02em;
@@ -931,7 +931,7 @@ footer a { color: var(--dim); }
    после него. Всё, что набрано прописными с разрядкой, — Oswald; обычный текст — Golos. */
 .cap, .notice-tag, .wordmark-name, .wordmark-sub, .cart-link, .hero h1,
 .catalog > summary, .group-title, .add, .item-main h1, .btn, .page h1.title,
-.block h2, .link-danger, .section, .soon, .foot-name, .foot-h,
+.block h2, .link-danger, .section, .soon, .foot-h,
 .stepper--wide, .copy-btn, .wordmark-num {
   font-family: var(--font-display);
 }

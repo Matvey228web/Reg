@@ -162,6 +162,11 @@ var Site = (function () {
 
     var box = input ? el.parentNode : el;
     box.classList.add("num-box");
+    // Быстрые нажатия: прежний призрак и незаконченное движение снимаем сразу,
+    // иначе призраки копятся по одному на нажатие.
+    var olds = box.querySelectorAll(".num-ghost");
+    for (var i = 0; i < olds.length; i++) olds[i].remove();
+    if (target.getAnimations) target.getAnimations().forEach(function (a) { a.cancel(); });
     var ghost = document.createElement("span");
     ghost.className = "num-ghost";
     ghost.textContent = old;
@@ -330,6 +335,10 @@ var Site = (function () {
   var stored = null;       // прижилась ли запись; null — ещё не проверяли
 
   function readCart() {
+    // Корзина в памяти страницы — главный источник: её сбрасывает refreshCart
+    // (соседняя вкладка, возврат «назад»). Разбирать JSON из хранилища на
+    // каждом нажатии незачем.
+    if (memCart) return memCart;
     try {
       var raw = localStorage.getItem(CART_KEY);
       var data = raw ? JSON.parse(raw) : null;
@@ -349,8 +358,8 @@ var Site = (function () {
     try {
       localStorage.setItem(CART_KEY, text);
       // Записалось — не значит сохранилось: в приватном режиме запись молча
-      // не доживает до чтения.
-      stored = localStorage.getItem(CART_KEY) === text;
+      // не доживает до чтения. Проверяем, пока не убедились; дальше хватает записи.
+      if (stored !== true) stored = localStorage.getItem(CART_KEY) === text;
     } catch (e) {
       stored = false;
     }
