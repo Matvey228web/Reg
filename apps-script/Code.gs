@@ -4298,6 +4298,9 @@ function handleMaintenance(payload, token) {
   var action = String(payload.action || "");
   if (action === "archive") return { message: archiveJournal() };
   if (action === "trim") return { message: trimJournal() };
+  // Новая вкладка или колонка после выкладки: то же, что «Run» у setupSheets в
+  // редакторе, но с телефона. Повторный запуск безопасен: данные не трогаются.
+  if (action === "setup") return { message: setupSheets() };
   throw apiError(400, "Неизвестное действие обслуживания");
 }
 
