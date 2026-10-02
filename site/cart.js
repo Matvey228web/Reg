@@ -178,7 +178,9 @@
         // Поле-ловушка: человек его не видит и не заполнит.
         '<input type="text" id="trap" tabindex="-1" autocomplete="off"' +
           ' aria-hidden="true" class="trap" />' +
-        '<button class="btn btn--wide" id="send">Забронировать</button>' +
+        '<button class="btn btn--wide btn--send" id="send">' +
+          '<span class="btn-label">Отправить</span></button>' +
+        operatorHtml() +
         // Одна строка вместо раздела «Условия»: главное, что студент должен
         // понять до нажатия, — заявка ещё не бронь, её подтверждает склад.
         '<p class="send-hint">Заявка — это не бронь</p>' +
@@ -419,6 +421,14 @@
 
   }
 
+  // Ссылка на чат склада с заявками. Пока адрес не задан в common.js, кнопки нет.
+  function operatorHtml() {
+    if (!Site.OPERATOR_URL) return "";
+    return '<a class="btn btn--secondary btn--wide btn--operator" id="operator" hidden' +
+      ' href="' + Site.escapeHtml(Site.OPERATOR_URL) + '" target="_blank"' +
+      ' rel="noopener">Операторская</a>';
+  }
+
   function bindControls() {
     $("send").addEventListener("click", send);
 
@@ -509,7 +519,8 @@
 
     var btn = $("send");
     btn.disabled = true;
-    btn.textContent = "Бронируем…";
+    btn.firstChild.textContent = "Отправляем…";
+    btn.classList.add("is-sending");
     note.classList.remove("hint--bad");
     note.hidden = true;
 
@@ -518,7 +529,9 @@
         // Заявка принята — номер израсходован. Иначе вторая заявка из той же
         // вкладки ушла бы под прежним номером и столкнулась с первой.
         code = null;
-        btn.textContent = "Забронировано";
+        btn.firstChild.textContent = "Отправлено";
+        btn.classList.add("is-done");
+        if ($("operator")) $("operator").hidden = false;
         note.hidden = false;
         note.textContent = res.repeat
           ? "Эта заявка уже принята, номер " + res.order_no + "."
@@ -526,12 +539,13 @@
       })
       .catch(function (err) {
         btn.disabled = false;
-        btn.textContent = "Забронировать";
+        btn.firstChild.textContent = "Отправить";
+        btn.classList.remove("is-sending");
         note.hidden = false;
         note.classList.add("hint--bad");
         note.textContent = err.status === 403
           ? "Склад пока не принимает заявки с сайта. Скопируйте текст и отправьте его складу."
-          : "Забронировать не вышло: " + (err.message || "склад не ответил") +
+          : "Отправить не вышло: " + (err.message || "склад не ответил") +
             ". Скопируйте текст и отправьте его складу.";
       });
   }
