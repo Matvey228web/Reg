@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20261002e" />
+<link rel="stylesheet" href="css/style.css?v=20261002g" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20261002e"></script>
+<script src="js/vendor/qrcode-generator.js?v=20261002g"></script>
 </head>
 <body>
 <div id="app">
@@ -90,7 +90,8 @@
          ней нет. Плитками, а не строками со стрелкой: строка читается как
          пункт списка, а это действия, по которым бьют пальцем в перчатке.
          «Настройки» ушли в шапку маленькой кнопкой, «Сменить PIN» и «Выйти» —
-         внутрь настроек: оба про свою учётную запись, а не про склад. -->
+         внутрь настроек: оба про свою учётную запись, а не про склад. Туда же
+         ушли «Сотрудники»: люди и права — настройка, а не складское дело. -->
     <div class="menu-grid">
       <button class="tile-btn" type="button" data-nav="inventory">
         <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="m9 14 2 2 4-4"/></svg>
@@ -110,10 +111,6 @@
       <button class="tile-btn" type="button" id="home-site-card">
         <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span class="tile-name">Сайт MifsRent</span>
-      </button>
-      <button class="tile-btn" type="button" data-nav="staff" id="home-staff-card" style="display:none;">
-        <svg class="tile-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span class="tile-name">Сотрудники</span>
       </button>
     </div>
   </div>
@@ -313,8 +310,6 @@
        складмен; на сайте они стоят первой строкой. -->
   <div class="screen" id="screen-announcements">
     <h1>Объявления</h1>
-    <p class="hint">Что завхоз пишет в чат о графике, инвентаризации и правилах.
-      Здесь вставьте текст — он появится на сайте проката первой строкой.</p>
     <div id="ann-list"></div>
     <button class="btn" id="ann-add-toggle">+ Новое объявление</button>
 
@@ -323,15 +318,15 @@
       <div id="ann-error"></div>
       <div class="field">
         <label for="ann-title">Заголовок</label>
-        <input id="ann-title" type="text" maxlength="120" placeholder="График работы склада на лето" required />
+        <input id="ann-title" type="text" maxlength="120" required />
       </div>
       <div class="field">
         <label for="ann-text">Текст</label>
-        <textarea id="ann-text" rows="7" maxlength="2000" placeholder="Каждый абзац с новой строки"></textarea>
+        <textarea id="ann-text" rows="7" maxlength="2000"></textarea>
       </div>
       <div class="field">
         <label for="ann-until">Показывать до</label>
-        <input id="ann-until" type="date" />
+        <input id="ann-until" type="date" required placeholder="не задано" />
         <p class="hint">Оставьте пустым — объявление висит, пока вы его не снимете.</p>
       </div>
       <button class="btn" id="ann-submit">Опубликовать</button>
@@ -407,39 +402,39 @@
 
 </div>
 
-<script src="js/config.js?v=20261002e"></script>
-<script src="js/util.js?v=20261002e"></script>
-<script src="js/suggest.js?v=20261002e"></script>
-<script src="js/cache.js?v=20261002e"></script>
+<script src="js/config.js?v=20261002g"></script>
+<script src="js/util.js?v=20261002g"></script>
+<script src="js/suggest.js?v=20261002g"></script>
+<script src="js/cache.js?v=20261002g"></script>
 <!-- Демо-данные весят 67 КБ и нужны только в демо-режиме. На рабочем
      складе MOCK_MODE выключен, и грузить их каждому открывшему незачем. -->
 <script>
   // CONFIG объявлен через const и в window не попадает — проверяем сам
   // идентификатор, а не свойство объекта окна.
   if (typeof CONFIG !== "undefined" && CONFIG.MOCK_MODE) {
-    document.write('<script src="js/mock-data.js?v=20261002e"><\/script>');
+    document.write('<script src="js/mock-data.js?v=20261002g"><\/script>');
   }
 </script>
-<script src="js/api.js?v=20261002e"></script>
-<script src="js/telegram.js?v=20261002e"></script>
-<script src="js/router.js?v=20261002e"></script>
-<script src="js/fab.js?v=20261002e"></script>
-<script src="js/qr.js?v=20261002e"></script>
-<script src="js/pull.js?v=20261002e"></script>
-<script src="js/auth.js?v=20261002e"></script>
-<script src="js/catalog.js?v=20261002e"></script>
-<script src="js/scan.js?v=20261002e"></script>
-<script src="js/item.js?v=20261002e"></script>
-<script src="js/order.js?v=20261002e"></script>
-<script src="js/repair.js?v=20261002e"></script>
-<script src="js/orders.js?v=20261002e"></script>
-<script src="js/staff.js?v=20261002e"></script>
-<script src="js/models.js?v=20261002e"></script>
-<script src="js/settings.js?v=20261002e"></script>
-<script src="js/labels.js?v=20261002e"></script>
-<script src="js/inventory.js?v=20261002e"></script>
-<script src="js/announcements.js?v=20261002e"></script>
-<script src="js/pin.js?v=20261002e"></script>
-<script src="js/app.js?v=20261002e"></script>
+<script src="js/api.js?v=20261002g"></script>
+<script src="js/telegram.js?v=20261002g"></script>
+<script src="js/router.js?v=20261002g"></script>
+<script src="js/fab.js?v=20261002g"></script>
+<script src="js/qr.js?v=20261002g"></script>
+<script src="js/pull.js?v=20261002g"></script>
+<script src="js/auth.js?v=20261002g"></script>
+<script src="js/catalog.js?v=20261002g"></script>
+<script src="js/scan.js?v=20261002g"></script>
+<script src="js/item.js?v=20261002g"></script>
+<script src="js/order.js?v=20261002g"></script>
+<script src="js/repair.js?v=20261002g"></script>
+<script src="js/orders.js?v=20261002g"></script>
+<script src="js/staff.js?v=20261002g"></script>
+<script src="js/models.js?v=20261002g"></script>
+<script src="js/settings.js?v=20261002g"></script>
+<script src="js/labels.js?v=20261002g"></script>
+<script src="js/inventory.js?v=20261002g"></script>
+<script src="js/announcements.js?v=20261002g"></script>
+<script src="js/pin.js?v=20261002g"></script>
+<script src="js/app.js?v=20261002g"></script>
 </body>
 </html>

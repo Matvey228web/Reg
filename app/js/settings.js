@@ -116,9 +116,33 @@ const SettingsScreen = (() => {
   // Своя учётная запись — в самом низу и отдельной зоной: это единственное на
   // экране, что меняет не склад, а вас. «Выйти» красной: на складе один телефон
   // ходит по рукам, и промах здесь выкидывает человека в форму входа.
-  function accountHtml() {
-    const me = Auth.getSession() || {};
+  // «Сотрудники» — строкой рядом со своей учётной записью: раньше это была
+  // плитка на главной, но там место под складские дела, а люди и права —
+  // настройка. Видна тем же, кому была видна плитка: администраторам.
+  // Рисуется вместе с учётной записью, поэтому есть и тогда, когда таблица не
+  // ответила, — заблокировать сотрудника бывает нужно именно в такой день.
+  function staffEntryHtml(me) {
+    if (me.role !== "Admin") return "";
     return `
+      <div class="section section--top">
+        <div class="menu">
+          <button class="menu-row" type="button" id="settings-go-staff">
+            <span class="menu-row-main">
+              <span class="menu-row-label">Сотрудники</span>
+              <span class="menu-row-hint">кто входит, роли, PIN и блокировка</span>
+            </span>
+            <span class="menu-row-go">›</span>
+          </button>
+        </div>
+      </div>`;
+  }
+
+  // withStaff = false, когда «Сотрудники» уже стоят строкой в общем списке
+  // настроек (menuHtml): отдельной карточкой они нужны только на запасном
+  // экране, когда таблица не ответила.
+  function accountHtml(withStaff = true) {
+    const me = Auth.getSession() || {};
+    return `${withStaff ? staffEntryHtml(me) : ""}
       <div class="section section--account section--top">
         <h2>Учётная запись</h2>
         <p class="hint">Вошли как ${escapeHtml(me.full_name || "—")}${
@@ -131,6 +155,8 @@ const SettingsScreen = (() => {
   function bindAccount() {
     const pin = document.getElementById("settings-pin");
     if (pin) pin.addEventListener("click", () => Router.navigate("pin"));
+    const staffBtn = document.getElementById("settings-go-staff");
+    if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
     const out = document.getElementById("settings-logout");
     // Раньше выход происходил молча с одного тапа, а кнопка стоит рядом со
     // «Сменить свой PIN» — промахнуться легко, а обратно только через логин
@@ -150,22 +176,45 @@ const SettingsScreen = (() => {
   // блоков не зависит от того, как их показывают.
   let panel = null;
 
+  // Значки — как в системных настройках iOS: белый контур на цветной
+  // плашке. Цвет различает строки быстрее подписи, поэтому у каждой свой.
+  // Контуры — из того же набора, что значки вкладок и плиток главной.
+  const ICONS = {
+    cats: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+    staff: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    public: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+    act: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a1 1 0 0 0 1 1h5"/><path d="M8 13h8"/><path d="M8 17h5"/>',
+    bot: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
+    links: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    login: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    maint: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  };
+
   const PANELS = [
-    { key: "cats", label: "Категории и модели", hint: "номера, названия, где лежит модель" },
-    { key: "public", label: "Заявки с сайта", hint: "принимать ли заявки и как часто" },
-    { key: "act", label: "Акт сдачи-приёмки", hint: "шаблон, подписи, папка" },
-    { key: "bot", label: "Бот в Telegram", hint: "чат, темы и проверка связи" },
-    { key: "links", label: "Адреса и связи", hint: "таблица, чат, сайт, приложение" },
-    { key: "login", label: "Вход и защита", hint: "срок сессии, попытки, блокировка" },
-    { key: "maint", label: "Обслуживание", hint: "выгрузка и подрезка журналов" },
+    { key: "cats", label: "Категории и модели", hint: "номера, названия, где лежит модель", color: "#ff9500" },
+    { key: "staff", label: "Сотрудники", hint: "кто входит, роли, PIN и блокировка", color: "#af52de", go: "staff" },
+    { key: "public", label: "Заявки с сайта", hint: "принимать ли заявки и как часто", color: "#007aff" },
+    { key: "act", label: "Акт сдачи-приёмки", hint: "шаблон, подписи, папка", color: "#34c759" },
+    { key: "bot", label: "Бот в Telegram", hint: "чат, темы и проверка связи", color: "#2aabee" },
+    { key: "links", label: "Адреса и связи", hint: "таблица, чат, сайт, приложение", color: "#5856d6" },
+    { key: "login", label: "Вход и защита", hint: "срок сессии, попытки, блокировка", color: "#ff3b30" },
+    { key: "maint", label: "Обслуживание", hint: "выгрузка и подрезка журналов", color: "#8e8e93" },
   ];
 
+  // Один список, как в настройках iOS. «Сотрудники» — не подраздел, а свой
+  // экран: у строки нет data-open, её ведёт bindAccount по id.
   function menuHtml() {
+    const me = Auth.getSession() || {};
+    const rows = PANELS.filter((x) => !x.go || me.role === "Admin");
     return `
       <div class="section" id="settings-menu">
         <div class="menu">
-          ${PANELS.map((x) => `
-            <button class="menu-row" type="button" data-open="${x.key}">
+          ${rows.map((x) => `
+            <button class="menu-row" type="button" ${x.go
+              ? `id="settings-go-${x.go}"` : `data-open="${x.key}"`}>
+              <span class="menu-ico" style="background:${x.color}">
+                <svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[x.key]}</svg>
+              </span>
               <span class="menu-row-main">
                 <span class="menu-row-label">${escapeHtml(x.label)}</span>
                 <span class="menu-row-hint">${escapeHtml(x.hint)}</span>
@@ -361,7 +410,7 @@ const SettingsScreen = (() => {
           для запроса по сети.</p>
       </div>
 
-      ${accountHtml()}
+      ${accountHtml(false)}
     `;
 
     renderCategories();
@@ -412,7 +461,6 @@ const SettingsScreen = (() => {
                  "смотрите лист Logs в таблице")}
           ${deadTileHtml()}
         </div>` : ""}
-        <button class="btn btn--secondary" id="settings-go-staff">Сотрудники и права</button>
       </div>`;
   }
 
@@ -895,8 +943,6 @@ const SettingsScreen = (() => {
       row.addEventListener("click", () => showPanel(null));
     });
 
-    const staffBtn = document.getElementById("settings-go-staff");
-    if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
     document.getElementById("settings-models").addEventListener("click", () => Router.navigate("models"));
     document.getElementById("settings-cat-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("settings-cat-form");

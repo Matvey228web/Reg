@@ -901,6 +901,19 @@ function trimLogs() {
   return removed;
 }
 
+// Google отказал скрипту в доступе к сервису (документы, Диск, сеть): в коде
+// появился вызов, на который владелец ещё не давал разрешения. Чинится только
+// руками владельца и один раз, а Google отвечает на языке аккаунта страницей
+// про авторизацию — переводим это в одну фразу о том, что нажать.
+function missingScopeHint(err) {
+  var msg = String(err && err.message ? err.message : err || "");
+  if (!/(DocumentApp|DriveApp|UrlFetchApp|ScriptApp|SpreadsheetApp)\.\w+/.test(msg)) return "";
+  if (!/Berechtigung|permission|authoriz|разрешени|autoris|permiso/i.test(msg)) return "";
+  return "Скрипту не хватает разрешения Google (" + (msg.match(/\w+App/) || ["сервис"])[0] +
+    "). Один раз владельцу таблицы: Расширения → Apps Script → вверху выбрать функцию " +
+    "setupTriggers → «Выполнить» → разрешить доступ. После этого повторите.";
+}
+
 /**
  * Ставит ночной триггер обслуживания. Запускать руками из редактора, как
  * setupSheets; повторный запуск безопасен. Снимает прежние триггеры
@@ -1438,6 +1451,8 @@ function doPost(e) {
     // токена, ни тела запроса (там телефоны и ФИО).
     logEvent("error", endpoint, "exception", err && err.message ? err.message : String(err),
       err && err.stack ? { stack: String(err.stack) } : "");
+    var hint = missingScopeHint(err);
+    if (hint) return respond(envelope(false, null, hint, 403));
     return respond(envelope(false, null, "Внутренняя ошибка сервера: " + (err && err.message ? err.message : err), 500));
   }
 }
