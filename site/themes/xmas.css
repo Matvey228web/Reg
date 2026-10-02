@@ -1,9 +1,9 @@
 /* Сезонная тема «Новый год» (15 декабря - 15 января). Грузится theme.js после
  * style.css; каждое правило с префиксом html[data-season="xmas"], чтобы
  * перебить основные по специфичности. Тёмная база остаётся, цвета: хвоя, клюква,
- * золото. Только CSS и SVG в data-URI, без скриптов и шрифтов; движутся
- * лишь opacity/transform/background-position, при prefers-reduced-motion
- * всё стоит (лампочки горят ровно).
+ * золото. CSS и SVG-файлы рядом (themes/art), без скриптов и шрифтов; движутся
+ * лишь opacity/transform, при prefers-reduced-motion всё стоит (лампочки горят
+ * ровно, колокольчики и звезда висят неподвижно). Рисунки лежат в art/xmas-*.svg.
  *
  * Контраст (расчёт). Тёмная: ink/bg 17.4, ink/panel 16.2, dim/bg 7.7,
  * dim/panel 7.1, белый на --accent (хвоя) 6.1, accent-text/bg 10.2, /panel 9.5,
@@ -52,19 +52,37 @@ html[data-season="xmas"][data-theme="light"] {
   --glow-rgb: 255, 200, 110;
 }
 
-/* --- Снегопад: фиксированный слой за содержимым, клики не ловит. Слой выше
-   экрана на период плитки (720), сдвиг transform - плавно и без перерисовки. --- */
-html[data-season="xmas"] body::before {
-  content: ""; position: fixed; left: 0; right: 0; top: -720px; bottom: 0; z-index: -1;
+/* --- Снегопад: три фиксированных слоя за содержимым (body::before, body::after,
+   html::before), клики не ловят. Спрайты - настоящие снежинки Fluent Emoji
+   (art/xmas-snow.svg, плитка 360 со снежинками трёх размеров; светлой теме -
+   насыщенно-голубая плитка). Дальний слой мелкий и медленный, ближний крупный
+   и быстрый; каждый слой выше экрана на период плитки, сдвиг и качание - только
+   transform, перерисовки нет. Периоды плиток (240, 360, 520) заданы в --st. --- */
+html[data-season="xmas"] body::before,
+html[data-season="xmas"] body::after,
+html[data-season="xmas"]::before {
+  content: ""; position: fixed; left: 0; right: 0; top: calc(var(--st) * -1); bottom: 0; z-index: -1;
   pointer-events: none; opacity: var(--snow-op);
-  background:
-    radial-gradient(1.6px 1.6px at 40px 30px, rgb(var(--snow)) 98%, transparent) 0 0 / 180px 180px,
-    radial-gradient(1.2px 1.2px at 120px 90px, rgb(var(--snow)) 98%, transparent) 0 0 / 240px 240px,
-    radial-gradient(2px 2px at 80px 150px, rgb(var(--snow)) 98%, transparent) 0 0 / 360px 360px;
+  background: url(art/xmas-snow.svg) var(--so, 0 0) / var(--st) var(--st) repeat;
   will-change: transform;
-  animation: xmas-snow 60s linear infinite;
+  animation: xmas-snow var(--sd) linear infinite;
 }
-@keyframes xmas-snow { to { transform: translateY(720px); } }
+html[data-season="xmas"][data-theme="light"] body::before,
+html[data-season="xmas"][data-theme="light"] body::after,
+html[data-season="xmas"][data-theme="light"]::before { background-image: url(art/xmas-snow-light.svg); }
+html[data-season="xmas"] body::before { --st: 520px; --sd: 34s; --so: 90px 40px; }
+html[data-season="xmas"] body::after { --st: 360px; --sd: 52s; --so: 0 0; opacity: calc(var(--snow-op) * .9); animation-name: xmas-snow-b; }
+html[data-season="xmas"]::before { --st: 240px; --sd: 80s; --so: 150px 100px; opacity: calc(var(--snow-op) * .8); }
+@keyframes xmas-snow {
+  0% { transform: translate3d(0, 0, 0); } 25% { transform: translate3d(14px, calc(var(--st) * .25), 0); }
+  50% { transform: translate3d(0, calc(var(--st) * .5), 0); } 75% { transform: translate3d(-14px, calc(var(--st) * .75), 0); }
+  100% { transform: translate3d(0, var(--st), 0); }
+}
+@keyframes xmas-snow-b {
+  0% { transform: translate3d(0, 0, 0); } 25% { transform: translate3d(-10px, calc(var(--st) * .25), 0); }
+  50% { transform: translate3d(0, calc(var(--st) * .5), 0); } 75% { transform: translate3d(10px, calc(var(--st) * .75), 0); }
+  100% { transform: translate3d(0, var(--st), 0); }
+}
 
 /* --- Шапка: золотая кромка, золотой знак, клюквенный счётчик. --- */
 html[data-season="xmas"] .topbar { border-bottom-color: var(--gold-line); }
@@ -107,52 +125,59 @@ html[data-season="xmas"] .hero::after {
   html[data-season="xmas"] .hero::before { background-image: url(../img/season-xmas.jpg); }
 }
 
-/* --- Гирлянда: провисающий хвойный провод (SVG в data-URI) и шесть лампочек
-   градиентами на одном псевдоэлементе. Мигание в три фазы (красные, золотые,
-   зелёные) через зарегистрированные --l1/--l2/--l3; лампочка не гаснет в ноль.
-   Нет @property - горят ровно. Висит на псевдоэлементах: pointer-events none,
-   вёрстку не двигает. Повисла не везде: шапка, объявления, баннер, строка
-   поиска, подвал. --- */
-@property --l1 { syntax: "<number>"; inherits: false; initial-value: 1; }
-@property --l2 { syntax: "<number>"; inherits: false; initial-value: 1; }
-@property --l3 { syntax: "<number>"; inherits: false; initial-value: 1; }
-@keyframes xl1 { 0%, 100% { --l1: 1; } 28% { --l1: 1; } 42% { --l1: .25; } 56% { --l1: 1; } }
-@keyframes xl2 { 0%, 100% { --l2: 1; } 28% { --l2: 1; } 42% { --l2: .25; } 56% { --l2: 1; } }
-@keyframes xl3 { 0%, 100% { --l3: 1; } 28% { --l3: 1; } 42% { --l3: .25; } 56% { --l3: 1; } }
-
+/* --- Гирлянда: нарисованный SVG (art/xmas-garland.svg, плитка 240x48, шесть
+   ламп C7 с цоколем, бликом и ореолом; мигание в три фазы зашито в сам файл,
+   СSS его не крутит). Светлой теме - art/xmas-garland-light.svg (тёмный провод,
+   мягче ореол). Висит на псевдоэлементах: pointer-events none, вёрстку не
+   двигает. Только шапка и подвал: объявления и строка поиска остались без
+   гирлянды (лампы легли бы на поле поиска и на текст). --- */
 html[data-season="xmas"] .topbar::after,
-html[data-season="xmas"] footer::before,
-html[data-season="xmas"] .notice::after,
-html[data-season="xmas"] .controls::before,
-html[data-season="xmas"] .hero-in::after {
-  content: ""; position: absolute; left: 0; right: 0; height: 12px;
+html[data-season="xmas"] footer::before {
+  content: ""; position: absolute; left: 0; right: 0;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 12px 6.35px, rgb(255 255 255 / calc(var(--l1) * .85)) 0, rgb(238 60 80 / var(--l1)) 1.2px, rgb(238 60 80 / calc(var(--l1) * .92)) 2.5px, rgb(238 60 80 / calc((var(--l1) - .25) * .4)) 3.3px, transparent 6px),
-    radial-gradient(circle at 24px 7.1px, rgb(255 255 255 / calc(var(--l2) * .85)) 0, rgb(255 200 70 / var(--l2)) 1.2px, rgb(255 200 70 / calc(var(--l2) * .92)) 2.5px, rgb(255 200 70 / calc((var(--l2) - .25) * .4)) 3.3px, transparent 6px),
-    radial-gradient(circle at 36px 6.35px, rgb(255 255 255 / calc(var(--l3) * .85)) 0, rgb(80 200 130 / var(--l3)) 1.2px, rgb(80 200 130 / calc(var(--l3) * .92)) 2.5px, rgb(80 200 130 / calc((var(--l3) - .25) * .4)) 3.3px, transparent 6px),
-    radial-gradient(circle at 60px 6.35px, rgb(255 255 255 / calc(var(--l3) * .85)) 0, rgb(80 200 130 / var(--l3)) 1.2px, rgb(80 200 130 / calc(var(--l3) * .92)) 2.5px, rgb(80 200 130 / calc((var(--l3) - .25) * .4)) 3.3px, transparent 6px),
-    radial-gradient(circle at 72px 7.1px, rgb(255 255 255 / calc(var(--l1) * .85)) 0, rgb(238 60 80 / var(--l1)) 1.2px, rgb(238 60 80 / calc(var(--l1) * .92)) 2.5px, rgb(238 60 80 / calc((var(--l1) - .25) * .4)) 3.3px, transparent 6px),
-    radial-gradient(circle at 84px 6.35px, rgb(255 255 255 / calc(var(--l2) * .85)) 0, rgb(255 200 70 / var(--l2)) 1.2px, rgb(255 200 70 / calc(var(--l2) * .92)) 2.5px, rgb(255 200 70 / calc((var(--l2) - .25) * .4)) 3.3px, transparent 6px),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='12' viewBox='0 0 96 12'%3E%3Cpath d='M0 .8Q24 6.8 48 .8Q72 6.8 96 .8' fill='none' stroke='%234a8a68' stroke-width='1.1'/%3E%3Crect x='11' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='23' y='3.60' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='35' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='59' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='71' y='3.60' width='2' height='1.8' fill='%234a8a68'/%3E%3Crect x='83' y='2.85' width='2' height='1.8' fill='%234a8a68'/%3E%3C/svg%3E");
-  background-size: 96px 12px; background-repeat: repeat-x;
-  animation: xl1 1.8s ease-in-out infinite, xl2 1.8s ease-in-out -.6s infinite, xl3 1.8s ease-in-out -1.2s infinite;
+  background: url(art/xmas-garland.svg) 0 0 / 200px 40px repeat-x;
 }
-html[data-season="xmas"] footer, html[data-season="xmas"] .notice, html[data-season="xmas"] .controls, html[data-season="xmas"] .hero-in { position: relative; }
+html[data-season="xmas"][data-theme="light"] .topbar::after,
+html[data-season="xmas"][data-theme="light"] footer::before { background-image: url(art/xmas-garland-light.svg); }
+html[data-season="xmas"] footer { position: relative; }
 
-/* Шапка: провод по нижней кромке, лампочки свисают на страницу. */
-html[data-season="xmas"] .topbar::after { bottom: -11px; }
-/* Подвал: с верхней кромки внутрь, в верхний отступ колонок. */
-html[data-season="xmas"] footer::before { top: 0; animation-delay: -.3s, -.9s, -1.5s; }
-/* Объявления: по нижнему краю полосы, в её нижнем отступе. */
-html[data-season="xmas"] .notice::after { bottom: 0; animation-delay: -.9s, -1.5s, -.3s; }
-/* Строка поиска: по верхнему краю, в верхнем отступе. */
-html[data-season="xmas"] .controls::before { top: 0; animation-delay: -1.2s, -.3s, -.9s; }
-/* Баннер: под заголовком, в нижнем отступе блока текста. */
-html[data-season="xmas"] .hero-in::after { bottom: 0; animation-delay: -.6s, -1.2s, 0s; }
+/* Шапка: провод по нижней кромке, лампы свисают на страницу (ниже кромки 38). */
+html[data-season="xmas"] .topbar::after { bottom: -38px; height: 40px; }
+/* Подвал: с верхней кромки внутрь, в верхний отступ колонок; ниже и мельче,
+   чтобы лампы не дошли до заголовков (отступ 28). */
+html[data-season="xmas"] footer::before { top: 0; height: 26px; background-size: 160px 32px; }
+
+/* --- Баннер: два колокольчика на лентах с качанием (art/xmas-bells.svg, Fluent
+   Emoji + свои банты, качание SMIL внутри файла) и звезда на золотой нити.
+   .hero-in здесь без position, поэтому псевдоэлементы считают от .hero
+   (там relative), верх баннера. Лента уходит под гирлянду шапки: колокольчики
+   как будто висят на её проводе. --- */
+html[data-season="xmas"] .hero-in::before,
+html[data-season="xmas"] .hero-in::after { content: ""; position: absolute; pointer-events: none; z-index: 0; }
+html[data-season="xmas"] .hero-in::before {
+  top: 0; right: max(calc(var(--pad) + 8px), calc((100% - 1280px) / 2 + var(--pad) + 8px));
+  width: 72px; height: 63px;
+  background: url(art/xmas-bells.svg) 0 0 / 72px 63px no-repeat;
+}
+html[data-season="xmas"] .hero-in::after {
+  top: 0; right: max(calc(var(--pad) + 96px), calc((100% - 1280px) / 2 + var(--pad) + 96px));
+  width: 28px; height: 58px;
+  background:
+    linear-gradient(var(--gold-line), var(--gold-line)) 50% 0 / 1px 30px no-repeat,
+    url(art/star.svg) 50% 100% / 26px 26px no-repeat;
+  filter: drop-shadow(0 0 5px rgba(var(--glow-rgb), .6));
+  transform-origin: 50% 0;
+  animation: xmas-star 4.2s ease-in-out infinite;
+}
+@keyframes xmas-star {
+  0%, 100% { transform: rotate(4deg); } 50% { transform: rotate(-4deg); }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  html[data-season="xmas"] body::before { animation: none; will-change: auto; }
-  html[data-season="xmas"] .topbar::after, html[data-season="xmas"] footer::before, html[data-season="xmas"] .notice::after,
-  html[data-season="xmas"] .controls::before, html[data-season="xmas"] .hero-in::after { animation: none; }
+  html[data-season="xmas"] body::before, html[data-season="xmas"] body::after, html[data-season="xmas"]::before { animation: none; will-change: auto; }
+  html[data-season="xmas"] .topbar::after, html[data-season="xmas"] footer::before { background-image: url(art/xmas-garland-static.svg); }
+  html[data-season="xmas"][data-theme="light"] .topbar::after,
+  html[data-season="xmas"][data-theme="light"] footer::before { background-image: url(art/xmas-garland-light-static.svg); }
+  html[data-season="xmas"] .hero-in::before { background-image: url(art/xmas-bells-static.svg); }
+  html[data-season="xmas"] .hero-in::after { animation: none; transform: none; }
 }

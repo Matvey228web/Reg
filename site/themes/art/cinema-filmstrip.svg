@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 28" width="96" height="28">
+<!-- Плёнка 35 мм: два кадра на звено, шаг перфорации 12, звено бесшовное по горизонтали. -->
+<defs>
+<linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b211a"/><stop offset=".5" stop-color="#17100d"/><stop offset="1" stop-color="#2b211a"/></linearGradient>
+<linearGradient id="h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3d1"/><stop offset="1" stop-color="#e6c37c"/></linearGradient>
+<linearGradient id="f" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6b4a2c" stop-opacity=".55"/><stop offset=".5" stop-color="#3a2a1e" stop-opacity=".6"/><stop offset="1" stop-color="#7a5632" stop-opacity=".45"/></linearGradient>
+<g id="p"><rect x="2.8" y="3.8" width="6.6" height="5" rx="1.4" fill="url(#h)" fill-opacity=".9"/><rect x="2.8" y="3.8" width="6.6" height="5" rx="1.4" fill="none" stroke="#050302" stroke-opacity=".55" stroke-width=".5"/></g>
+</defs>
+<rect width="96" height="28" fill="url(#b)"/>
+<rect width="96" height="28" fill="#8a5a2b" fill-opacity=".1"/>
+<path d="M0 1.3H96M0 26.7H96" stroke="#d9a441" stroke-opacity=".38" stroke-width=".6"/>
+<path d="M0 .3H96M0 27.7H96" stroke="#000" stroke-opacity=".5" stroke-width=".6"/>
+<g fill="url(#f)" stroke="#050302" stroke-opacity=".55" stroke-width=".5"><rect x="2" y="10.6" width="44" height="6.8" rx=".5"/><rect x="50" y="10.6" width="44" height="6.8" rx=".5"/></g>
+<path d="M8 12.2l11 3.2M54 16l14-3.4M72 12.4l9 2.4" stroke="#f3d9a0" stroke-opacity=".12" stroke-width=".7" fill="none"/>
+<g id="r"><use href="#p"/><use href="#p" x="12"/><use href="#p" x="24"/><use href="#p" x="36"/><use href="#p" x="48"/><use href="#p" x="60"/><use href="#p" x="72"/><use href="#p" x="84"/></g>
+<use href="#r" y="15.4"/><use href="#r"/>
+<path d="M4 9.6h2M52 9.6h2M4 18.4h2M52 18.4h2" stroke="#e9b44c" stroke-opacity=".3" stroke-width=".5"/>
+</svg>
