@@ -373,6 +373,7 @@ global.Utilities = {
     return Array.from(buf).map(b => (b > 127 ? b - 256 : b));
   },
   getUuid: () => crypto.randomUUID(),
+  sleep() {},
   // Часовой пояс здесь не учитываем: проверяется только вид имени копии.
   formatDate: (d, _tz, _fmt) => d.toISOString().slice(0, 10),
   base64Decode(str) {
@@ -3752,6 +3753,27 @@ check('главный администратор выключает',
 check('и включает обратно',
   call('/settings/set', { settings: { site_seasons: 1 } }, seasonOwner).ok === true &&
   call('/public/announcements', {}).data.seasons === true);
+
+console.log('\n== свежая копия документа недоступна в первую секунду ==');
+{
+  const realOpen = DocumentApp.openById;
+  let calls = 0;
+  DocumentApp.openById = (id) => {
+    calls += 1;
+    if (calls < 3) throw new Error('Auf das Dokument kann nicht zugegriffen werden. Bitte versuchen Sie es später noch einmal.');
+    return { id };
+  };
+  check('openDoc повторяет и дожидается документа', openDoc('d1').id === 'd1' && calls === 3, calls);
+  calls = -10;
+  let thrown = null;
+  try { openDoc('d2'); } catch (e) { thrown = e; }
+  check('после всех попыток — та же ошибка наружу', thrown && /nicht zugegriffen/.test(thrown.message), calls);
+  DocumentApp.openById = () => { calls = 100; throw new Error('Exception: not found'); };
+  thrown = null;
+  try { openDoc('d3'); } catch (e) { thrown = e; }
+  check('другая ошибка — без повторов', thrown && calls === 100);
+  DocumentApp.openById = realOpen;
+}
 
 console.log('\n== нет разрешения Google: понятная фраза вместо страницы на языке аккаунта ==');
 check('немецкий отказ DocumentApp → что нажать',
