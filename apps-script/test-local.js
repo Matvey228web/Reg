@@ -3718,5 +3718,12 @@ check('нет вкладки — публичный ответ пуст, а не
   call('/public/announcements', {}).ok === true && call('/public/announcements', {}).data.items.length === 0,
   call('/public/announcements', {}));
 
+console.log('\n== нет разрешения Google: понятная фраза вместо страницы на языке аккаунта ==');
+check('немецкий отказ DocumentApp → что нажать',
+  /setupTriggers/.test(missingScopeHint(new Error('Sie haben nicht die erforderliche Berechtigung, DocumentApp.openById anzurufen.'))));
+check('английский отказ DriveApp → тоже',
+  /DriveApp/.test(missingScopeHint(new Error('You do not have permission to call DriveApp.getFileById. Required permissions: …'))));
+check('обычная ошибка не подменяется', missingScopeHint(new Error('Cannot read properties of undefined')) === '');
+
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
