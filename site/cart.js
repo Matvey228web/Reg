@@ -160,16 +160,15 @@
             '<input type="tel" id="gphone" inputmode="tel" /></label>' +
         "</div>" +
         '<label class="field"><span class="cap">Проект</span>' +
-          '<input type="text" id="project" placeholder="курсовая, короткий метр…" /></label>' +
+          '<input type="text" id="project" /></label>' +
         '<label class="field"><span class="cap">Мастерская и курс</span>' +
           '<input type="text" id="workshop" /></label>' +
         '<label class="field"><span class="cap">Комментарий</span>' +
           '<textarea id="note" rows="3"></textarea></label>' +
         // Адрес — по желанию: съёмка бывает и в павильоне колледжа. Складу
         // он нужен, чтобы знать, куда уезжает техника.
-        '<label class="field"><span class="cap">Адрес съёмок</span>' +
-          '<input type="text" id="address" autocomplete="off"' +
-            ' placeholder="если снимаете не в колледже" /></label>' +
+        '<label class="field"><span class="cap">Адрес</span>' +
+          '<input type="text" id="address" autocomplete="off" /></label>' +
         // Данные лежат в этом телефоне, и убрать их человек должен уметь сам:
         // на складе один телефон иногда ходит по рукам.
         '<button class="link-danger" type="button" id="forget">Забыть мои данные</button>' +
