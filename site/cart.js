@@ -424,8 +424,8 @@
   // Ссылка на чат склада с заявками. Пока адрес не задан в common.js, кнопки нет.
   function operatorHtml() {
     if (!Site.OPERATOR_URL) return "";
-    return '<a class="btn btn--secondary btn--wide btn--operator" id="operator" hidden' +
-      ' href="' + Site.escapeHtml(Site.OPERATOR_URL) + '" target="_blank"' +
+    return '<a class="btn btn--secondary btn--wide btn--operator" id="operator"' +
+      ' tabindex="-1" href="' + Site.escapeHtml(Site.OPERATOR_URL) + '" target="_blank"' +
       ' rel="noopener">Операторская</a>';
   }
 
@@ -490,6 +490,18 @@
     });
   }
 
+  var CHECK_SVG = '<svg class="send-check" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="M4 12.5l5 5L20 6.5" pathLength="1"/></svg>';
+
+  // Подпись меняется с лёгким всплытием; перезапуск анимации — через reflow.
+  function setLabel(btn, html, raw) {
+    var lab = btn.firstChild;
+    if (raw) lab.innerHTML = html; else lab.textContent = html;
+    lab.classList.remove("is-swap");
+    void lab.offsetWidth;
+    lab.classList.add("is-swap");
+  }
+
   function send() {
     var note = $("sendnote");
     var gaps = missing();
@@ -519,7 +531,7 @@
 
     var btn = $("send");
     btn.disabled = true;
-    btn.firstChild.textContent = "Отправляем…";
+    setLabel(btn, "Отправляем…");
     btn.classList.add("is-sending");
     note.classList.remove("hint--bad");
     note.hidden = true;
@@ -529,9 +541,11 @@
         // Заявка принята — номер израсходован. Иначе вторая заявка из той же
         // вкладки ушла бы под прежним номером и столкнулась с первой.
         code = null;
-        btn.firstChild.textContent = "Отправлено";
+        setLabel(btn, CHECK_SVG + "Отправлено", true);
+        btn.classList.remove("is-sending");
         btn.classList.add("is-done");
-        if ($("operator")) $("operator").hidden = false;
+        var op = $("operator");
+        if (op) { op.classList.add("is-shown"); op.removeAttribute("tabindex"); }
         note.hidden = false;
         note.textContent = res.repeat
           ? "Эта заявка уже принята, номер " + res.order_no + "."
@@ -539,7 +553,7 @@
       })
       .catch(function (err) {
         btn.disabled = false;
-        btn.firstChild.textContent = "Отправить";
+        setLabel(btn, "Отправить");
         btn.classList.remove("is-sending");
         note.hidden = false;
         note.classList.add("hint--bad");
