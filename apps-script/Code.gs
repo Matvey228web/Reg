@@ -5578,7 +5578,7 @@ function buildActTemplate() {
   // Проверяем, что получилось: преобразование делает Google, и молча отдать
   // документ, в котором половина подстановок потерялась, нельзя — по нему
   // потом собираются акты. Не сошлось — убираем черновик и говорим почему.
-  var text = DocumentApp.openById(id).getBody().getText();
+  var text = openDoc(id).getBody().getText();
   var missing = ACT_PLACEHOLDERS.filter(function (k) { return text.indexOf(k) === -1; });
   if (missing.length) {
     try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* остался в Диске */ }
@@ -5765,6 +5765,24 @@ function handleActBuild(payload, token) {
   return buildAct(String(payload.order_id || ""), staffRow.full_name);
 }
 
+// Свежую копию документа Google отдаёт не сразу: DocumentApp.openById в ту же
+// секунду отвечает «Документ недоступен, попробуйте позже» (так падали акты
+// 2 октября 2026). Ждём и повторяем; иная ошибка — сразу наружу.
+var OPEN_DOC_WAITS_MS = [1500, 3000, 6000];
+
+function openDoc(id) {
+  for (var i = 0; ; i++) {
+    try {
+      return DocumentApp.openById(id);
+    } catch (err) {
+      var busy = /nicht zugegriffen|inaccessible|try again later|später noch einmal|недоступ/i
+        .test(String(err && err.message));
+      if (!busy || i >= OPEN_DOC_WAITS_MS.length) throw err;
+      Utilities.sleep(OPEN_DOC_WAITS_MS[i]);
+    }
+  }
+}
+
 function buildAct(orderId, masterName) {
   var settings = getSettings();
   var templateId = String(settings.act_template_id || "");
@@ -5796,7 +5814,7 @@ function buildAct(orderId, masterName) {
       ". Проверьте идентификатор шаблона в настройках");
   }
 
-  fillAct(DocumentApp.openById(copy.getId()), order, orderId, lines, settings, stamp, masterName);
+  fillAct(openDoc(copy.getId()), order, orderId, lines, settings, stamp, masterName);
   var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
 
   // Ссылку держим в строке заказа: карточка показывает её без обращения к
@@ -5841,7 +5859,7 @@ function rebuildAct(orderId, masterName) {
 
   var docId = (oldUrl.match(/\/document\/d\/([^\/?#]+)/) || [])[1] || "";
   var doc = null;
-  try { if (docId) doc = DocumentApp.openById(docId); } catch (e) { doc = null; }
+  try { if (docId) doc = openDoc(docId); } catch (e) { doc = null; }
   if (!doc) {
     var fresh = buildAct(orderId, masterName);
     fresh.same_document = false;
@@ -5853,7 +5871,7 @@ function rebuildAct(orderId, masterName) {
   var stamp = (String(doc.getName ? doc.getName() : "")
     .match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/) || [])[0] || actStamp();
 
-  resetActBody(doc.getBody(), DocumentApp.openById(templateId).getBody());
+  resetActBody(doc.getBody(), openDoc(templateId).getBody());
   fillAct(doc, order, orderId, lines, settings, stamp, masterName);
   return {
     url: oldUrl, document_id: docId, lines: lines.length, same_document: true,
