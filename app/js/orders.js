@@ -66,24 +66,27 @@ const OrdersScreen = (() => {
     return `
       <div class="card" data-order-id="${order.order_id}">
         <div class="card-title">
-          <span class="order-no"><span class="order-no-sign">№</span>${escapeHtml(order.order_no)}</span>
+          ${orderNoHtml(order)}
           ${statusChip(order.status)}
           ${overdue ? `<span class="badge badge--open">Просрочен</span>` : ""}
         </div>
         <div class="card-sub">${escapeHtml(order.student_name || "—")}${order.is_adult ? "" : " · с представителем"}</div>
         <div class="card-sub">${parts.join(" · ")}</div>
-        ${quickRowHtml(order)}
       </div>`;
   }
 
-  // Быстрое действие в списке — акт: его смотрят перед выдачей, стоя у полки.
-  // Кнопку не показываем пустой: нет акта — нет кнопки, и сразу видно, что
-  // шаблон не создан. Чат и архив — смахиванием строки (rowActions ниже):
-  // кнопка «Чат» под каждой строкой занимала место у всех ради одного тапа.
-  function quickRowHtml(order) {
+  // Акт открывается нажатием на номер заказа: его смотрят перед выдачей,
+  // стоя у полки, а отдельная кнопка «Акт» под каждой строкой занимала место.
+  // Номер-ссылка окрашен как ссылка; нет акта — обычный номер, и сразу
+  // видно, что шаблон не создан. Остальная строка открывает карточку, чат и
+  // архив — смахиванием (rowActions ниже). Так же номер и ник — сами кнопки
+  // в карточке заказа (order.js, contactRow).
+  function orderNoHtml(order) {
+    const no = `<span class="order-no-sign">№</span>${escapeHtml(order.order_no)}`;
     return order.act_url
-      ? `<div class="quick-row"><button class="chip-btn" type="button" data-act-url="${escapeHtml(order.act_url)}">Акт</button></div>`
-      : "";
+      ? `<button class="order-no order-no--link" type="button" data-act-url="${escapeHtml(order.act_url)}"
+           aria-label="Открыть акт заказа №${escapeHtml(order.order_no)}">${no}</button>`
+      : `<span class="order-no">${no}</span>`;
   }
 
   // Один слушатель на список, и вешается он один раз — в init: элемент списка

@@ -1726,31 +1726,21 @@ select {
   color: var(--accent); font: inherit; font-size: 15px; cursor: pointer;
 }
 
-/* --- Быстрое действие: акт в строке списка заказов --- */
-/* Кнопки мелкие по площади, но не мелкие для пальца: высота 36, отступы
-   внутрь, и между ними зазор, чтобы не промахнуться по соседней. */
-.quick-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-.chip-btn {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  text-decoration: none;
-  padding: 0 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  color: var(--accent);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 600;
+/* Номер заказа в списке — ссылка на акт (orders.js, orderNoHtml). Кнопка
+   без вида кнопки: цвет ссылки и пунктир снизу подсказывают, что номер
+   нажимается; поля вокруг расширяют площадь под палец. */
+.order-no--link {
+  background: none; border: 0; padding: 6px 4px; margin: -6px 0 -6px -4px;
+  width: auto; min-width: 0; min-height: 0; flex: none; display: inline;
+  font: inherit; font-family: var(--font-mono); color: var(--accent);
+  text-decoration: underline dotted; text-underline-offset: 4px;
   cursor: pointer;
 }
-.chip-btn:active { background: var(--surface-strong); }
+.order-no--link:active { opacity: .6; }
+/* Номер-кнопка не span, и правило «первый значок — вправо» (.card-title
+   .badge:first-of-type) сработало бы на статус. Держим его рядом с номером,
+   как в строках без акта. */
+.card-title .order-no--link ~ .badge { margin-left: 0; }
 
 /* Номер и ник в карточке заказа — сам текст и есть кнопка: нажатие на номер
    копирует его, на ник — открывает переписку. Цвет ссылки подсказывает, что
