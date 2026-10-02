@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+<!-- Хлопушка контуром: тонкая золотая линия. Планка раз открывается и захлопывается, дальше закрыта. -->
+<g fill="none" stroke="#d9a441" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+<rect x="5" y="13.5" width="22" height="14.5" rx="1"/>
+<path d="M5 18H27M10 18l3-4.5M16 18l3-4.5M22 18l3-4.5" stroke-width="1.2"/>
+<g transform="rotate(0 5 12)"><animateTransform attributeName="transform" type="rotate" begin="1s" dur="1.2s" fill="freeze" calcMode="spline" keyTimes="0;.45;.78;1" keySplines=".2 .7 .3 1;.5 0 .5 1;.9 0 1 .6" values="0 5 12;-24 5 12;-24 5 12;0 5 12"/><rect x="5" y="7.5" width="22" height="4.5" rx="1"/><path d="M10 12l3-4.5M16 12l3-4.5M22 12l3-4.5" stroke-width="1.2"/></g>
+</g>
+</svg>

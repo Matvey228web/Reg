@@ -1,0 +1,264 @@
+/* Сезонная тема «Хэллоуин» (25 октября — 1 ноября). Грузится после style.css
+ * (см. theme.js), поэтому каждое правило начинается с html[data-season="halloween"]:
+ * специфичность выше базовой. Кинематографичный хоррор-постер, не мультяшный:
+ * почти чёрный фиолет, тыквенный оранжевый на действии, пурпурный туман.
+ * Только CSS и инлайн-SVG; движется только transform и opacity; при
+ * prefers-reduced-motion анимаций нет.
+ *
+ * Контраст (расчёт WCAG):
+ *  тёмная: ink на bg 17.1; dim на bg 7.3, на panel 6.7; белый на accent 4.76;
+ *          accent-text на bg 8.3, на panel 7.7.
+ *  светлая: ink на bg 15.1; dim на bg 6.5, на panel 7.7; белый на accent 4.76;
+ *          accent-text на bg 5.0, на panel 5.9. */
+
+/* --- Токены: тёмная (по умолчанию) --- */
+html[data-season="halloween"] {
+  --bg: #0f0a16;
+  --panel: #170f21;
+  --line: #2f2142;
+  --ink: #f3eef8;
+  --dim: #a698b8;
+  --accent: #c9480c;
+  --accent-text: #ff8a3d;
+  --on-accent: #fff;
+  --shot: #130c1c;
+  --veil-rgb: 15, 10, 22;
+  --img-filter: saturate(1) brightness(1.08);
+
+  --hw-fog: 112, 60, 175;        /* цвет тумана */
+  --hw-fog-a: .26;               /* плотность тумана */
+  --hw-glow: 255, 120, 30;       /* свет фонаря */
+}
+
+/* --- Токены: светлая --- */
+html[data-season="halloween"][data-theme="light"] {
+  --bg: #eee9f5;
+  --panel: #ffffff;
+  --line: #d3c9e2;
+  --ink: #1c1030;
+  --dim: #5a4d6e;
+  --accent: #c9480c;
+  --accent-text: #b03d08;
+  --on-accent: #fff;
+  --shot: #e3dcee;
+  --veil-rgb: 238, 233, 245;
+  --img-filter: saturate(.9) brightness(1.05);
+
+  --hw-fog: 150, 110, 210;
+  --hw-fog-a: .30;
+  --hw-glow: 255, 140, 50;
+}
+
+/* --- Туман: два больших слоя за содержимым, медленно плывут --- */
+/* Слои шире экрана и двигаются только transform: перерисовки нет, работает
+   композитор. Фиксированы и позади всего (z-index -1, pointer-events none). */
+html[data-season="halloween"] body::before,
+html[data-season="halloween"] body::after {
+  content: ""; position: fixed; inset: -30%; z-index: -1; pointer-events: none;
+  will-change: transform;
+}
+html[data-season="halloween"] body::before {
+  background:
+    radial-gradient(40% 30% at 20% 30%, rgba(var(--hw-fog), var(--hw-fog-a)), transparent 70%),
+    radial-gradient(35% 28% at 75% 20%, rgba(var(--hw-fog), calc(var(--hw-fog-a) * .7)), transparent 70%),
+    radial-gradient(45% 32% at 60% 80%, rgba(var(--hw-fog), var(--hw-fog-a)), transparent 70%);
+  animation: hw-fog-a 52s ease-in-out infinite alternate;
+}
+html[data-season="halloween"] body::after {
+  background:
+    radial-gradient(38% 30% at 80% 60%, rgba(var(--hw-fog), calc(var(--hw-fog-a) * .8)), transparent 70%),
+    radial-gradient(42% 30% at 25% 85%, rgba(var(--hw-fog), calc(var(--hw-fog-a) * .6)), transparent 70%);
+  animation: hw-fog-b 44s ease-in-out infinite alternate;
+}
+@keyframes hw-fog-a {
+  from { transform: translate3d(-6%, 2%, 0) scale(1); }
+  to   { transform: translate3d(7%, -4%, 0) scale(1.12); }
+}
+@keyframes hw-fog-b {
+  from { transform: translate3d(6%, -3%, 0) scale(1.1); }
+  to   { transform: translate3d(-8%, 4%, 0) scale(1); }
+}
+
+/* --- Баннер: ведьма с фонарём --- */
+/* Как в style.css: узкому экрану — лёгкий снимок, от 720 — большой. Завесу
+   (.hero::after) не трогаем, она держит заголовок читаемым; к снимку добавлен
+   тёплый свет у фонаря, и вся картинка мерцает, как от свечи (opacity). */
+html[data-season="halloween"] .hero::before {
+  background:
+    url(art/halloween-moon.svg) right -46px top -44px / 170px 170px no-repeat,
+    radial-gradient(circle at 82% 66%, rgba(var(--hw-glow), .28), transparent 38%),
+    url(../img/season-halloween-m.jpg) 62% 36% / cover no-repeat;
+  filter: var(--img-filter);
+  animation: hw-flicker 7s linear infinite;
+}
+html[data-season="halloween"] .hero::after {
+  background:
+    linear-gradient(to bottom, rgba(var(--veil-rgb), .12) 0%, rgba(var(--veil-rgb), .5) 62%, var(--bg) 100%),
+    linear-gradient(to right, rgba(var(--veil-rgb), .62), rgba(var(--veil-rgb), 0) 70%);
+}
+/* Светлая тема: баннер остаётся тёмным «кадром» на светлой странице (снимок
+   тёмный, на светлой завесе он превращался в грязно-серое пятно). Завеса тёмная,
+   текст на нём светлый, внизу жёсткая кромка вместо растворения в фон. */
+html[data-season="halloween"][data-theme="light"] .hero::before { filter: saturate(1) brightness(1.05); }
+html[data-season="halloween"][data-theme="light"] .hero::after {
+  background:
+    linear-gradient(to bottom, rgba(15, 10, 22, .1) 0%, rgba(15, 10, 22, .72) 100%),
+    linear-gradient(to right, rgba(15, 10, 22, .5), rgba(15, 10, 22, 0) 70%);
+}
+html[data-season="halloween"][data-theme="light"] .hero { border-bottom: 1px solid var(--line); }
+html[data-season="halloween"][data-theme="light"] .hero h1,
+html[data-season="halloween"][data-theme="light"] .hero p { color: #f6f1fb; }
+@media (min-width: 720px) {
+  html[data-season="halloween"] .hero::before {
+    background:
+      url(art/halloween-moon.svg) right 40px top -70px / 260px 260px no-repeat,
+      radial-gradient(circle at 82% 78%, rgba(var(--hw-glow), .28), transparent 34%),
+      url(../img/season-halloween.jpg) 62% 40% / cover no-repeat;
+  }
+}
+/* Неровное мерцание: короткие провалы и всплески, а не ровное дыхание. */
+@keyframes hw-flicker {
+  0%, 100% { opacity: 1; }
+  8%  { opacity: .9; }
+  12% { opacity: .97; }
+  21% { opacity: .84; }
+  27% { opacity: .95; }
+  38% { opacity: .88; }
+  41% { opacity: 1; }
+  57% { opacity: .92; }
+  63% { opacity: .82; }
+  68% { opacity: .96; }
+  82% { opacity: .89; }
+  90% { opacity: .98; }
+}
+html[data-season="halloween"] .hero h1 {
+  text-shadow: 0 0 22px rgba(var(--hw-glow), .35), 0 1px 0 rgba(var(--veil-rgb), .6);
+}
+
+/* Летучие мыши: свой рисунок art/halloween-bats.svg. Стая в нём сама машет
+   крыльями (SMIL) и пролетает один раз за ~12 с, потом стоит за краем кадра, так
+   что здесь только место и размер. Элемент — во всю ширину баннера, ни на что не
+   давит (absolute, pointer-events none), сдвига вёрстки нет. При
+   prefers-reduced-motion вместо полёта — неподвижная стая в кадре. */
+html[data-season="halloween"] .hero-in::before {
+  content: ""; position: absolute; left: 0; top: 10px; width: 100%; height: 104px;
+  background: url(art/halloween-bats.svg) center top / auto 100% no-repeat;
+  pointer-events: none;
+}
+@media (min-width: 720px) {
+  html[data-season="halloween"] .hero-in::before { top: 14px; height: 170px; }
+}
+
+/* Тлеющие искры: редкие мелкие оранжевые точки медленно поднимаются слева над
+   заголовком и гаснут (один слой, двигается только transform и opacity). Лежат в
+   углу баннера, а не в .hero-in: тот прижат книзу и по высоте равен тексту. */
+html[data-season="halloween"] .hero-in::after {
+  content: ""; position: absolute; left: 0; top: 40px; width: 150px; height: 130px;
+  background:
+    radial-gradient(circle at 24px 96px, rgba(var(--hw-glow), .9) 0 1.4px, transparent 2.4px),
+    radial-gradient(circle at 70px 60px, rgba(var(--hw-glow), .7) 0 1px, transparent 2px),
+    radial-gradient(circle at 112px 104px, rgba(var(--hw-glow), .85) 0 1.2px, transparent 2.2px),
+    radial-gradient(circle at 46px 28px, rgba(var(--hw-glow), .6) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 128px 40px, rgba(var(--hw-glow), .7) 0 1.1px, transparent 2px);
+  pointer-events: none; opacity: 0;
+  animation: hw-embers 9s ease-out infinite;
+}
+@media (min-width: 720px) {
+  html[data-season="halloween"] .hero-in::after { left: max(0px, calc((100% - 1280px) / 2)); width: 200px; top: 50px; height: 170px; }
+}
+@keyframes hw-embers {
+  0%   { opacity: 0; transform: translate3d(0, 34px, 0); }
+  15%  { opacity: .8; }
+  70%  { opacity: .5; }
+  100% { opacity: 0; transform: translate3d(8px, -26px, 0); }
+}
+
+/* --- Паутина: угол шапки и угол подвала, паучок на нити --- */
+/* Рисунок art/halloween-web.svg (лучи и провисающие нити, обводка лавандовая,
+   наполовину прозрачная). Под содержимым (z-index -1 внутри собственного
+   контекста шапки/подвала), не ловит нажатий. В светлой теме обводка темнеет
+   фильтром: тот же файл, без второго набора. */
+html[data-season="halloween"] .topbar::before,
+html[data-season="halloween"] footer::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  width: 96px; height: 96px;
+  background: url(art/halloween-web.svg) 0 0 / 96px 96px no-repeat;
+  opacity: .85;
+}
+html[data-season="halloween"] .topbar::before { top: 0; left: 0; height: 56px; }
+html[data-season="halloween"] footer { position: relative; isolation: isolate; overflow: hidden; }
+html[data-season="halloween"] footer::before { right: 0; bottom: 0; transform: scale(-1, -1); opacity: .65; }
+html[data-season="halloween"][data-theme="light"] .topbar::before,
+html[data-season="halloween"][data-theme="light"] footer::before { filter: brightness(.3) saturate(1.4); }
+html[data-season="halloween"][data-theme="light"] .topbar::before { opacity: .7; }
+html[data-season="halloween"][data-theme="light"] footer::before { opacity: .5; }
+
+/* Тонкий силуэт паучка (art/halloween-spider.svg) спускается с кромки шапки
+   у правого края. Нить (::before) и паук
+   (::after) качаются одним ритмом и одной кривой: нить вытягивается на столько
+   же, на сколько паук опускается, поэтому не рвётся и не торчит. Нить лежит под
+   содержимым шапки, паук ниже её кромки — над баннером. Двигается только
+   transform. */
+html[data-season="halloween"] .topbar-in { position: relative; }
+html[data-season="halloween"] .topbar-in::before,
+html[data-season="halloween"] .topbar-in::after {
+  content: ""; position: absolute; pointer-events: none;
+  animation: 5s ease-in-out infinite alternate;
+}
+html[data-season="halloween"] .topbar-in::before {
+  z-index: -1; top: 0; right: 13px; width: 1px; height: 70px;
+  background: var(--dim); opacity: .6;
+  transform-origin: 50% 0;
+  animation-name: hw-thread;
+}
+html[data-season="halloween"] .topbar-in::after {
+  z-index: -1; top: 62px; right: 2px; width: 24px; height: 24px;
+  background: url(art/halloween-spider.svg) center / contain no-repeat;
+  animation-name: hw-spider;
+}
+@keyframes hw-thread { from { transform: scaleY(.857); } to { transform: scaleY(1); } }
+@keyframes hw-spider { from { transform: translateY(-10px); } to { transform: translateY(0); } }
+
+/* Луна: приглушённая, с ореолом, в углу баннера под завесой (art/halloween-moon.svg
+   — Fluent Emoji full-moon). Лежит в слое снимка, отдельного элемента нет. */
+
+/* --- Тыквенные тонкие линии --- */
+html[data-season="halloween"] .topbar {
+  border-bottom-color: rgba(var(--hw-glow), .4);
+  box-shadow: 0 1px 0 rgba(var(--hw-glow), .08), 0 6px 18px -10px rgba(var(--hw-glow), .35);
+}
+html[data-season="halloween"] footer { border-top-color: rgba(var(--hw-glow), .35); }
+html[data-season="halloween"] .grid,
+html[data-season="halloween"] .controls {
+  border-color: var(--line);
+}
+html[data-season="halloween"] .section--on { border-bottom-color: var(--accent); }
+html[data-season="halloween"] .add:hover { border-color: var(--accent); }
+html[data-season="halloween"] .cell:hover { box-shadow: 0 0 0 1px rgba(var(--hw-glow), .55); position: relative; }
+
+/* Подпись логотипа и «40» в тон тумана, а не серым. */
+html[data-season="halloween"] .wordmark { --lk-num-color: var(--accent-text); }
+
+/* Нажатие: тёплый свет под пальцем, как у фонаря. */
+html[data-season="halloween"] .cart-link:active,
+html[data-season="halloween"] .btn:active { filter: brightness(.85); }
+
+/* Календарь даты/времени: иконка берёт тон темы. */
+html[data-season="halloween"][data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+html[data-season="halloween"][data-theme="light"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: opacity(.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-season="halloween"] body::before,
+  html[data-season="halloween"] body::after,
+  html[data-season="halloween"] .hero::before,
+  html[data-season="halloween"] .hero-in::after,
+  html[data-season="halloween"] .topbar-in::before,
+  html[data-season="halloween"] .topbar-in::after { animation: none !important; will-change: auto; }
+  /* Вместо полёта — неподвижная стая в кадре, искры стоят. */
+  html[data-season="halloween"] .hero-in::before {
+    background-image: url(art/halloween-bats-static.svg); opacity: .9;
+  }
+  html[data-season="halloween"] .hero-in::after { opacity: .6; transform: none; }
+}

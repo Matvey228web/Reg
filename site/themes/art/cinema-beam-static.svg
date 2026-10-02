@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 360" preserveAspectRatio="none" width="240" height="360">
+<!-- Луч проектора: мягкая трапеция и пылинки, плывущие вверх по лучу. -->
+<defs>
+<linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff1cf" stop-opacity=".55"/><stop offset=".6" stop-color="#ffe3a6" stop-opacity=".2"/><stop offset="1" stop-color="#ffe3a6" stop-opacity=".04"/></linearGradient>
+<linearGradient id="w" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<mask id="k"><polygon points="92,0 138,0 238,360 -8,360" fill="url(#w)"/></mask>
+<filter id="f" x="-20%" y="-5%" width="140%" height="110%"><feGaussianBlur stdDeviation="5"/></filter>
+</defs>
+<g filter="url(#f)"><rect width="240" height="360" fill="url(#v)" mask="url(#k)"/></g>
+<polygon points="104,0 128,0 182,360 52,360" fill="url(#v)" opacity=".55" filter="url(#f)"/>
+<g fill="#fff6dc">
+<circle cx="115" cy="180" r="1.6" opacity=".6"/>
+<circle cx="85" cy="190" r="1.1" opacity=".6"/>
+<circle cx="154" cy="170" r="1.3" opacity=".6"/>
+<circle cx="134" cy="150" r="0.9" opacity=".6"/>
+<circle cx="101" cy="200" r="1.4" opacity=".6"/>
+<circle cx="168" cy="190" r="1.0" opacity=".6"/>
+<circle cx="124" cy="140" r="0.8" opacity=".6"/>
+</g>
+</svg>
