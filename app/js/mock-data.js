@@ -1770,15 +1770,15 @@ const MockAPI = {
       }
 
       case "/staff/delete": {
-        const me = MockStore.findStaffById(MockStore.requireAdmin(token).staff_id);
-        const target = MockStore.staff.find((x) => String(x.staff_id) === String(body.staff_id));
+        const me = MockStore.requireOwner(token);
+        const target = MockStore.findStaffById(body.staff_id);
         if (!target) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
         if (String(target.staff_id) === String(me.staff_id)) {
           const e = new Error("Нельзя удалить самого себя"); e.status = 409; throw e;
         }
-        if (target.role === "Admin" &&
-            MockStore.staff.filter((x) => x.role === "Admin" && x.active).length <= 1) {
-          const e = new Error("Это последний администратор, удалить нельзя"); e.status = 409; throw e;
+        if (String(target.staff_id) === String(MockStore.ownerId())) {
+          const e = new Error("Главного администратора удалить нельзя — права можно только передать");
+          e.status = 409; throw e;
         }
         MockStore.rotateToken(target.staff_id, false);
         MockStore.staff.splice(MockStore.staff.indexOf(target), 1);
@@ -1804,6 +1804,9 @@ const MockAPI = {
         } else if (me.role !== "Admin") {
           const e = new Error("Менять PIN другому сотруднику может только администратор");
           e.status = 403; throw e;
+        } else if (String(targetId) === String(MockStore.ownerId())) {
+          const e = new Error("PIN главного администратора меняет только он сам");
+          e.status = 409; throw e;
         }
         target.pin = newPin;
         const rotated = MockStore.rotateToken(target.staff_id, isSelf);
@@ -1828,21 +1831,6 @@ const MockAPI = {
         }
         s.active = !!body.active;
         return { staff_id: s.staff_id, full_name: s.full_name, active: s.active };
-      }
-
-      case "/staff/delete": {
-        const me = MockStore.requireOwner(token);
-        const s = MockStore.findStaffById(body.staff_id);
-        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
-        if (String(s.staff_id) === String(me.staff_id)) {
-          const e = new Error("Нельзя удалить самого себя"); e.status = 409; throw e;
-        }
-        if (String(s.staff_id) === String(MockStore.ownerId())) {
-          const e = new Error("Главного администратора удалить нельзя — права можно только передать");
-          e.status = 409; throw e;
-        }
-        MockStore.staff.splice(MockStore.staff.indexOf(s), 1);
-        return { staff_id: s.staff_id, full_name: s.full_name };
       }
 
       case "/staff/set-role": {
@@ -1870,31 +1858,6 @@ const MockAPI = {
         s.role = "Admin";
         MockStore.setOwnerId(s.staff_id);
         return { staff_id: s.staff_id, full_name: s.full_name };
-      }
-
-      case "/staff/set-pin": {
-        const meId = MockStore.requireToken(token);
-        const me = MockStore.findStaffById(meId);
-        const targetId = body.staff_id === undefined || body.staff_id === null || body.staff_id === ""
-          ? meId : body.staff_id;
-        const s = MockStore.findStaffById(targetId);
-        if (!s) { const e = new Error("Сотрудник не найден"); e.status = 404; throw e; }
-        if (!/^\d{6}$/.test(String(body.pin || ""))) {
-          const e = new Error("PIN — ровно 6 цифр"); e.status = 400; throw e;
-        }
-        if (String(targetId) === String(meId)) {
-          if (String(body.current_pin || "") !== s.pin) {
-            const e = new Error("Текущий PIN указан неверно"); e.status = 403; throw e;
-          }
-        } else if (me.role !== "Admin") {
-          const e = new Error("Менять PIN другому сотруднику может только администратор");
-          e.status = 403; throw e;
-        } else if (String(targetId) === String(MockStore.ownerId())) {
-          const e = new Error("PIN главного администратора меняет только он сам");
-          e.status = 409; throw e;
-        }
-        s.pin = String(body.pin);
-        return { staff_id: s.staff_id };
       }
 
       default: {

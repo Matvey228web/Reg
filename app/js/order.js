@@ -242,8 +242,10 @@ const OrderScreen = (() => {
              создан шаблон.</p>`}
 
       ${o.archived_at
-        ? `<button class="btn btn--secondary" id="order-archive"
-                   style="margin-top:8px;">Вернуть из архива</button>
+        ? `${(Auth.getSession() || {}).role === "Admin"
+             ? `<button class="btn btn--secondary" id="order-archive"
+                   style="margin-top:8px;">Вернуть из архива</button>`
+             : ""}
            <p class="hint">Заказ в архиве: в общем списке его не видно,
              но он цел — состав, даты, исходный текст.</p>`
         : ""}

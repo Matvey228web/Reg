@@ -184,6 +184,64 @@ ok("недоступная таблица объясняет причину, а 
    r.data.ok === false && /Нет связи с таблицей/.test(r.data.error), r.data);
 globalThis.fetch = savedFetch;
 
+console.log("\n== публичная ручка токен не подтверждает ==");
+// Сайт отвечает ok на любой токен: таблица его там не проверяет. Иначе
+// выдуманный токен, пройдя через каталог, получал бы кэш складских списков.
+upstream.reply = listReply([{ item_id: "010101" }]);
+await call("/equipment/list", { category: "all" }, "tok-1");          // прогрели
+upstream.reply = { ok: true, data: { models: [] }, error: null, status: 200 };
+await call("/public/catalog", { from: "2026-10-05", to: "2026-10-06" }, "выдумка");
+await call("/public/announcements", { probe: "токен" }, "выдумка");
+ok("после публичных ручек токен не подтверждён",
+   (await env.CACHE.get("sess:выдумка")) === null);
+upstream.calls = [];
+upstream.reply = { ok: false, data: null, error: "Требуется вход", status: 401 };
+r = await call("/equipment/list", { category: "all" }, "выдумка");
+ok("и кэш склада ему не достаётся", r.data.status === 401 && upstream.calls.length === 1, r.data);
+
+console.log("\n== список сотрудников — у каждого свой ==");
+// Таблица отдаёт его только админу. Общий ключ раздал бы ответ админа
+// складмену мимо проверки роли.
+await env.CACHE.put("sess:admin-1", "1");
+await env.CACHE.put("sess:sklad-1", "1");
+upstream.reply = listReply([{ login: "boss", role: "Admin" }]);
+await call("/staff/list", {}, "admin-1");
+r = await call("/staff/list", {}, "admin-1");
+ok("админу — из кэша", r.cache === "hit", r.cache);
+upstream.reply = { ok: false, data: null, error: "Только для администратора", status: 403 };
+r = await call("/staff/list", {}, "sklad-1");
+ok("складмену — не из кэша админа, а отказ таблицы", r.cache === "miss" && r.data.status === 403, r);
+
+console.log("\n== запись без ответа таблицы тоже сбрасывает кэш ==");
+// Таблица могла записать и не успеть ответить: исход неизвестен.
+upstream.reply = listReply([{ item_id: "010101", status: "Available" }]);
+await call("/equipment/list", { category: "all" }, "tok-1");
+r = await call("/equipment/list", { category: "all" }, "tok-1");
+ok("прогрето", r.cache === "hit", r.cache);
+const savedDown = globalThis.fetch;
+globalThis.fetch = async () => { throw new Error("connect reset"); };
+r = await call("/transaction/checkout", { item_id: "010101" }, "tok-1");
+globalThis.fetch = savedDown;
+ok("запись получила 502", r.data.status === 502, r.data);
+r = await call("/equipment/list", { category: "all" }, "tok-1");
+ok("и после неё каталог перечитан", r.cache === "miss", r.cache);
+
+console.log("\n== чтение, начатое до записи, не ложится в новое поколение ==");
+// Пока таблица отвечает на чтение, кто-то выдаёт вещь. Старый ответ не должен
+// стать «свежим» кэшем под новым поколением.
+upstream.reply = (body) => {
+  if (body.endpoint === "/equipment/list") {
+    // Запись успевает пройти, пока таблица собирает ответ на чтение.
+    env.CACHE.store.set("gen", { value: String(Number(env.CACHE.store.get("gen")?.value || 0) + 1), expires: 0 });
+    return listReply([{ item_id: "010101", status: "Available" }]);
+  }
+  return { ok: true, data: {}, error: null, status: 200 };
+};
+await call("/equipment/list", { category: "race" }, "tok-1");
+upstream.reply = listReply([{ item_id: "010101", status: "Rented" }]);
+r = await call("/equipment/list", { category: "race" }, "tok-1");
+ok("следующее чтение идёт в таблицу", r.cache === "miss" && r.data.data[0].status === "Rented", r);
+
 console.log("== заявка с сайта: отказ на месте, без таблицы ==");
 const goodOrder = (no) => [
   "Заказ №" + no,
@@ -222,6 +280,12 @@ ok("ответ успешный и с номером",
    r.data.ok === true && r.data.data.order_no === "260101-0001", r.data);
 ok("заявка доставлена в таблицу", upstream.calls.includes("/public/order"), upstream.calls);
 ok("из очереди убрана после успеха", qKeys().length === 0, qKeys());
+{
+  const genBefore = Number(await env.CACHE.get("gen")) || 0;
+  await call("/public/order", { raw_text: goodOrder("260101-0011") });
+  ok("доставленная заявка сбрасывает кэш (заказы, наличие)",
+     (Number(await env.CACHE.get("gen")) || 0) > genBefore);
+}
 
 console.log("== повтор не плодит заявок ==");
 // Ответ мгновенный, и кнопку жмут второй раз.

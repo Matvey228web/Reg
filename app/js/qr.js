@@ -164,6 +164,123 @@ const QR = (() => {
     TG.closeScanQr();
   }
 
+  // На этикетке номер напечатан группами — «01 01 01»: так его диктуют и
+  // набирают. Пробелы и дефисы поэтому просто выкидываем, иначе человек вводит
+  // ровно то, что видит, и получает «предмет не найден».
+  function normalize(raw) {
+    return String(raw == null ? "" : raw).replace(/[\s\-]/g, "");
+  }
+
+  // showScanQrPopup в SDK есть на всех платформах, но камера — только у
+  // телефона: на Telegram Desktop и в веб-версии окно сканера не открывается.
+  // «unknown» — страница открыта не из Telegram (обычный браузер).
+  const DESKTOP = ["tdesktop", "web", "weba", "webk", "macos", "unknown"];
+
+  function isDesktop() {
+    return DESKTOP.indexOf(TG.platform()) !== -1;
+  }
+
+  function canCamera() {
+    return TG.hasScanQr() && !isDesktop();
+  }
+
+  // Сканер штрихкодов (USB или Bluetooth) притворяется клавиатурой: печатает
+  // номер и жмёт Enter. Отличаем его от человека по скорости: сканер выдаёт
+  // знак за 5–30 мс, человек — за 100 мс и дольше.
+  const WEDGE_GAP = 50;    // быстрее этого человек не печатает
+  const WEDGE_IDLE = 100;  // столько тишины — и очередь сброшена
+  // Первые знаки ещё нельзя отличить от человеческих, и они попадают в поле.
+  // Перехватываем с третьего: два быстрых нажатия у человека бывают, три — нет.
+  const WEDGE_MIN = 3;
+
+  // wedge(onCode, when): onCode(code) — на каждый номер от сканера.
+  // when(target) — брать ли очередь, начатую в этом элементе; без него берём
+  // любую. Возвращает отписку.
+  function wedge(onCode, when) {
+    let buf = "", last = 0, held = false, field = null, before = null, timer = null;
+
+    function reset() {
+      clearTimeout(timer);
+      buf = ""; held = false; field = null; before = null;
+    }
+
+    // Вернуть поле к тому, что было до очереди. С text — как если бы его
+    // напечатали руками, без text — как будто очереди не было вовсе.
+    function restore(text) {
+      if (!field || !before) return;
+      const typed = text == null ? before.value
+        : before.value.slice(0, before.start) + text + before.value.slice(before.end);
+      const at = text == null ? before.end : before.start + text.length;
+      field.value = typed;
+      try { field.setSelectionRange(at, at); } catch (ignored) {}
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    // Очередь кончилась без Enter: сканер так не делает, но если это был он
+    // без суффикса — перехваченные знаки возвращаем в поле, а не теряем.
+    function idle() {
+      if (held) restore(buf);
+      reset();
+    }
+
+    function onKey(e) {
+      const now = Date.now();
+      if (e.key === "Enter") {
+        if (buf.length >= WEDGE_MIN && now - last < WEDGE_IDLE) {
+          // Иначе Enter дойдёт до поля и кнопок, и номер примут второй раз.
+          e.preventDefault();
+          e.stopPropagation();
+          const code = normalize(buf);
+          restore();
+          reset();
+          if (code) onCode(code);
+          return;
+        }
+        reset();
+        return;
+      }
+      if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || e.repeat || e.isComposing) {
+        if (held) restore(buf);
+        reset();
+        return;
+      }
+      if (buf && now - last < WEDGE_GAP) {
+        buf += e.key;
+        if (buf.length >= WEDGE_MIN) {
+          e.preventDefault();
+          e.stopPropagation();
+          held = true;
+        }
+      } else {
+        if (held) restore(buf);
+        reset();
+        if (when && !when(e.target)) return;
+        buf = e.key;
+        const t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA") && typeof t.value === "string") {
+          field = t;
+          const len = t.value.length;
+          let start = len, end = len;
+          try {
+            if (t.selectionStart != null) { start = t.selectionStart; end = t.selectionEnd; }
+          } catch (ignored) {}
+          before = { value: t.value, start, end };
+        }
+      }
+      last = now;
+      clearTimeout(timer);
+      timer = setTimeout(idle, WEDGE_IDLE);
+    }
+
+    // Перехват на погружении: обработчики полей (подсказки suggest.js, Enter
+    // в поле ввода) не должны увидеть ни очередь, ни её Enter.
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      reset();
+    };
+  }
+
   return { render, downloadCanvas, deliverCanvas, showFullscreen, showImage,
-           scan, scanContinuous, stopScan };
+           scan, scanContinuous, stopScan, normalize, isDesktop, canCamera, wedge };
 })();

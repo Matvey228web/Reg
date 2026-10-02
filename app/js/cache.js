@@ -167,6 +167,18 @@ const Cache = (() => {
     }
   }
 
+  // При выходе: в кэше заказы с ФИО и телефонами студентов, и телефон бывает
+  // общий на смену — следующий вошедший не должен увидеть их до входа.
+  function clearAll() {
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(PREFIX))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch {
+      // нечего чистить
+    }
+  }
+
   function ageText(name) {
     const ms = age(name);
     if (ms === null) return "";
@@ -182,7 +194,7 @@ const Cache = (() => {
   }
 
   return { items, one, get, set, setOne, replace, stale, age, ageText, isFresh, patch,
-           ensure, load, warm, clear, FRESH_MS };
+           ensure, load, warm, clear, clearAll, FRESH_MS };
 })();
 
 // Как своя запись меняет строку каталога. Повторяет правила Code.gs

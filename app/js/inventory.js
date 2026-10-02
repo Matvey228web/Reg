@@ -142,7 +142,7 @@ const InventoryScreen = (() => {
   // Единственное место, где решается, что делать с отсканированным номером.
   // Возвращает, что случилось, — экран и вибрация идут отсюда.
   function accept(rawCode) {
-    const code = String(rawCode || "").replace(/[\s\-]/g, "");
+    const code = QR.normalize(rawCode);
     if (!code) return { kind: "empty" };
     lastCode = code;
     const item = itemById(code);
@@ -316,6 +316,7 @@ const InventoryScreen = (() => {
         <div class="field">
           <label for="inventory-manual">Номер руками</label>
           <input type="text" id="inventory-manual" inputmode="numeric"
+                 enterkeyhint="go" autocomplete="off"
                  placeholder="${escapeHtml(lastCode || "010101")}" />
         </div>
       </div>
@@ -502,12 +503,11 @@ const InventoryScreen = (() => {
         render();
       });
     });
-    document.getElementById("inventory-add").addEventListener("click", () => {
-      const input = document.getElementById("inventory-manual");
-      const result = accept(input.value);
-      input.value = "";
-      showResult(result);
-      render();
+    document.getElementById("inventory-add").addEventListener("click", addManual);
+    document.getElementById("inventory-manual").addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      addManual();
     });
     document.getElementById("inventory-finish").addEventListener("click", finish);
     wireMissing();
@@ -536,6 +536,25 @@ const InventoryScreen = (() => {
         render();
       });
     });
+  }
+
+  function addManual() {
+    const input = document.getElementById("inventory-manual");
+    const result = accept(input.value);
+    input.value = "";
+    takeResult(result);
+  }
+
+  // Экран перерисован целиком, и фокус из поля пропал. На компьютере
+  // возвращаем его: следующий номер набирают сразу. На телефоне — нет,
+  // клавиатура закрыла бы список.
+  function takeResult(result) {
+    showResult(result);
+    renderSession(document.getElementById("inventory-content"));
+    if (QR.isDesktop()) {
+      const input = document.getElementById("inventory-manual");
+      if (input) input.focus({ preventScroll: true });
+    }
   }
 
   function bindFound(container) {
@@ -727,6 +746,14 @@ const InventoryScreen = (() => {
 
   function startScanning() {
     showBoxError("inventory-error", "");
+    if (QR.isDesktop()) {
+      document.getElementById("inventory-error").innerHTML = `<p class="hint">Камеры на
+        компьютере нет. Сканируйте сканером штрихкодов — коды отмечаются подряд, без
+        нажатий, — или вводите номера полем ниже и жмите Enter.</p>`;
+      const input = document.getElementById("inventory-manual");
+      if (input) input.focus({ preventScroll: true });
+      return;
+    }
     const res = QR.scanContinuous(
       "Сканируйте предметы подряд — окно закроется, когда вы его закроете",
       (code) => {
@@ -822,6 +849,14 @@ const InventoryScreen = (() => {
 
   function init() {
     Router.register("inventory", { onShow });
+    QR.wedge((code) => takeResult(accept(code)), (target) => {
+      if (!session) return false;
+      if (!document.getElementById("screen-inventory").classList.contains("screen--active")) return false;
+      // В форме заведения сканером читают заводской номер с коробки — это
+      // текст поля, а не отметка.
+      return !/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
+        target.id === "inventory-manual" || target.id === "inventory-missing-filter";
+    });
   }
 
   return { init };

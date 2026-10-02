@@ -24,6 +24,7 @@ const Auth = (() => {
 
   function logout() {
     localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
+    Cache.clearAll();
     Router.reset("login");
   }
 

@@ -177,8 +177,18 @@ global.SpreadsheetApp = {
   openById: () => sourceSpreadsheet,
 };
 global.Logger = { log: () => {} };
+// Замок считает вложенность: на повторный вход у настоящего замка Apps Script
+// опираться нельзя — внутренний releaseLock отпустил бы и внешний. Вложенных
+// захватов быть не должно, это проверяется в конце.
+const lockState = { depth: 0, nested: 0 };
 global.LockService = {
-  getScriptLock: () => ({ waitLock() {}, releaseLock() {} }),
+  getScriptLock: () => {
+    let held = false;
+    return {
+      waitLock() { if (lockState.depth > 0) lockState.nested++; lockState.depth++; held = true; },
+      releaseLock() { if (held) { held = false; lockState.depth--; } },
+    };
+  },
 };
 // Кэш скрипта. Время жизни не изображаем: в проверках важно, что счётчик
 // растёт и что предел срабатывает, а не что запись истекает через час.
@@ -1289,6 +1299,51 @@ check('сотрудник склада вкладки не заводит',
   call('/maintenance', { action: 'setup' }, ivanToken).status === 401);
 r = call('/maintenance', { action: 'archive' }, token);
 check('выгрузка через эндпоинт работает', r.ok === true && /выгружен|пуст/.test(r.data.message), r);
+// Проверки выше со складским токеном получают 401 — его сессия к этому месту
+// уже недействительна. Здесь — живая сессия без прав администратора.
+call('/staff/create', { full_name: 'Склад Обслуживание', login: 'maint', pin: '246824', role: 'Warehouse Staff' }, token);
+const maintToken = call('/auth/login', { login: 'maint', pin: '246824' }).data.token;
+check('живая сессия склада: обслуживание — 403',
+  call('/maintenance', { action: 'archive' }, maintToken).status === 403);
+check('живая сессия склада: неизвестное действие — тоже 403, права проверяются первыми',
+  call('/maintenance', { action: 'drop-everything' }, maintToken).status === 403);
+check('администратор: пустое действие — 400',
+  call('/maintenance', {}, token).status === 400);
+
+console.log('\n== настройки: память в пределах запроса ==');
+{
+  const realReadRows = global.readRows, realGetSettings = global.getSettings;
+  let metaReads = 0;
+  global.readRows = function (sheet) {
+    if (sheet && sheet.getName && sheet.getName() === SHEETS.META) metaReads++;
+    return realReadRows.apply(this, arguments);
+  };
+  call('/students/list', {}, token);
+  check('проверка сессии читает Meta один раз, а не по разу на настройку', metaReads === 1, metaReads);
+  metaReads = 0;
+  call('/settings/get', {}, token);
+  const settingsGetReads = metaReads;
+  metaReads = 0;
+  global.getSettings = ((real) => function () { real(); return real.apply(this, arguments); })(getSettings);
+  call('/settings/get', {}, token);
+  check('повторный getSettings в том же запросе берёт из памяти', metaReads === settingsGetReads, [metaReads, settingsGetReads]);
+  global.readRows = realReadRows;
+  global.getSettings = realGetSettings;
+}
+const ttlBefore = getSettings().session_ttl_hours;
+metaSet('setting_session_ttl_hours', ttlBefore + 1);
+check('metaSet сбрасывает память и вне doPost', getSettings().session_ttl_hours === ttlBefore + 1);
+r = call('/settings/set', { settings: { session_ttl_hours: ttlBefore + 2 } }, token);
+check('/settings/set возвращает новое значение', r.ok && r.data.settings.session_ttl_hours === ttlBefore + 2, r);
+check('следующий /settings/get в том же процессе видит новое значение',
+  call('/settings/get', {}, token).data.settings.session_ttl_hours === ttlBefore + 2);
+const ttlRow = readRows(getSheet(SHEETS.META)).filter((m) => m.key === 'setting_session_ttl_hours')[0];
+updateRow(getSheet(SHEETS.META), ttlRow.__row, { value: ttlBefore + 3 });
+check('правка Meta руками между запросами видна следующему запросу',
+  call('/settings/get', {}, token).data.settings.session_ttl_hours === ttlBefore + 3);
+call('/settings/set', { settings: { session_ttl_hours: ttlBefore } }, token);
+check('getSettings отдаёт копию — правка результата память не портит',
+  (() => { const s = getSettings(); s.session_ttl_hours = -1; return getSettings().session_ttl_hours === ttlBefore; })());
 
 
 console.log('\n== заказы: разбор живого сообщения бота ==');
@@ -3457,6 +3512,42 @@ check('в журнале нет ни токена сессии, ни данны�
   JSON.stringify(errLog).indexOf(logToken) === -1 && JSON.stringify(errLog).indexOf('+79990001122') === -1,
   errLog);
 
+// Отказы, которые стоит видеть потом: неверный вход, блокировка, 5xx.
+logBefore = logRows().length;
+call('/auth/login', { login: 'matvey', pin: '999888' });
+errLog = logRows().slice(logBefore);
+check('неверный вход — строка refusal 401 в журнале',
+  errLog.length === 1 && errLog[0].kind === 'refusal' && errLog[0].endpoint === '/auth/login' &&
+  errLog[0].reason === '401', errLog);
+check('в строке о неверном входе нет ни логина, ни PIN',
+  JSON.stringify(errLog).indexOf('matvey') === -1 && JSON.stringify(errLog).indexOf('999888') === -1, errLog);
+call('/staff/create', { full_name: 'Перебор', login: 'brute', pin: '135791' }, logToken);
+for (let i = 0; i < getSettings().max_login_attempts; i++) call('/auth/login', { login: 'brute', pin: '000000' });
+logBefore = logRows().length;
+r = call('/auth/login', { login: 'brute', pin: '135791' });
+errLog = logRows().slice(logBefore);
+check('блокировка входа (429) — в журнале',
+  r.status === 429 && errLog.length === 1 && errLog[0].reason === '429', [r, errLog]);
+logBefore = logRows().length;
+call('/staff/list', {}, 'чужой-токен');
+check('401 вне входа (протухшая сессия) в журнал не идёт', logRows().length === logBefore);
+__telegramSendReply = () => ({ ok: false, error_code: 403, description: 'Forbidden: bot was kicked' });
+logBefore = logRows().length;
+r = call('/notify/hello', { chat_id: '-100555' }, logToken);
+errLog = logRows().slice(logBefore);
+check('отказ Telegram (502) — одна строка, без дубля от doPost',
+  r.status === 502 && errLog.length === 1 && errLog[0].kind === 'telegram', [r, errLog]);
+__telegramSendReply = null;
+const realNotifyChats = handleNotifyChats;
+globalThis.handleNotifyChats = () => { throw apiError(502, 'Диск не ответил'); };
+logBefore = logRows().length;
+call('/notify/chats', {}, logToken);
+errLog = logRows().slice(logBefore);
+check('прочий 5xx от ручки — строка refusal в журнале',
+  errLog.length === 1 && errLog[0].kind === 'refusal' && errLog[0].reason === '502' &&
+  errLog[0].message === 'Диск не ответил', errLog);
+globalThis.handleNotifyChats = realNotifyChats;
+
 // Отказ Telegram по заявке — строка в журнале, в чат ничего сверх попытки.
 __telegramSendReply = () => ({ ok: false, error_code: 403, description: 'Forbidden: bot was kicked' });
 logBefore = logRows().length;
@@ -3848,6 +3939,10 @@ check('немецкий отказ DocumentApp → что нажать',
 check('английский отказ DriveApp → тоже',
   /DriveApp/.test(missingScopeHint(new Error('You do not have permission to call DriveApp.getFileById. Required permissions: …'))));
 check('обычная ошибка не подменяется', missingScopeHint(new Error('Cannot read properties of undefined')) === '');
+
+console.log('\n== замок ==');
+check('вложенных захватов замка не было', lockState.nested === 0, lockState);
+check('все замки отпущены', lockState.depth === 0, lockState);
 
 console.log('\n' + (failures ? '❌ ПРОВАЛОВ: ' + failures : '✅ Все проверки пройдены'));
 process.exit(failures ? 1 : 0);
