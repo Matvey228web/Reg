@@ -355,11 +355,30 @@ ok("первый запрос идёт в таблицу", r.cache === "miss", r
 r = await call("/public/announcements", {});
 ok("второй — из кэша, хотя токена нет", r.cache === "hit" && upstream.calls.length === 1,
    { cache: r.cache, calls: upstream.calls });
-upstream.reply = { ok: true, data: { announcement_id: "2", changed: true }, error: null, status: 200 };
+// Таблица отвечает по адресу: фоновая сборка спрашивает публичный список, а не запись.
+let annItems = [];
+upstream.reply = (b) => b.endpoint === "/public/announcements"
+  ? { ok: true, data: { items: annItems }, error: null, status: 200 }
+  : { ok: true, data: { announcement_id: "2", changed: true }, error: null, status: 200 };
 await call("/announcement/remove", { announcement_id: "1" }, "tok-1");
-upstream.reply = { ok: true, data: { items: [] }, error: null, status: 200 };
 r = await call("/public/announcements", {});
-ok("после снятия объявления кэш сброшен: сайт видит сразу", r.cache === "miss", r.cache);
+ok("после снятия объявления сайт видит новый список, а не снятое",
+   r.data.data.items.length === 0, r.data);
+
+console.log("== свежей копии нет — отдаём долгую сразу, свежую догоняем ==");
+annItems = [{ id: "a5", title: "Новое", lines: ["x"] }];
+await call("/announcement/save", { title: "Новое", text: "x" }, "tok-1");
+r = await call("/public/announcements", {});
+ok("после записи копия уже собрана в фоне", r.data.data.items[0].id === "a5", r.data);
+for (const k of [...env.CACHE.store.keys()]) if (k.startsWith("c:")) env.CACHE.store.delete(k);
+annItems = [{ id: "a6", title: "Позже", lines: ["x"] }];
+upstream.calls = [];
+r = await call("/public/announcements", {});
+ok("ответ мгновенный из долгой копии (старый)", r.cache === "stale" && r.data.data.items[0].id === "a5",
+   { cache: r.cache, d: r.data });
+ok("а в фоне таблицу спросили", upstream.calls.includes("/public/announcements"), upstream.calls);
+r = await call("/public/announcements", {});
+ok("следующий ответ уже свежий", r.cache === "hit" && r.data.data.items[0].id === "a6", { c: r.cache, d: r.data });
 
 console.log("\n== нажатия, которые не должны выбрасывать кэш ==");
 // Поиск чата, проверка связи и пачка этикеток ничего в складе не меняют.
