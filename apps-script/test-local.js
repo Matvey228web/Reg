@@ -293,6 +293,8 @@ global.HtmlService = {
 // Триггеры проекта держим списком — setupTriggers проверяется на повторный запуск.
 const triggers = [];
 global.ScriptApp = {
+  AuthMode: { FULL: 'FULL' },
+  requireAllScopes() {},
   getOAuthToken: () => 'test-token',
   getProjectTriggers: () => triggers.slice(),
   deleteTrigger(t) { triggers.splice(triggers.indexOf(t), 1); },

@@ -917,6 +917,10 @@ function missingScopeHint(err) {
  * dailyMaintenance и убранного dailyOverdueDigest, затем ставит один новый.
  */
 function setupTriggers() {
+  // Google выдаёт разрешения по одному и из редактора спрашивает только те,
+  // что нужны запущенной функции: триггерам документы не нужны, и доступ к
+  // ним (акты) так и не выдавался. requireAllScopes просит все разом.
+  ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
   var removed = 0;
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var h = t.getHandlerFunction();
