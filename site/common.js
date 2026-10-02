@@ -14,7 +14,7 @@ var Site = (function () {
   // Витрина от этого не зависит вовсе: каталог лежит снимком рядом со страницей.
   var BACKEND = "https://mifs-rent-api.odintsovmatvey08.workers.dev";
   // Чат склада с заявками (Telegram). Пусто — кнопка «Операторская» не показывается.
-  var OPERATOR_URL = "";
+  var OPERATOR_URL = "https://t.me/mifs_rent_ecosystem_operator/1";
   var CART_KEY = "mifs_cart";
   // Данные заявки. Отдельно от корзины: корзину человек меняет весь день, а
   // ФИО с телефоном вводит один раз — и терять их при уходе в каталог нельзя.
