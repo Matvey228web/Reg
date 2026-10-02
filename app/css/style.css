@@ -1905,3 +1905,8 @@ body.snackbar-on .fab.fab--on { transform: translateY(-60px); }
 /* Строка истории выдач, ведущая в заказ (item.js, txRowHtml). */
 .card--link { cursor: pointer; }
 .card--link:active { background: var(--surface-strong); }
+
+/* Плитка «ошибок за сутки» раскрывает журнал (settings.js, logsTileHtml). */
+.tile-tap { cursor: pointer; }
+.tile-tap:active { opacity: .7; }
+#settings-logs { margin-top: var(--s3); }

@@ -1675,7 +1675,13 @@ const MockAPI = {
             staff_active: MockStore.staff.filter((x) => x.active).length,
             admins: MockStore.staff.filter((x) => x.role === "Admin").length,
             // В демо журнала Logs нет — ошибок за сутки ноль, как на чистой таблице.
-            logs_24h: 0,
+            logs_24h: 2,
+            logs_recent: [
+              { at: new Date(Date.now() - 3600e3).toISOString(), kind: "act", endpoint: "autoAct", reason: "build-failed",
+                message: "Скрипту не хватает разрешения Google (DocumentApp)." },
+              { at: new Date(Date.now() - 7200e3).toISOString(), kind: "telegram", endpoint: "sendMessage", reason: "fallback",
+                message: "Тема форума не приняла сообщение, ушло в General." },
+            ],
           },
           maintenance: { journal_archived_at: "", journal_trimmed_at: "", schema_outdated: false },
         };

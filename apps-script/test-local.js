@@ -3740,6 +3740,13 @@ check('главный администратор выключает',
   check('обычный администратор — отказ', adminNotOwner.status === 400 &&
     /главный администратор/.test(adminNotOwner.error), adminNotOwner);
 }
+{
+  const sumAdmin = call('/settings/get', {}, seasonOwner).data.summary;
+  check('администратору — последние записи журнала, свежие первыми',
+    Array.isArray(sumAdmin.logs_recent) && sumAdmin.logs_recent.length <= 5 &&
+    sumAdmin.logs_recent.length === Math.min(5, sumAdmin.logs_24h) &&
+    (sumAdmin.logs_recent.length < 2 || sumAdmin.logs_recent[0].at >= sumAdmin.logs_recent[1].at), sumAdmin.logs_recent);
+}
 check('и включает обратно',
   call('/settings/set', { settings: { site_seasons: 1 } }, seasonOwner).ok === true &&
   call('/public/announcements', {}).data.seasons === true);

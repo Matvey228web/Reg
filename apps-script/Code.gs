@@ -4253,7 +4253,7 @@ function handleSettingsGet(payload, token) {
     owner: ownerRow ? { staff_id: ownerRow.staff_id, full_name: ownerRow.full_name } : null,
     // Сводка отдаётся здесь же, а не отдельным запросом: таблица отвечает
     // 5–8 секунд, и второй запрос ради пяти чисел стоил бы этих секунд заново.
-    summary: warehouseSummary(),
+    summary: warehouseSummary(me.role === "Admin"),
     maintenance: {
       journal_archived_at: metaGet("journal_archived_at") || "",
       journal_trimmed_at: metaGet("journal_trimmed_at") || "",
@@ -4503,7 +4503,9 @@ function publicOrderQuotaTake(limit) {
 // Что творится на складе одним взглядом: из чего состоит каталог, сколько на
 // руках, что просрочено и что сломано. Считается по тем же листам, которые всё
 // равно читаются — отдельного хранилища для этого заводить незачем.
-function warehouseSummary() {
+// withLogs — администратору: последние записи журнала, чтобы плитка «ошибок
+// за сутки» показывала, что именно падает, без похода в лист Logs с телефона.
+function warehouseSummary(withLogs) {
   var today = new Date().toISOString().substring(0, 10);
   var out = {
     items: 0, available: 0, rented: 0, in_repair: 0, retired: 0,
@@ -4556,10 +4558,16 @@ function warehouseSummary() {
   var logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.LOGS);
   if (logSheet) {
     var since = Date.now() - 24 * 60 * 60 * 1000;
+    var recent = [];
     readRows(logSheet).forEach(function (l) {
       var t = new Date(l.timestamp).getTime();
-      if (!isNaN(t) && t >= since) out.logs_24h += 1;
+      if (isNaN(t) || t < since) return;
+      out.logs_24h += 1;
+      recent.push({ at: new Date(t).toISOString(), kind: String(l.kind || ""),
+        endpoint: String(l.endpoint || ""), reason: String(l.reason || ""),
+        message: String(l.message || "").substring(0, 300) });
     });
+    if (withLogs) out.logs_recent = recent.slice(-5).reverse();
   }
 
   return out;
