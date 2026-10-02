@@ -68,14 +68,14 @@ var CATEGORY_CODES = {
   MED: "14",   // карты, ридеры, диски
 };
 
-// Названия для людей. Живут рядом с кодами только как умолчания для засева:
-// после засева название правится в таблице и в админке.
 // Категории, которые учитываются количеством, а не поштучно: у мешков, флагов и
 // расходников нет и не будет личного номера — клеить QR на каждый сэндбэг никто
 // не станет. Флаг живёт в таблице (колонка by_qty) и правится в «Настройках»;
 // здесь — только значение при заведении категории.
 var CATEGORY_BY_QTY = { GRP: true, CNS: true };
 
+// Названия для людей. Живут рядом с кодами только как умолчания для засева:
+// после засева название правится в таблице и в админке.
 var CATEGORY_LABELS = {
   CAM: "Камеры",
   LEN: "Объективы",
@@ -231,7 +231,6 @@ function setupEverything() {
   return message;
 }
 
-// Заполняет лист умолчаниями, если в нём нет ни одной строки данных.
 function seedSheet(ss, name, rows) {
   var sheet = ss.getSheetByName(name);
   if (!sheet || sheet.getLastRow() > 1 || !rows.length) return;
@@ -638,7 +637,6 @@ function importInventory() {
       modelSheet.getRange(mStart, 1, mRows.length, mHeaders.length).setValues(mRows);
     }
 
-    // Сохраняем счётчики обратно в Meta
     for (var k in counters) {
       if (metaRowIndex[k]) updateRow(metaSheet, metaRowIndex[k], { value: counters[k] });
       else appendRow(metaSheet, { key: k, value: counters[k] });
@@ -793,7 +791,6 @@ function trimJournal() {
     removed.Transactions = trimSheetRows(getSheet(SHEETS.TRANSACTIONS), function (row) {
       return row.status === "Closed";
     });
-    // Дефекты: удаляем только устранённые.
     removed.Defects = trimSheetRows(getSheet(SHEETS.DEFECTS), function (row) {
       return row.status === "Resolved";
     });
@@ -3495,7 +3492,6 @@ function handleStaffSetActive(payload, token) {
   return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, active: !!payload.active };
 }
 
-// Смена роли: повысить складского сотрудника до администратора и обратно.
 function handleStaffSetRole(payload, token) {
   requireOwner(token);
   var role = String(payload.role || "");
@@ -4266,9 +4262,6 @@ function handleSettingsGet(payload, token) {
   };
 }
 
-// Что творится на складе одним взглядом: из чего состоит каталог, сколько на
-// руках, что просрочено и что сломано. Считается по тем же листам, которые всё
-// равно читаются — отдельного хранилища для этого заводить незачем.
 // ---------------------------------------------------------------------
 // Занятость по датам — то, на чём стоит бронь
 // ---------------------------------------------------------------------
@@ -4507,6 +4500,9 @@ function publicOrderQuotaTake(limit) {
   cache.put(slot, String(used + 1), 3900);
 }
 
+// Что творится на складе одним взглядом: из чего состоит каталог, сколько на
+// руках, что просрочено и что сломано. Считается по тем же листам, которые всё
+// равно читаются — отдельного хранилища для этого заводить незачем.
 function warehouseSummary() {
   var today = new Date().toISOString().substring(0, 10);
   var out = {
@@ -5294,7 +5290,7 @@ function modelByCode(category, modelCode) {
   throw apiError(404, "Модель не найдена в справочнике");
 }
 
-// Находит модель по названию или заводит новую. Возвращает {model_code, model_name}.
+// Возвращает {model_code, model_name}.
 function findOrCreateModel(category, modelName) {
   var name = canonicalModelName(modelName);
   if (!name) throw apiError(400, "Укажите название модели");
@@ -5491,7 +5487,6 @@ function pluralRu(n, one, few, many) {
   return many;
 }
 
-// Одна группа из трёх цифр словами.
 function tripleInWords(value, female) {
   var out = [];
   var hundreds = Math.floor(value / 100);
@@ -5796,7 +5791,6 @@ function buildAct(orderId, masterName) {
   // Диску, и повторная сборка не плодит документы на один заказ.
   updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
 
-  // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
   tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
     '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
 

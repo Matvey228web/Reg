@@ -562,7 +562,6 @@ global.DriveApp = {
 };
 global.MimeType = { CSV: 'text/csv' };
 
-// Загружаем настоящий Code.gs в глобальную область
 const code = fs.readFileSync(path.join(__dirname, 'Code.gs'), 'utf8');
 (0, eval)(code);
 
@@ -1784,7 +1783,6 @@ const mvLogin = call('/auth/login', { login: 'matvey', pin: '432143' });
 const mvToken = mvLogin.ok ? mvLogin.data.token : null;
 check('вход перед переносом', mvLogin.ok === true, mvLogin);
 
-// Заводим модель в «Камерах» и две её единицы.
 let mv = call('/item/create', { category: 'CAM', model_name: 'Гоупро Тест', serial_number: 'S1' }, mvToken);
 check('первая единица заведена', mv.ok === true, mv);
 const mvId1 = mv.ok ? mv.data.item_id : null;
@@ -1823,7 +1821,6 @@ const mvTxBefore = readRows(getSheet(SHEETS.TRANSACTIONS)).filter(r => String(r.
 const mvDfBefore = readRows(getSheet(SHEETS.DEFECTS)).filter(r => String(r.item_id) === mvId1).length;
 check('в журналах есть строки на эту вещь', mvTxBefore > 0 && mvDfBefore > 0, [mvTxBefore, mvDfBefore]);
 
-// Переносим в «Объективы».
 mv = call('/model/move', { category: 'CAM', model_code: mvCode, to_category: 'LEN' }, mvToken);
 check('перенос прошёл', mv.ok === true, mv);
 check('перенесены обе единицы', mv.ok && mv.data.moved === 2, mv.data);
@@ -3712,7 +3709,6 @@ for (let i = 0; i < 12 && !annLimit; i++) {
 }
 check('больше десяти действующих отказ', annLimit && annLimit.status === 409, annLimit);
 
-// Снятие.
 const annGone = call('/announcement/remove', { announcement_id: annNew.data.announcement_id }, annStaff);
 check('складмен снимает объявление', annGone.ok === true && annGone.data.changed === true, annGone);
 check('снятое пропало с сайта',

@@ -556,7 +556,6 @@ const OrdersScreen = (() => {
 
   async function submitDraft() {
     if (!draft) return;
-    // Подхватываем сопоставления, которые человек выбрал руками.
     document.querySelectorAll(".order-line-pick").forEach((sel) => {
       if (!sel.value) return;
       const [category, modelCode] = sel.value.split("|");
