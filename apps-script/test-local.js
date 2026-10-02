@@ -2424,15 +2424,15 @@ so = call('/public/order', { raw_text: botOrderText('270101-0001', [
 check('заявка для сообщения принята', so.ok === true, so);
 let tgm = siteTg();
 check('parse_mode HTML в сообщении о заявке', tgm && tgm.parse_mode === 'HTML', tgm);
-check('заголовок с номером, ниже жирный блок состава', /^Заказ №270101-0001\n<b>1\. /.test(tgm.text), tgm.text);
+check('заголовок с номером, через строку состав', /^<b>📦 Заказ №270101-0001<\/b>\n\n1\. /.test(tgm.text), tgm.text);
 check('строка позиции: сумма и (кол-во x цена)',
   tgm.text.indexOf('1. ' + siteCat.model_name + ': 77000 (2 x 38500)') !== -1, tgm.text);
 check('нулевая цена печатается как у Tilda',
   tgm.text.indexOf('2. Бесплатная вещь: 0 (1 x 0.00)') !== -1, tgm.text);
-check('сумма — по строкам, закрывает жирный блок', /\nСумма: 77000 RUB<\/b>\n/.test(tgm.text), tgm.text);
+check('сумма — по строкам, жирным', /\n<b>Сумма: 77000 RUB<\/b>\n/.test(tgm.text), tgm.text);
 check('блок покупателя для взрослого: ФИО, телефон, ник',
-  /Покупатель:\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
-check('приём и сдача со временем', /\nПрием: 2026-10-01 10:00\nСдача: 2026-10-05 18:00\n/.test(tgm.text), tgm.text);
+  /<b>👤 Покупатель<\/b>\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
+check('приём и сдача со временем', /\n\n<b>📅 Сроки<\/b>\nПрием: 2026-10-01 10:00\nСдача: 2026-10-05 18:00\n\n<b>🎬 Съёмка<\/b>\n/.test(tgm.text), tgm.text);
 check('проект отдельной строкой', /Проект: курсовая/.test(tgm.text), tgm.text);
 check('без Input строк мастерской, комментария и адреса нет',
   !/Мастерская:|Комментарий:|Адрес:/.test(tgm.text), tgm.text);
@@ -2444,12 +2444,12 @@ so = call('/public/order', { raw_text: botOrderText('270101-0011', [
 ], adultBuyer.concat(['Input: Мастерская: оператор. Комментарий: Доп. алекса и прочие понты. Адрес: Москва, ул. Примерная 1'])) });
 tgm = siteTg();
 check('мастерская, комментарий и адрес — по строке, в порядке образца',
-  /\nПроект: курсовая\nМастерская: оператор\nКомментарий: Доп\. алекса и прочие понты\nАдрес: Москва, ул\. Примерная 1\n/.test(tgm.text), tgm.text);
+  /<b>🎬 Съёмка<\/b>\nПроект: курсовая\nМастерская: оператор\nКомментарий: Доп\. алекса и прочие понты\nАдрес: Москва, ул\. Примерная 1\n/.test(tgm.text), tgm.text);
 check('Input без меток — комментарием', splitExtraInput('просто текст')['Комментарий'] === 'просто текст');
 check('старый Input «Мастерская: …» без адреса',
   JSON.stringify(splitExtraInput('Мастерская: звук, 2 курс')) === JSON.stringify({ 'Мастерская': 'звук, 2 курс' }));
 check('ссылка на сайт из site_url, экранированная',
-  tgm.text.indexOf('<b><a href="https://example.test/site?a=1&amp;b=2">Сделать заказ</a></b>') !== -1, tgm.text);
+  tgm.text.indexOf('\n\n<a href="https://example.test/site?a=1&amp;b=2">Сделать заказ</a>') !== -1, tgm.text);
 
 // Несовершеннолетний: представитель, затем сам арендатор.
 so = call('/public/order', { raw_text: botOrderText('270101-0002', [
@@ -2459,7 +2459,7 @@ so = call('/public/order', { raw_text: botOrderText('270101-0002', [
   'Phone_minors: +70000000002', 'Telegram_Minors: @yunov']) });
 tgm = siteTg();
 check('блок покупателя для несовершеннолетнего',
-  /Покупатель:\nПредставитель: Опекунов Опекун Опекунович\nТелефон представителя: \+70000000001\nНесовершеннолетний: Юнов Юн Юнович\nТелефон: \+70000000002\nTelegram: @yunov/.test(tgm.text), tgm.text);
+  /<b>👤 Покупатель<\/b>\nПредставитель: Опекунов Опекун Опекунович\nТелефон представителя: \+70000000001\nНесовершеннолетний: Юнов Юн Юнович\nТелефон: \+70000000002\nTelegram: @yunov/.test(tgm.text), tgm.text);
 
 // Всё, что пришло с формы, экранируется.
 so = call('/public/order', { raw_text: botOrderText('270101-0003', [
@@ -2487,7 +2487,7 @@ check('длинная заявка принята', so.ok === true, so);
 tgm = siteTg();
 check('сообщение укладывается в предел Telegram', tgm.text.length <= 4096, tgm.text.length);
 check('список урезан пометкой «… и ещё N поз.»', /… и ещё \d+ поз\./.test(tgm.text), tgm.text.slice(0, 200));
-check('сумма по всем позициям сохранена', /Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
+check('сумма по всем позициям сохранена', /<b>Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
 check('покупатель и ссылка уцелели',
   /Тестов Тест Тестович/.test(tgm.text) && /<a href="https:\/\/example\.test\/">/.test(tgm.text), tgm.text.slice(-400));
 metaSet('setting_site_url', '');
@@ -2891,7 +2891,6 @@ check('копейки на месте',
   moneyInWords(1500.5) === 'Одна тысяча пятьсот рублей 50 копеек', moneyInWords(1500.5));
 check('разряды пробелами', moneyDigits(476718) === '476 718', moneyDigits(476718));
 check('дата как в старом акте', humanRuDate('2026-10-01') === '01-10-2026г.');
-check('фамилия сокращается', shortName('Гриднев Егор Олегович') === 'Гриднев Е.О.');
 
 console.log('\n== чат склада находится сам ==');
 // В Telegram на телефоне id чата не показывают, а открывать getUpdates в
@@ -3085,26 +3084,30 @@ check('повторное создание без подтверждения о�
 const tplText = __docs.get(tpl.data.template_id).body.getText();
 check('в шаблоне нет ничьих персональных данных',
   !/Куприянова|Мария|977 677/.test(tplText));
-// Шаблон — присланный колледжем акт, а не нарисованный заново: проверяем, что
-// в нём осталась их формулировка и их реквизиты.
-check('текст договора — колледжа',
-  /О ПОЛНОЙ МАТЕРИАЛЬНОЙ ОТВЕТСТВЕННОСТИ/.test(tplText) &&
-  /Шаболовка/.test(tplText) && /Приложение № 1/.test(tplText),
+// Шаблон — бланк колледжа, а не нарисованный заново: проверяем, что в нём
+// осталась их формулировка и их реквизиты.
+check('текст акта — колледжа',
+  /Акт приема-передачи/.test(tplText) && /материальных ценностей № \{\{НОМЕР\}\}-МТО/.test(tplText) &&
+  /Шаболовка/.test(tplText) && /Приказа № 104\.25-о/.test(tplText) &&
+  !/ПОЛНОЙ МАТЕРИАЛЬНОЙ ОТВЕТСТВЕННОСТИ|Приложение № 1/.test(tplText),
   tplText.slice(0, 120));
+check('пункты пронумерованы текстом, как в бланке',
+  ['1.4. ', '1.10. ', '2.6.3. ', '3.6.4. ', '3.13. ', '4.3. ', '9. Реквизиты Сторон']
+    .every((k) => tplText.includes(k)));
 check('все подстановки на месте',
-  ['{{НОМЕР}}', '{{ДАТА}}', '{{ФИО}}', '{{ТЕЛЕФОН}}', '{{ПРОЕКТ}}', '{{С}}', '{{ПО}}',
-   '{{СУММА}}', '{{СУММА_СЛОВАМИ}}', '{{МАСТЕР}}', '{{МАСТЕР_КРАТКО}}', '{{ДИРЕКТОР}}',
-   '{{ПОДПИСАНТ}}', '{{ПОЗИЦИИ}}'].every((k) => tplText.includes(k)),
+  ACT_PLACEHOLDERS.every((k) => tplText.includes(k)) &&
+  (tplText.match(/\{\{[^}]+\}\}/g) || []).every((k) => ACT_PLACEHOLDERS.includes(k)),
   (tplText.match(/\{\{[^}]+\}\}/g) || []).join(' '));
 const tplTable = __docs.get(tpl.data.template_id).body.getTables()
   .filter((t) => t.grid[0][0] === '№')[0];
 check('в таблице позиций шапка, одна строка-образец и «Итого»',
   tplTable && tplTable.grid.length === 3 && tplTable.grid[2][1] === 'Итого',
   tplTable && tplTable.grid);
-check('столбец «КОЛ-ВО» вместо пустой «МОДЕЛЬ»',
-  tplTable && tplTable.grid[0].join('|') === '№|НАИМЕНОВАНИЕ|КОЛ-ВО|ЗАВОДСКОЙ №|СТОИМОСТЬ (руб.)',
+check('столбцы в порядке бланка: заводской номер перед количеством',
+  tplTable && tplTable.grid[0].join('|') ===
+    '№|Наименование материальных ценностей|Зав. номер|Кол-во|Стоимость, рублей',
   tplTable && tplTable.grid[0]);
-check('пятнадцати пустых строк из присланного акта не осталось',
+check('двадцати пяти пустых строк из бланка не осталось',
   tplTable && !tplTable.grid.some((r) => r[0] === '5'), tplTable && tplTable.grid.map((r) => r[0]));
 
 console.log('\n== акт: каждая позиция в свою ячейку ==');
@@ -3125,13 +3128,18 @@ check('номера строк по порядку',
   itemsTable && itemsTable.grid.slice(1, -1).every((r, i) => r[0] === String(i + 1)),
   itemsTable && itemsTable.grid.slice(1, -1).map((r) => r[0]));
 check('количество в своём столбце',
-  itemsTable && itemsTable.grid.slice(1, -1).every((r) => /^\d+$/.test(r[2])),
-  itemsTable && itemsTable.grid.slice(1, -1).map((r) => r[2]));
+  itemsTable && itemsTable.grid.slice(1, -1).every((r) => /^\d+$/.test(r[3])),
+  itemsTable && itemsTable.grid.slice(1, -1).map((r) => r[3]));
 check('подстановок в документе не осталось',
   !built.body.getText().includes('{{'),
   (built.body.getText().match(/\{\{[^}]+\}\}/g) || []).slice(0, 4));
 check('ФИО арендатора подставлено',
   built.body.getText().includes('Ильина-Ноктина Полина Ильинична'));
+const builtPara = (doc, start) => (doc.body.items
+  .filter((i) => i.kind === 'p' && i.text.startsWith(start))[0] || {}).text;
+check('адреса в заявке нет — в п. 4.3 линия от руки',
+  builtPara(built, '4.3.') === '4.3. Адрес использования оборудования: ' + ACT_BLANK + ACT_BLANK,
+  builtPara(built, '4.3.'));
 check('имя файла — дата и ФИО',
   /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /.test(built.name), built.name);
 
@@ -3163,54 +3171,60 @@ const act2 = call('/act/build', { order_id: 1 }, actAdmin);
 const built2 = __docs.get(act2.data.document_id);
 const table2 = built2.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
 check('заводской номер доехал до акта',
-  table2.grid.slice(1, -1).some((r) => r[3] === 'SN-АКТ-001'),
-  table2.grid.slice(1, -1).map((r) => r[3]));
+  table2.grid.slice(1, -1).some((r) => r[2] === 'SN-АКТ-001'),
+  table2.grid.slice(1, -1).map((r) => r[2]));
 check('у невыданных позиций столбец пуст, а не с чужим номером',
-  table2.grid.slice(1, -1).filter((r) => r[3] === 'SN-АКТ-001').length === 1,
-  table2.grid.slice(1, -1).map((r) => r[3]));
+  table2.grid.slice(1, -1).filter((r) => r[2] === 'SN-АКТ-001').length === 1,
+  table2.grid.slice(1, -1).map((r) => r[2]));
 
 check('заказа без позиций акт не делает',
   call('/act/build', { order_id: 999 }, actAdmin).status === 404);
 
-console.log('\n== акт: кто подписывает ==');
-// Обычно акт от колледжа подписывает складмен, оформивший выдачу, — это
-// выбирается в настройках акта. Мастер — прежнее поведение и умолчание.
-const signedBy = (token) => {
-  const res = call('/act/build', { order_id: 1 }, token);
-  return res.ok ? __docs.get(res.data.document_id).body.getText() : JSON.stringify(res);
-};
-check('по умолчанию подписывает мастер',
-  call('/settings/get', {}, actAdmin).data.settings.act_signer === 'master');
-call('/settings/set', { settings: { act_master: 'Гриднев Егор Олегович' } }, actAdmin);
-let signText = signedBy(helperToken);
-check('мастер: ФИО из настроек, а не вошедшего',
-  signText.includes('Гриднев Егор Олегович') && signText.includes('Гриднев Е.О.') &&
-  !signText.includes('Складмен'), signText.slice(-300));
-check('мастер: подпись «Мастер»',
-  /Мастер/.test(signText) && !signText.includes('Сотрудник склада'));
+console.log('\n== акт: кто подписывает за колледж ==');
+// Подписанта и директора владелец вписывает в сам шаблон-документ: настроек
+// для них больше нет, а в бланке на их месте — линии.
+const signText = __docs.get(act.data.document_id).body.getText();
+const handover = __docs.get(act.data.document_id).body.getTables()
+  .filter((t) => /СДАЛ/.test(t.getText()))[0];
+check('в блоке выдачи за колледж — пустая линия, за арендатора — его ФИО',
+  handover && handover.grid[1][0] === '' && handover.grid[1][4] === 'Ильина-Ноктина Полина Ильинична',
+  handover && handover.grid[1]);
+check('«в лице» — линия от руки',
+  /в лице _{20,}, действующего на основании Приказа/.test(signText));
+check('настроек подписанта больше нет',
+  !('act_signer' in call('/settings/get', {}, actAdmin).data.settings) &&
+  !('act_master' in call('/settings/get', {}, actAdmin).data.settings) &&
+  !('act_director' in call('/settings/get', {}, actAdmin).data.settings));
 
-check('кто подписывает: сотрудник склада принимается',
-  call('/settings/set', { settings: { act_signer: 'staff' } }, actAdmin).ok === true);
-signText = signedBy(helperToken);
-check('сотрудник склада: его ФИО, а мастер из настроек не мешает',
-  signText.includes('Складмен Актов') && signText.includes('Складмен А.') &&
-  !signText.includes('Гриднев'), signText.slice(-300));
-check('сотрудник склада: подпись «Сотрудник склада»',
-  signText.includes('Сотрудник склада') && !/Мастер/.test(signText));
+// Шаблон, созданный до нынешнего бланка, ещё может стоять в настройках: его
+// подстановки подписанта не должны остаться в акте сырыми «{{…}}».
+const oldTpl = DocumentApp.create('старый шаблон');
+oldTpl.body.appendParagraph('в лице {{ДИРЕКТОР}}, {{ПОДПИСАНТ}} {{МАСТЕР}} / {{МАСТЕР_КРАТКО}}');
+oldTpl.body.appendTable([['№', 'НАИМЕНОВАНИЕ', 'КОЛ-ВО', 'ЗАВОДСКОЙ №', 'СТОИМОСТЬ'],
+  ['1', '{{ПОЗИЦИИ}}', '', '', ''], ['', 'Итого', '', '', '{{СУММА}}']]);
+fillAct(oldTpl, findRowByValue(getSheet(SHEETS.ORDERS), 'order_id', '1'), '1', actLines('1'),
+  '2026-10-02 10:00:00');
+check('старый шаблон: вместо подписанта и директора — линии',
+  oldTpl.body.items[0].text === 'в лице ' + ACT_BLANK + ', ' + [ACT_BLANK, ACT_BLANK, '/', ACT_BLANK].join(' '),
+  oldTpl.body.items[0].text);
 
-// Заявка с сайта: акт собирается без вошедшего (autoAct с пустым именем).
-const blankAct = buildAct('1', '');
-signText = __docs.get(blankAct.document_id).body.getText();
-check('без имени — линия под подпись от руки, а не пустота',
-  signText.includes(ACT_BLANK) && !signText.includes('{{'), signText.slice(-300));
-
-check('кто подписывает: иное значение отклонено',
-  call('/settings/set', { settings: { act_signer: 'director' } }, actAdmin).status === 400);
-check('кто подписывает: пусто отклонено',
-  call('/settings/set', { settings: { act_signer: '' } }, actAdmin).status === 400);
-check('отклонённое не сохранилось',
-  call('/settings/get', {}, actAdmin).data.settings.act_signer === 'staff');
-call('/settings/set', { settings: { act_signer: 'master', act_master: '' } }, actAdmin);
+console.log('\n== акт: адрес из заявки ==');
+// Адрес приходит с сайта частью extra_input («… Адрес: …»), отдельной колонки
+// у него нет — в акт он попадает через splitExtraInput.
+const adrOrder = call('/order/create', {
+  order_no: '261002-7777', student_name: 'Адресова Ольга Ивановна', student_phone: '+79990007777',
+  issue_date: '03-10-2026', return_date: '06-10-2026', project: 'Курсовой фильм',
+  extra_input: 'Мастерская: Режиссура. Комментарий: к 10 утра. Адрес: Москва, ул. Шаболовка, д. 44, павильон 2',
+  items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
+}, actAdmin);
+const adrDoc = adrOrder.ok && __docs.get((String(adrOrder.data.act_url).match(/\/document\/d\/([^/]+)/) || [])[1]);
+check('адрес из заявки — в п. 4.3, без мастерской и комментария',
+  !!adrDoc && builtPara(adrDoc, '4.3.') ===
+    '4.3. Адрес использования оборудования: Москва, ул. Шаболовка, д. 44, павильон 2',
+  adrDoc ? builtPara(adrDoc, '4.3.') : adrOrder);
+check('проект — в п. 4.2',
+  !!adrDoc && builtPara(adrDoc, '4.2.') === '4.2. Указанные материальные ценности предназначены для: Курсовой фильм',
+  adrDoc && builtPara(adrDoc, '4.2.'));
 
 console.log('\n== акт собирается сам ==');
 // Кнопки «собрать акт» нет: акт нужен всегда, а значит его незачем просить.
@@ -3234,7 +3248,7 @@ const tgTexts = () => sent
   .filter((r) => /sendMessage/.test(r.url))
   .map((r) => JSON.parse(r.opts.payload).text);
 check('в чат ушло сообщение об акте со ссылкой <a href>',
-  tgTexts().some((m) => /^<b>АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/b> .*\n<a href="https:\/\/docs\.google\.com[^"]*">Открыть акт<\/a>$/.test(m)),
+  tgTexts().some((m) => /^<b><a href="https:\/\/docs\.google\.com[^"]*">АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/a><\/b>\n.+$/.test(m)),
   tgTexts().slice(-3));
 
 // Шаблон сломали — заказ всё равно должен записаться: это договорённость со
@@ -3291,7 +3305,7 @@ check('только заявленное — звёздочек нет',
 check('только заявленное — расшифровки звёздочки нет', legendCount() === 0);
 
 const docsBefore = __docs.size;
-const actMsgsBefore = tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length;
+const actMsgsBefore = tgTexts().filter((m) => /АКТ от/.test(m)).length;
 const stampBefore = exDoc.name.slice(0, 19);
 const exR1 = call('/transaction/checkout', { item_id: exA, order_id: exOrder.data.order_id }, actAdmin);
 const exR2 = call('/transaction/checkout', { item_id: exB, order_id: exOrder.data.order_id }, actAdmin);
@@ -3304,9 +3318,9 @@ let exRows = exTable().grid.slice(1, -1);
 check('сначала заявленное, потом сверх заявки',
   exRows.length === 2 && exRows[0][1] === 'Видеоштатив' && exRows[1][0] === '2', exRows);
 check('лишнее — одной строкой на модель, со звёздочкой',
-  exRows[1][1] === 'Прожектор Сверхзаказ *' && exRows[1][2] === '2', exRows[1]);
+  exRows[1][1] === 'Прожектор Сверхзаказ *' && exRows[1][3] === '2', exRows[1]);
 check('заводские номера лишнего перечислены',
-  exRows[1][3] === 'SN-EX-1, SN-EX-2', exRows[1][3]);
+  exRows[1][2] === 'SN-EX-1, SN-EX-2', exRows[1][2]);
 check('цена лишнего — по модели, за штуку на количество',
   exRows[1][4] === moneyDigits(3000), exRows[1][4]);
 check('под таблицей одна строка «* — выдано сверх заявки»', legendCount() === 1);
@@ -3318,7 +3332,7 @@ check('пересобран тот же документ — новых нет',
 check('ссылка в заказе та же',
   call('/order/card', { order_id: exOrder.data.order_id }, actAdmin).data.order.act_url === exUrl);
 check('второго сообщения об акте в чат нет',
-  tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length === actMsgsBefore);
+  tgTexts().filter((m) => /АКТ от/.test(m)).length === actMsgsBefore);
 check('дата акта прежняя', exDoc.body.getText().includes(stampBefore), stampBefore);
 
 // Вернули — всё равно выдавали: акт о переданном, как и у заявленных строк.
@@ -3326,9 +3340,9 @@ call('/transaction/checkin', { item_id: exA }, actAdmin);
 call('/transaction/checkout', { item_id: exC, order_id: exOrder.data.order_id }, actAdmin);
 exRows = exTable().grid.slice(1, -1);
 check('возвращённое лишнее из акта не пропало',
-  exRows.some((r) => r[1] === 'Прожектор Сверхзаказ *' && r[3] === 'SN-EX-1, SN-EX-2'), exRows);
+  exRows.some((r) => r[1] === 'Прожектор Сверхзаказ *' && r[2] === 'SN-EX-1, SN-EX-2'), exRows);
 check('другая модель — своя строка, без цены прочерк',
-  exRows.some((r) => r[1] === 'Отражатель Сверхзаказ *' && r[2] === '1' && r[4] === '—'), exRows);
+  exRows.some((r) => r[1] === 'Отражатель Сверхзаказ *' && r[3] === '1' && r[4] === '—'), exRows);
 check('расшифровка всё так же одна', legendCount() === 1);
 
 // Пересборка сломалась — выдача всё равно прошла, причина в журнале.
@@ -3402,7 +3416,7 @@ console.log('\n== темы форума: заявки и акты ==');
 // Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
 // настройка — General, как было до тем.
 const tgMsgs = () => sent.filter((r) => /sendMessage/.test(r.url)).map((r) => JSON.parse(r.opts.payload));
-const orderMsgs = () => tgMsgs().filter((m) => /^Заказ №/.test(m.text));
+const orderMsgs = () => tgMsgs().filter((m) => /Заказ №/.test(m.text));
 check('номер темы: пусто принимается',
   call('/settings/set', { settings: { notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin).ok === true);
 check('номер темы: число принимается',
@@ -3431,7 +3445,7 @@ const thrOrder = call('/order/create', {
   items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
 }, actAdmin);
 check('заказ с актом записан', thrOrder.ok === true, thrOrder);
-const actMsgs = tgMsgs().filter((m) => /^<b>АКТ от /.test(m.text));
+const actMsgs = tgMsgs().filter((m) => /АКТ от /.test(m.text));
 check('акт ушёл в тему «АКТЫ»',
   actMsgs.length === 1 && actMsgs[0].message_thread_id === 456, tgMsgs());
 

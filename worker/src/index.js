@@ -49,6 +49,12 @@ const READS = new Set([
 // Чтения, которые кэшируются без токена: их зовёт сайт, где никто не входит.
 const PUBLIC_READS = new Set(["/public/catalog", "/public/announcements"]);
 
+// Таблица отвечает от 7 до 30 секунд, а сайт ждёт объявления пять и сдаётся:
+// после каждой записи и каждых пяти минут первому посетителю объявлений не
+// видно вовсе. Поэтому у публичных чтений есть вторая, долгоживущая копия:
+// когда свежей нет, отдаём её сразу, а свежую догоняем в фоне.
+const STALE_TTL = 60 * 60 * 24 * 7;
+
 // Сколько раз пытаемся донести заявку до таблицы, прежде чем считать это
 // нашей проблемой, а не случайным сбоем.
 const DELIVER_TRIES = 10;
@@ -123,6 +129,11 @@ export default {
     if (cacheable && PUBLIC_READS.has(endpoint)) {
       const hit = await env.CACHE.get(key);
       if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
+      const old = await env.CACHE.get(staleKey(endpoint, await hash(JSON.stringify(body.payload || {}))));
+      if (old) {
+        ctx.waitUntil(refreshPublic(env, endpoint, body.payload));
+        return cors(json(JSON.parse(old), { "X-Mifs-Cache": "stale" }));
+      }
     } else if (cacheable && token) {
       // Отдаём кэш только тому, чей токен Apps Script уже подтверждал: иначе
       // подделанный токен получил бы весь каталог, не заходя в систему.
@@ -180,10 +191,21 @@ export default {
       // существовать и истекают сами. До ответа, а не после: склад сразу
       // после выдачи перечитывает список и не должен попасть на старое.
       await bumpGeneration(env);
+      // Снятое объявление не должно воскреснуть из долгой копии: её сносим и
+      // сразу собираем новую, пока сайт ещё никто не спросил.
+      if (endpoint.startsWith("/announcement/")) {
+        ctx.waitUntil(env.CACHE.delete(staleKey("/public/announcements", await hash("{}")))
+          .then(() => bumpGeneration(env))
+          .then(() => refreshPublic(env, "/public/announcements", {})));
+      }
     }
 
     if (cacheable && answer.ok && (token || PUBLIC_READS.has(endpoint))) {
       ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answer), { expirationTtl: TTL.cache }));
+      if (PUBLIC_READS.has(endpoint)) {
+        ctx.waitUntil(env.CACHE.put(staleKey(endpoint, await hash(JSON.stringify(body.payload || {}))),
+          JSON.stringify(answer), { expirationTtl: STALE_TTL }));
+      }
     }
 
     return cors(json(answer, { "X-Mifs-Cache": cacheable ? "miss" : "bypass" }));
@@ -586,6 +608,21 @@ async function askUpstream(env, body, signal) {
 async function generation(env) {
   const value = await env.CACHE.get("gen");
   return value || "0";
+}
+
+function staleKey(endpoint, payloadHash) {
+  return "stale:" + endpoint + ":" + payloadHash;
+}
+
+// Фоновое обновление публичного чтения: свежая копия под ключом текущего
+// поколения плюс долгая. Упавшая таблица ничего не портит — остаётся прежняя.
+async function refreshPublic(env, endpoint, payload) {
+  const upstream = await callUpstream(env, { endpoint, payload: payload || {} });
+  if (!upstream.ok || !upstream.envelope.ok) return;
+  const value = JSON.stringify(upstream.envelope);
+  await env.CACHE.put(await cacheKey(env, endpoint, payload, ""), value, { expirationTtl: TTL.cache });
+  await env.CACHE.put(staleKey(endpoint, await hash(JSON.stringify(payload || {}))), value,
+    { expirationTtl: STALE_TTL });
 }
 
 async function bumpGeneration(env) {
