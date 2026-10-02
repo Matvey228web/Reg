@@ -165,11 +165,6 @@
           '<input type="text" id="workshop" /></label>' +
         '<label class="field"><span class="cap">Комментарий</span>' +
           '<textarea id="note" rows="3"></textarea></label>' +
-        // Адрес — по желанию: съёмка бывает и в павильоне колледжа. Складу
-        // он нужен, чтобы знать, куда уезжает техника.
-        '<label class="field"><span class="cap">Адрес съёмок</span>' +
-          '<input type="text" id="address" autocomplete="off"' +
-            ' placeholder="если снимаете не в колледже" /></label>' +
         // Данные лежат в этом телефоне, и убрать их человек должен уметь сам:
         // на складе один телефон иногда ходит по рукам.
         '<button class="link-danger" type="button" id="forget">Забыть мои данные</button>' +
@@ -201,7 +196,7 @@
   // Список перерисовывается целиком при каждом изменении количества, а форма
   // живёт в том же блоке: без этого набранный текст пропадал от нажатия «+».
   var TEXT_FIELDS = ["name", "phone", "tg", "gname", "gphone", "project",
-                     "workshop", "note", "address"];
+                     "workshop", "note"];
 
   function snapshot() {
     if (!$("adult")) return null;
@@ -299,10 +294,6 @@
     var note = flat(val("note"));
     if (workshop) parts.push("Мастерская: " + workshop);
     if (note) parts.push("Комментарий: " + note);
-    // Метки разбирает бэкенд (splitExtraInput в Code.gs) — в сообщении бота
-    // каждая встаёт своей строкой.
-    var address = flat(val("address"));
-    if (address) parts.push("Адрес: " + address);
     return parts.join(". ");
   }
 
