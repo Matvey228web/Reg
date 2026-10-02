@@ -3674,7 +3674,33 @@ function tgOrderBuyerBlock(fields) {
 // Предел Telegram на одно сообщение.
 var TG_MAX_LEN = 4096;
 
-// Текст сообщения о новой заявке с сайта — раскладка прежних сообщений Tilda.
+// Строка «Input» с сайта: «Мастерская: …. Комментарий: …. Адрес: …» одной
+// колонкой extra_input (см. extraInput в site/cart.js). Разбираем по меткам,
+// а не по точкам: точка бывает и внутри комментария. Без меток (старые
+// заявки, ручной ввод) — весь текст идёт комментарием.
+var EXTRA_LABELS = ["Мастерская", "Комментарий", "Адрес"];
+
+function splitExtraInput(extra) {
+  var out = {};
+  extra = String(extra || "").trim();
+  if (!extra) return out;
+  var re = new RegExp("(?:^|\\.\\s+)(" + EXTRA_LABELS.join("|") + "):\\s*", "g");
+  var marks = [], m;
+  while ((m = re.exec(extra))) marks.push({ label: m[1], at: m.index, from: re.lastIndex });
+  if (!marks.length || marks[0].at !== 0) {
+    out["Комментарий"] = marks.length ? extra.substring(0, marks[0].at) : extra;
+  }
+  marks.forEach(function (mk, i) {
+    var to = i + 1 < marks.length ? marks[i + 1].at : extra.length;
+    var value = extra.substring(mk.from, to).trim();
+    if (value) out[mk.label] = out[mk.label] ? out[mk.label] + ". " + value : value;
+  });
+  return out;
+}
+
+// Текст сообщения о новой заявке с сайта — по образцу владельца (2 октября
+// 2026): номер, состав с суммой жирным, покупатель, затем приём, сдача,
+// проект, мастерская, комментарий и адрес съёмок по строке, внизу ссылка.
 // Не влезает в предел — режем список позиций, а не итог, покупателя и ссылку.
 function tgOrderMessage(parsed, fields, siteUrl) {
   var items = parsed.items || [];
@@ -3687,25 +3713,30 @@ function tgOrderMessage(parsed, fields, siteUrl) {
       (Number(it.qty) || 0) + " x " + (unit ? unit : "0.00") + ")";
   });
 
-  var tail = ["<b>Сумма: " + total + " RUB</b>", ""];
+  var tail = ["Сумма: " + total + " RUB</b>", ""];
   var buyer = tgOrderBuyerBlock(fields);
-  tail.push("<b>Покупатель</b>");
+  tail.push("Покупатель:");
   if (buyer) tail.push(buyer);
   tail.push("");
 
+  function add(label, value) {
+    value = String(value || "").trim();
+    if (value) tail.push(label + ": " + tgEscape(value.length > 500 ? value.substring(0, 500) + "…" : value));
+  }
   function when(d, t) { return d ? d + (t ? " " + t : "") : ""; }
-  var from = when(fields.issue_date, fields.issue_time);
-  var to = when(fields.return_date, fields.return_time);
-  if (from || to) tail.push("<b>Даты:</b> " + tgEscape(from || "—") + " — " + tgEscape(to || "—"));
-  if (String(fields.project || "").trim()) tail.push("Проект: " + tgEscape(String(fields.project).trim()));
-  var extra = String(fields.extra_input || "").trim();
-  if (extra) tail.push("Дополнительно: " + tgEscape(extra.length > 500 ? extra.substring(0, 500) + "…" : extra));
+  add("Прием", when(fields.issue_date, fields.issue_time));
+  add("Сдача", when(fields.return_date, fields.return_time));
+  add("Проект", fields.project);
+  var extra = splitExtraInput(fields.extra_input);
+  EXTRA_LABELS.forEach(function (label) { add(label, extra[label]); });
   if (siteUrl) {
     tail.push("");
-    tail.push('<a href="' + tgEscape(siteUrl) + '">Открыть заказ на сайте</a>');
+    tail.push('<b><a href="' + tgEscape(siteUrl) + '">Сделать заказ</a></b>');
   }
 
-  var head = "<b>Заказ №" + tgEscape(parsed.order_no) + "</b>";
+  // Жирный блок — от номера до суммы: открывающий тег в голове, закрывающий
+  // в хвосте, поэтому обрезка позиций его не разрывает.
+  var head = "Заказ №" + tgEscape(parsed.order_no) + "\n<b>";
   var tailText = tail.join("\n");
   var shown = itemLines.slice();
   function build() {
@@ -3713,7 +3744,7 @@ function tgOrderMessage(parsed, fields, siteUrl) {
     if (shown.length < itemLines.length) {
       body.push("… и ещё " + (itemLines.length - shown.length) + " поз.");
     }
-    return [head].concat(body).join("\n") + "\n" + tailText;
+    return head + body.join("\n") + (body.length ? "\n" : "") + tailText;
   }
   var text = build();
   while (text.length > TG_MAX_LEN && shown.length) {
