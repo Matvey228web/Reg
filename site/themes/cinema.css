@@ -7,8 +7,8 @@
  * занавес и тёплое золото; перфорация киноплёнки по краям баннера и подвала,
  * маркиза из лампочек по нижнему краю баннера, медленный луч прожектора, зерно.
  * Картинки лежат в art/: плёнка, маркиза, луч с пылинками, хлопушка и звёзды
- * нарисованы для сайта (cinema-*.svg, анимация внутри SMIL), проектор, попкорн и
- * билет — Fluent Emoji Flat (MIT).
+ * нарисованы для сайта (cinema-*.svg, анимация внутри SMIL). Реквизит сдержанный:
+ * хлопушка и блики — тонкая золотая линия, в подвале рамка кадра.
  * Светлая тема — тёплая бумага старой афиши, чёрный текст, красный занавес.
  *
  * Декор лежит в псевдоэлементах (absolute), pointer-events: none, вёрстку не
@@ -67,7 +67,6 @@ html[data-season="cinema"] {
   --cn-art-bulbs: url(art/cinema-marquee.svg);
   --cn-art-beam: url(art/cinema-beam.svg);
   --cn-art-stars: url(art/cinema-stars.svg);
-  --cn-art-proj: url(art/cinema-projector.svg);
 }
 
 /* --- Баннер: фото, плёнка, маркиза, зерно --- */
@@ -104,12 +103,12 @@ html[data-season="cinema"] .hero::after {
     linear-gradient(rgba(110, 12, 28, .2), rgba(110, 12, 28, .2)),
     linear-gradient(to bottom, rgba(var(--veil-rgb), .38) 0%, rgba(var(--veil-rgb), .6) 62%, var(--bg) 100%),
     linear-gradient(to right, rgba(var(--veil-rgb), .62), rgba(var(--veil-rgb), 0) 80%);
-  background-size: 58px 58px, 180px 180px, 100% 100%, 100% 100%, 100% 100%;
+  background-size: 46px 46px, 180px 180px, 100% 100%, 100% 100%, 100% 100%;
   background-repeat: no-repeat, repeat, no-repeat, no-repeat, no-repeat;
   background-position: right var(--pad) top 36px, 0 0, 0 0, 0 0, 0 0;
 }
 @media (min-width: 720px) {
-  html[data-season="cinema"] .hero::after { background-size: 88px 88px, 180px 180px, 100% 100%, 100% 100%, 100% 100%; background-position: right var(--pad) top 40px, 0 0, 0 0, 0 0, 0 0; }
+  html[data-season="cinema"] .hero::after { background-size: 64px 64px, 180px 180px, 100% 100%, 100% 100%, 100% 100%; background-position: right var(--pad) top 40px, 0 0, 0 0, 0 0, 0 0; }
 }
 
 /* Плёнка по верху и над маркизой: звено 72x21 повторяется, полоса шире экрана на
@@ -150,12 +149,12 @@ html[data-season="cinema"] .hero-in::after {
   background: var(--cn-art-bulbs) 0 0 / 60px 22px repeat-x;
 }
 
-/* Звёзды сразу за заголовком: мерцают по очереди внутри картинки. */
+/* Блики сразу за заголовком: мерцают по очереди внутри картинки. */
 html[data-season="cinema"] .hero h1::after {
   content: ""; position: absolute; pointer-events: none;
   left: 100%; top: -.55em; width: 62px; height: 32px; margin-left: 4px;
   background: var(--cn-art-stars) 0 0 / 100% 100% no-repeat;
-  filter: drop-shadow(0 0 5px rgba(var(--cn-gold-rgb), .55));
+  filter: drop-shadow(0 0 4px rgba(var(--cn-gold-rgb), .4));
 }
 @media (min-width: 720px) {
   html[data-season="cinema"] .hero h1::after { width: 84px; height: 44px; margin-left: 8px; top: -.45em; }
@@ -201,7 +200,7 @@ html[data-season="cinema"] .group-title::before {
   background: repeating-linear-gradient(-45deg, var(--cn-gold) 0 3px, transparent 3px 7px);
 }
 
-/* --- Подвал: плёнка по верху, проектор у знака, наклейки в углу --- */
+/* --- Подвал: плёнка по верху, рамка кадра в углу --- */
 
 html[data-season="cinema"] footer {
   position: relative; overflow: hidden;
@@ -209,21 +208,16 @@ html[data-season="cinema"] footer {
   border-top-color: rgba(var(--cn-gold-rgb), .4);
 }
 
-/* Проектор справа от знака: свет идёт вправо, низкий и слабый. */
-html[data-season="cinema"] .foot-brand { position: relative; }
-html[data-season="cinema"] .foot-brand::after {
-  content: ""; position: absolute; pointer-events: none;
-  left: 188px; top: -4px; width: 104px; height: 36px;
-  background: var(--cn-art-proj) 0 0 / 100% 100% no-repeat;
-  opacity: .9;
-}
-
-/* Попкорн и билет: две наклейки в правом углу, под строкой «ГБПОУ…». */
+/* Рамка кадра с уголками видоискателя в правом углу: тонкая золотая линия. */
 html[data-season="cinema"] footer::after {
   content: ""; position: absolute; pointer-events: none;
-  right: max(var(--pad), calc((100% - 1280px) / 2 + var(--pad))); bottom: 8px;
-  width: 76px; height: 46px;
-  background: url(art/cinema-stickers.svg) 0 0 / 100% 100% no-repeat;
+  right: max(var(--pad), calc((100% - 1280px) / 2 + var(--pad))); bottom: 10px;
+  width: 64px; height: 40px;
+  background: url(art/cinema-frame.svg) 0 0 / 100% 100% no-repeat;
+}
+/* На телефоне строка «ГБПОУ…» идёт во всю ширину — рамке там места нет. */
+@media (max-width: 719px) {
+  html[data-season="cinema"] footer::after { display: none; }
 }
 
 /* Без движения: плёнка и луч стоят, картинки берутся неподвижные. */
@@ -233,7 +227,6 @@ html[data-season="cinema"] footer::after {
     --cn-art-bulbs: url(art/cinema-marquee-static.svg);
     --cn-art-beam: url(art/cinema-beam-static.svg);
     --cn-art-stars: url(art/cinema-stars-static.svg);
-    --cn-art-proj: url(art/cinema-projector-static.svg);
   }
   html[data-season="cinema"] .hero-in::before { animation: none !important; transform: translateX(40%); }
   html[data-season="cinema"] .hero p::before,

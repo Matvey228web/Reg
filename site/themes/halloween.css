@@ -149,24 +149,28 @@ html[data-season="halloween"] .hero-in::before {
   html[data-season="halloween"] .hero-in::before { top: 14px; height: 170px; }
 }
 
-/* Тыква с огоньком: тёплое пятно света и мерцание, как у свечи. Стоит слева над
-   заголовком (внизу слева — сам заголовок), лежит в углу баннера, а не в .hero-in:
-   тот прижат книзу и по высоте равен только тексту. */
+/* Тлеющие искры: редкие мелкие оранжевые точки медленно поднимаются слева над
+   заголовком и гаснут (один слой, двигается только transform и opacity). Лежат в
+   углу баннера, а не в .hero-in: тот прижат книзу и по высоте равен тексту. */
 html[data-season="halloween"] .hero-in::after {
-  content: ""; position: absolute; left: 0; top: 56px; width: 76px; height: 76px;
+  content: ""; position: absolute; left: 0; top: 40px; width: 150px; height: 130px;
   background:
-    url(art/jack-o-lantern.svg) center 14px / 44px 44px no-repeat,
-    radial-gradient(circle, rgba(var(--hw-glow), .42), rgba(var(--hw-glow), 0) 68%);
-  pointer-events: none;
-  animation: hw-flicker 5.3s linear infinite;
+    radial-gradient(circle at 24px 96px, rgba(var(--hw-glow), .9) 0 1.4px, transparent 2.4px),
+    radial-gradient(circle at 70px 60px, rgba(var(--hw-glow), .7) 0 1px, transparent 2px),
+    radial-gradient(circle at 112px 104px, rgba(var(--hw-glow), .85) 0 1.2px, transparent 2.2px),
+    radial-gradient(circle at 46px 28px, rgba(var(--hw-glow), .6) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 128px 40px, rgba(var(--hw-glow), .7) 0 1.1px, transparent 2px);
+  pointer-events: none; opacity: 0;
+  animation: hw-embers 9s ease-out infinite;
 }
 @media (min-width: 720px) {
-  html[data-season="halloween"] .hero-in::after {
-    left: max(0px, calc((100% - 1280px) / 2)); top: 58px; width: 104px; height: 104px;
-    background:
-      url(art/jack-o-lantern.svg) center 20px / 62px 62px no-repeat,
-      radial-gradient(circle, rgba(var(--hw-glow), .42), rgba(var(--hw-glow), 0) 68%);
-  }
+  html[data-season="halloween"] .hero-in::after { left: max(0px, calc((100% - 1280px) / 2)); width: 200px; top: 50px; height: 170px; }
+}
+@keyframes hw-embers {
+  0%   { opacity: 0; transform: translate3d(0, 34px, 0); }
+  15%  { opacity: .8; }
+  70%  { opacity: .5; }
+  100% { opacity: 0; transform: translate3d(8px, -26px, 0); }
 }
 
 /* --- Паутина: угол шапки и угол подвала, паучок на нити --- */
@@ -189,7 +193,8 @@ html[data-season="halloween"][data-theme="light"] footer::before { filter: brigh
 html[data-season="halloween"][data-theme="light"] .topbar::before { opacity: .7; }
 html[data-season="halloween"][data-theme="light"] footer::before { opacity: .5; }
 
-/* Паучок спускается с кромки шапки у правого края. Нить (::before) и паук
+/* Тонкий силуэт паучка (art/halloween-spider.svg) спускается с кромки шапки
+   у правого края. Нить (::before) и паук
    (::after) качаются одним ритмом и одной кривой: нить вытягивается на столько
    же, на сколько паук опускается, поэтому не рвётся и не торчит. Нить лежит под
    содержимым шапки, паук ниже её кромки — над баннером. Двигается только
@@ -208,31 +213,11 @@ html[data-season="halloween"] .topbar-in::before {
 }
 html[data-season="halloween"] .topbar-in::after {
   z-index: -1; top: 62px; right: 2px; width: 24px; height: 24px;
-  background: url(art/spider.svg) center / contain no-repeat;
+  background: url(art/halloween-spider.svg) center / contain no-repeat;
   animation-name: hw-spider;
 }
 @keyframes hw-thread { from { transform: scaleY(.857); } to { transform: scaleY(1); } }
 @keyframes hw-spider { from { transform: translateY(-10px); } to { transform: translateY(0); } }
-
-/* Призрак под кромкой подвала: медленно плывёт слева направо (40 с), едва
-   заметно покачивается и гаснет у краёв. Идёт по верхнему полю подвала, где нет
-   текста, и под содержимым. */
-html[data-season="halloween"] footer::after {
-  content: ""; position: absolute; z-index: -1; left: 0; top: 3px; width: 26px; height: 26px;
-  background: url(art/ghost.svg) center / contain no-repeat;
-  pointer-events: none; opacity: 0;
-  animation: hw-ghost-x 40s linear infinite, hw-ghost-y 5.5s ease-in-out infinite alternate;
-}
-@keyframes hw-ghost-x {
-  0%   { translate: -40px 0; opacity: 0; }
-  6%   { opacity: .7; }
-  94%  { opacity: .7; }
-  100% { translate: calc(100vw + 14px) 0; opacity: 0; }
-}
-@keyframes hw-ghost-y {
-  from { transform: translateY(0); }
-  to   { transform: translateY(-3px); }
-}
 
 /* Луна: приглушённая, с ореолом, в углу баннера под завесой (art/halloween-moon.svg
    — Fluent Emoji full-moon). Лежит в слое снимка, отдельного элемента нет. */
@@ -270,11 +255,10 @@ html[data-season="halloween"][data-theme="light"] input[type="time"]::-webkit-ca
   html[data-season="halloween"] .hero::before,
   html[data-season="halloween"] .hero-in::after,
   html[data-season="halloween"] .topbar-in::before,
-  html[data-season="halloween"] .topbar-in::after,
-  html[data-season="halloween"] footer::after { animation: none !important; will-change: auto; }
-  /* Вместо полёта — неподвижная стая в кадре; призрак стоит на месте. */
+  html[data-season="halloween"] .topbar-in::after { animation: none !important; will-change: auto; }
+  /* Вместо полёта — неподвижная стая в кадре, искры стоят. */
   html[data-season="halloween"] .hero-in::before {
     background-image: url(art/halloween-bats-static.svg); opacity: .9;
   }
-  html[data-season="halloween"] footer::after { opacity: .7; translate: 12px 0; }
+  html[data-season="halloween"] .hero-in::after { opacity: .6; transform: none; }
 }
