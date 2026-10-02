@@ -50,6 +50,7 @@
   --accent: #e2231a;        /* заливка кнопок: белый на нём даёт 4.68 */
   --accent-text: #ff4b3e;   /* тот же смысл текстом: на фоне даёт 5.85 */
   --on-accent: #fff;        /* текст на заливке акцента */
+  --ok: #1b7f45;            /* «отправлено»: заливка кнопки, белый на ней даёт 5.3 */
   --shot: #0f0f12;          /* фон пустой карточки без картинки категории */
 
   /* Приглушение картинок (баннер, фон пустых карточек): завеса цвета страницы
@@ -661,10 +662,23 @@ input:focus-visible, textarea:focus-visible {
   background: none; color: var(--ink); border-color: var(--line);
 }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+/* «Отправить» заливается зелёным слева направо, пока заявка уходит: до 88% за
+   четыре секунды, на ответе склада добегает до края. Красный под заливкой
+   остаётся, если отправка не вышла. */
+.btn--send { position: relative; overflow: hidden; }
+.btn--send::before {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ok);
+}
+.btn--send.is-sending::before { width: 88%; transition: width 4s cubic-bezier(.1, .6, .3, 1); }
+.btn--send.is-done::before { width: 100%; transition: width .3s ease-out; }
+.btn--send.is-done { border-color: var(--ok); }
+.btn--send[disabled].is-sending, .btn--send[disabled].is-done { opacity: 1; }
+.btn-label { position: relative; }
+.btn--operator { margin-top: 10px; }
 /* Бронь — единственное действие на странице, поэтому во всю ширину: три
    кнопки в ряд на телефоне не влезали и переносились лестницей. */
 .btn--wide { width: 100%; min-height: 52px; font-size: 15px; }
-/* Подпись под «Забронировать»: полупрозрачный курсив, чтобы читалась, но не
+/* Подпись под «Отправить»: полупрозрачный курсив, чтобы читалась, но не
    спорила с кнопкой. Цвет — основной текст, а не приглушённый: при .6
    прозрачности он всё равно даёт на панели больше 4.5. */
 .send-hint {
@@ -740,7 +754,7 @@ input:focus-visible, textarea:focus-visible {
 
 /* «Забыть мои данные» стоит под формой, а не в строке корзины: своя высота и
    отступ сверху, чтобы не приклеивалось к комментарию и не путалось с
-   «Забронировать». */
+   «Отправить». */
 #forget { padding: 12px 0; margin-top: 4px; }
 
 .field { display: grid; gap: 5px; margin-bottom: 12px; }

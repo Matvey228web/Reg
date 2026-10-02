@@ -13,6 +13,8 @@ var Site = (function () {
   // https://script.google.com/macros/s/AKfycbyEGfWDeV8esYMCk6h-rkuroUNK28PVFNcc0lADlCRNBlRA8wfcCOvzxou6UVgmX4kn/exec
   // Витрина от этого не зависит вовсе: каталог лежит снимком рядом со страницей.
   var BACKEND = "https://mifs-rent-api.odintsovmatvey08.workers.dev";
+  // Чат склада с заявками (Telegram). Пусто — кнопка «Операторская» не показывается.
+  var OPERATOR_URL = "";
   var CART_KEY = "mifs_cart";
   // Данные заявки. Отдельно от корзины: корзину человек меняет весь день, а
   // ФИО с телефоном вводит один раз — и терять их при уходе в каталог нельзя.
@@ -494,6 +496,7 @@ var Site = (function () {
     humanDate: humanDate, icon: icon, shotIcon: shotIcon, shotAttr: shotAttr, tick: tick,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
+    OPERATOR_URL: OPERATOR_URL,
     sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
