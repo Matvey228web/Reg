@@ -32,9 +32,19 @@ const LabelsScreen = (() => {
   let singleItemId = null; // пришли из карточки предмета
   let catalogError = "";   // каталог не подтянулся — что ответил сервер
 
+  // Старая подпись по умолчанию писалась через «#». У тех, кто открывал экран
+  // до замены, она осталась в памяти телефона, и этикетки печатались с «#40».
+  // Её считаем прежним умолчанием и переписываем; свою подпись не трогаем.
+  const OLD_DEFAULT_CAPTION = "киноколледж #40";
+
   function caption() {
     try {
-      return localStorage.getItem(CAPTION_KEY) || DEFAULT_CAPTION;
+      const stored = localStorage.getItem(CAPTION_KEY);
+      if (stored && stored.trim().toLowerCase() === OLD_DEFAULT_CAPTION) {
+        saveCaption(DEFAULT_CAPTION);
+        return DEFAULT_CAPTION;
+      }
+      return stored || DEFAULT_CAPTION;
     } catch {
       return DEFAULT_CAPTION;
     }
@@ -128,11 +138,7 @@ const LabelsScreen = (() => {
       откроет лист «Поделиться», а если его нет — покажет картинку во весь
       экран. Сохраняйте по одной; пачкой и для печати откройте приложение в Safari.</p>
       <div class="section-title">Размер в настоящую величину</div>
-      <div class="size-row" id="labels-sizes"></div>
-      <p class="hint">Нажмите на размер, чтобы взять его, на образец ниже —
-      чтобы рассмотреть. Ряд прокручивается вбок.</p>
-      <div class="section-title">Как будет выглядеть</div>
-      <div id="labels-preview"></div>`;
+      <div class="size-row" id="labels-sizes"></div>`;
 
     if (!singleItemId) {
       const cats = categoryList();
@@ -184,8 +190,9 @@ const LabelsScreen = (() => {
     });
   }
 
-  // Предпросмотр показываем в реальных миллиметрах и только несколько штук:
-  // рисовать 628 QR на экран незачем, а понять, что влезает, хватает и трёх.
+  // Образец — один ряд размеров в настоящую величину, на первой отобранной
+  // позиции. Отдельный блок «Как будет выглядеть» с тремя крупными образцами
+  // убран по просьбе владельца: он повторял тот же ряд и удлинял экран.
   function recount() {
     items = selected();
     const size = SIZES[sizeKey];
@@ -193,7 +200,6 @@ const LabelsScreen = (() => {
       `К печати: ${items.length} ${plural(items.length, "этикетка", "этикетки", "этикеток")}` +
       ` · ${size.w}×${size.h} мм`;
     drawSizes(items[0]);
-    drawPreview(items.slice(0, 3));
   }
 
   // Предпросмотр показываем той же картинкой, которая уйдёт в печать и в файл:
@@ -205,37 +211,6 @@ const LabelsScreen = (() => {
     canvas.style.width = size.w + "mm";
     canvas.style.height = size.h + "mm";
     return canvas;
-  }
-
-  // Образец в списке нажимается: на экране этикетка размером 30×40 мм, и ни
-  // номер, ни подпись на ней не разобрать. Открываем её во весь экран в печатном
-  // разрешении — там же её и сохраняют долгим нажатием.
-  function previewNode(item, size) {
-    const node = labelNode(item, size, PREVIEW_SCALE);
-    node.classList.add("label--tappable");
-    node.setAttribute("role", "button");
-    node.setAttribute("tabindex", "0");
-    node.setAttribute("title", "Показать крупно");
-    const open = () => showLabel(item, size);
-    node.addEventListener("click", open);
-    node.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
-    });
-    return node;
-  }
-
-  function showLabel(item, size) {
-    const canvas = labelCanvas(item, size, caption(), FILE_SCALE);
-    // Кнопкой, а не «удерживайте картинку»: системное меню по долгому нажатию
-    // вебвью Telegram не показывает — подсказка обещала то, чего не бывает.
-    QR.showImage(
-      canvas,
-      item.name + " · " + item.item_id,
-      TG.isAvailable()
-        ? "Скачать напрямую из Telegram нельзя — кнопка откроет системный лист «Поделиться», а если его нет — покажет картинку во весь экран (удерживайте, чтобы сохранить)."
-        : "",
-      () => saveImageFor(canvas, fileName(item, size), item.name,
-                         document.getElementById("qr-overlay-save")));
   }
 
   // Ряд размеров: одна и та же этикетка во всех форматах, в настоящую величину.
@@ -272,17 +247,6 @@ const LabelsScreen = (() => {
     if (select) select.value = key;
     TG.hapticSuccess();
     recount();
-  }
-
-  function drawPreview(list) {
-    const box = document.getElementById("labels-preview");
-    const size = SIZES[sizeKey];
-    box.innerHTML = "";
-    if (!list.length) {
-      box.innerHTML = `<p class="empty">Ничего не найдено</p>`;
-      return;
-    }
-    list.forEach((item) => box.appendChild(previewNode(item, size)));
   }
 
   function print() {

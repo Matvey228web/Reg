@@ -241,16 +241,12 @@ const OrderScreen = (() => {
              если его нет, значит в «Настройки → Акт сдачи-приёмки» ещё не
              создан шаблон.</p>`}
 
-      <div id="order-archive-error"></div>
       ${o.archived_at
         ? `<button class="btn btn--secondary" id="order-archive"
-                   data-back="1" style="margin-top:8px;">Вернуть из архива</button>
+                   style="margin-top:8px;">Вернуть из архива</button>
            <p class="hint">Заказ в архиве: в общем списке его не видно,
              но он цел — состав, даты, исходный текст.</p>`
-        : `<button class="btn btn--secondary" id="order-archive"
-                   style="margin-top:8px;">Убрать в архив</button>
-           <p class="hint">Архив прячет заказ из списка, но ничего не стирает —
-             мало ли что. Пока по заказу есть вещи на руках, убрать нельзя.</p>`}
+        : ""}
 
       <div class="section">
         <div class="section-title">Арендатор</div>
@@ -440,7 +436,7 @@ const OrderScreen = (() => {
       btn.addEventListener("click", () => issueLine(order, Number(btn.dataset.line)));
     });
     const arcBtn = document.getElementById("order-archive");
-    if (arcBtn) arcBtn.addEventListener("click", () => archiveOrder(order, arcBtn));
+    if (arcBtn) arcBtn.addEventListener("click", () => unarchiveOrder(order, arcBtn));
     const byId = new Map(open.map((g) => [String(g.item_id), g]));
     document.querySelectorAll(".order-checkin-line").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -604,36 +600,24 @@ const OrderScreen = (() => {
     reconcile();
   }
 
-  // Архив, а не удаление: запись о договорённости не стирают. Возврат из
-  // архива — та же кнопка, тем же запросом.
-  async function archiveOrder(order, btn) {
-    const back = btn.dataset.back === "1";
-    if (!back) {
-      const go = await new Promise((resolve) => TG.showConfirm(
-        `Убрать заказ №${order.order_no} в архив? Из списка исчезнет, ` +
-        "но сохранится целиком.", resolve));
-      if (!go) return;
-    }
+  // Возврат из архива. Убирать в архив с карточки больше нельзя (кнопку сняли
+  // по просьбе владельца), а уже убранные заказы должны уметь вернуться.
+  async function unarchiveOrder(order, btn) {
     btn.disabled = true;
-    btn.textContent = back ? "Возвращаем…" : "Убираем…";
+    btn.textContent = "Возвращаем…";
     try {
-      await apiPost("/order/archive", { order_id: Number(order.order_id), back });
-      // Список заказов держится в кэше: без сброса убранный заказ остаётся на
-      // экране, и человек жмёт «в архив» второй раз, думая, что не сработало.
+      await apiPost("/order/archive", { order_id: Number(order.order_id), back: true });
+      // Список заказов держится в кэше: без сброса вернувшийся заказ в нём не
+      // появится до истечения срока.
       Cache.clear("orders");
       TG.hapticSuccess();
-      if (back) {
-        TG.showAlert("Заказ вернулся в список");
-        await load({ force: true });
-      } else {
-        TG.showAlert("Заказ в архиве");
-        Router.navigate("orders");
-      }
+      TG.showAlert("Заказ вернулся в список");
+      await load({ force: true });
     } catch (err) {
       TG.hapticError();
       TG.showAlert(err.message);
       btn.disabled = false;
-      btn.textContent = back ? "Вернуть из архива" : "Убрать в архив";
+      btn.textContent = "Вернуть из архива";
     }
   }
 

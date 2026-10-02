@@ -204,9 +204,9 @@ const OrdersScreen = (() => {
       </div>
       <div class="form-group">
         <div class="field"><label for="mo-issue">Дата выдачи</label>
-          <input id="mo-issue" type="date" /></div>
+          <input id="mo-issue" type="date" required placeholder="не задано" /></div>
         <div class="field"><label for="mo-return">Дата возврата</label>
-          <input id="mo-return" type="date" /></div>
+          <input id="mo-return" type="date" required placeholder="не задано" /></div>
         <div class="field"><label for="mo-project">Проект</label>
           <input id="mo-project" type="text" /></div>
       </div>
