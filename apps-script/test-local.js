@@ -2369,15 +2369,15 @@ so = call('/public/order', { raw_text: botOrderText('270101-0001', [
 check('заявка для сообщения принята', so.ok === true, so);
 let tgm = siteTg();
 check('parse_mode HTML в сообщении о заявке', tgm && tgm.parse_mode === 'HTML', tgm);
-check('заголовок с номером, ниже жирный блок состава', /^Заказ №270101-0001\n<b>1\. /.test(tgm.text), tgm.text);
+check('заголовок с номером, через строку состав', /^<b>📦 Заказ №270101-0001<\/b>\n\n1\. /.test(tgm.text), tgm.text);
 check('строка позиции: сумма и (кол-во x цена)',
   tgm.text.indexOf('1. ' + siteCat.model_name + ': 77000 (2 x 38500)') !== -1, tgm.text);
 check('нулевая цена печатается как у Tilda',
   tgm.text.indexOf('2. Бесплатная вещь: 0 (1 x 0.00)') !== -1, tgm.text);
-check('сумма — по строкам, закрывает жирный блок', /\nСумма: 77000 RUB<\/b>\n/.test(tgm.text), tgm.text);
+check('сумма — по строкам, жирным', /\n<b>Сумма: 77000 RUB<\/b>\n/.test(tgm.text), tgm.text);
 check('блок покупателя для взрослого: ФИО, телефон, ник',
-  /Покупатель:\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
-check('приём и сдача со временем', /\nПрием: 2026-10-01 10:00\nСдача: 2026-10-05 18:00\n/.test(tgm.text), tgm.text);
+  /<b>👤 Покупатель<\/b>\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
+check('приём и сдача со временем', /\n\n<b>📅 Сроки<\/b>\nПрием: 2026-10-01 10:00\nСдача: 2026-10-05 18:00\n\n<b>🎬 Съёмка<\/b>\n/.test(tgm.text), tgm.text);
 check('проект отдельной строкой', /Проект: курсовая/.test(tgm.text), tgm.text);
 check('без Input строк мастерской, комментария и адреса нет',
   !/Мастерская:|Комментарий:|Адрес:/.test(tgm.text), tgm.text);
@@ -2389,12 +2389,12 @@ so = call('/public/order', { raw_text: botOrderText('270101-0011', [
 ], adultBuyer.concat(['Input: Мастерская: оператор. Комментарий: Доп. алекса и прочие понты. Адрес: Москва, ул. Примерная 1'])) });
 tgm = siteTg();
 check('мастерская, комментарий и адрес — по строке, в порядке образца',
-  /\nПроект: курсовая\nМастерская: оператор\nКомментарий: Доп\. алекса и прочие понты\nАдрес: Москва, ул\. Примерная 1\n/.test(tgm.text), tgm.text);
+  /<b>🎬 Съёмка<\/b>\nПроект: курсовая\nМастерская: оператор\nКомментарий: Доп\. алекса и прочие понты\nАдрес: Москва, ул\. Примерная 1\n/.test(tgm.text), tgm.text);
 check('Input без меток — комментарием', splitExtraInput('просто текст')['Комментарий'] === 'просто текст');
 check('старый Input «Мастерская: …» без адреса',
   JSON.stringify(splitExtraInput('Мастерская: звук, 2 курс')) === JSON.stringify({ 'Мастерская': 'звук, 2 курс' }));
 check('ссылка на сайт из site_url, экранированная',
-  tgm.text.indexOf('<b><a href="https://example.test/site?a=1&amp;b=2">Сделать заказ</a></b>') !== -1, tgm.text);
+  tgm.text.indexOf('\n\n<a href="https://example.test/site?a=1&amp;b=2">Сделать заказ</a>') !== -1, tgm.text);
 
 // Несовершеннолетний: представитель, затем сам арендатор.
 so = call('/public/order', { raw_text: botOrderText('270101-0002', [
@@ -2404,7 +2404,7 @@ so = call('/public/order', { raw_text: botOrderText('270101-0002', [
   'Phone_minors: +70000000002', 'Telegram_Minors: @yunov']) });
 tgm = siteTg();
 check('блок покупателя для несовершеннолетнего',
-  /Покупатель:\nПредставитель: Опекунов Опекун Опекунович\nТелефон представителя: \+70000000001\nНесовершеннолетний: Юнов Юн Юнович\nТелефон: \+70000000002\nTelegram: @yunov/.test(tgm.text), tgm.text);
+  /<b>👤 Покупатель<\/b>\nПредставитель: Опекунов Опекун Опекунович\nТелефон представителя: \+70000000001\nНесовершеннолетний: Юнов Юн Юнович\nТелефон: \+70000000002\nTelegram: @yunov/.test(tgm.text), tgm.text);
 
 // Всё, что пришло с формы, экранируется.
 so = call('/public/order', { raw_text: botOrderText('270101-0003', [
@@ -2432,7 +2432,7 @@ check('длинная заявка принята', so.ok === true, so);
 tgm = siteTg();
 check('сообщение укладывается в предел Telegram', tgm.text.length <= 4096, tgm.text.length);
 check('список урезан пометкой «… и ещё N поз.»', /… и ещё \d+ поз\./.test(tgm.text), tgm.text.slice(0, 200));
-check('сумма по всем позициям сохранена', /Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
+check('сумма по всем позициям сохранена', /<b>Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
 check('покупатель и ссылка уцелели',
   /Тестов Тест Тестович/.test(tgm.text) && /<a href="https:\/\/example\.test\/">/.test(tgm.text), tgm.text.slice(-400));
 metaSet('setting_site_url', '');
@@ -3193,7 +3193,7 @@ const tgTexts = () => sent
   .filter((r) => /sendMessage/.test(r.url))
   .map((r) => JSON.parse(r.opts.payload).text);
 check('в чат ушло сообщение об акте со ссылкой <a href>',
-  tgTexts().some((m) => /^<b>АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/b> .*\n<a href="https:\/\/docs\.google\.com[^"]*">Открыть акт<\/a>$/.test(m)),
+  tgTexts().some((m) => /^<b><a href="https:\/\/docs\.google\.com[^"]*">АКТ от \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}<\/a><\/b>\n.+$/.test(m)),
   tgTexts().slice(-3));
 
 // Шаблон сломали — заказ всё равно должен записаться: это договорённость со
@@ -3250,7 +3250,7 @@ check('только заявленное — звёздочек нет',
 check('только заявленное — расшифровки звёздочки нет', legendCount() === 0);
 
 const docsBefore = __docs.size;
-const actMsgsBefore = tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length;
+const actMsgsBefore = tgTexts().filter((m) => /АКТ от/.test(m)).length;
 const stampBefore = exDoc.name.slice(0, 19);
 const exR1 = call('/transaction/checkout', { item_id: exA, order_id: exOrder.data.order_id }, actAdmin);
 const exR2 = call('/transaction/checkout', { item_id: exB, order_id: exOrder.data.order_id }, actAdmin);
@@ -3277,7 +3277,7 @@ check('пересобран тот же документ — новых нет',
 check('ссылка в заказе та же',
   call('/order/card', { order_id: exOrder.data.order_id }, actAdmin).data.order.act_url === exUrl);
 check('второго сообщения об акте в чат нет',
-  tgTexts().filter((m) => /^<b>АКТ от/.test(m)).length === actMsgsBefore);
+  tgTexts().filter((m) => /АКТ от/.test(m)).length === actMsgsBefore);
 check('дата акта прежняя', exDoc.body.getText().includes(stampBefore), stampBefore);
 
 // Вернули — всё равно выдавали: акт о переданном, как и у заявленных строк.
@@ -3361,7 +3361,7 @@ console.log('\n== темы форума: заявки и акты ==');
 // Группа склада — форум: заявки идут в тему «ЗАЯВКИ», акты — в «АКТЫ». Пустая
 // настройка — General, как было до тем.
 const tgMsgs = () => sent.filter((r) => /sendMessage/.test(r.url)).map((r) => JSON.parse(r.opts.payload));
-const orderMsgs = () => tgMsgs().filter((m) => /^Заказ №/.test(m.text));
+const orderMsgs = () => tgMsgs().filter((m) => /Заказ №/.test(m.text));
 check('номер темы: пусто принимается',
   call('/settings/set', { settings: { notify_thread_orders: '', notify_thread_acts: '' } }, actAdmin).ok === true);
 check('номер темы: число принимается',
@@ -3390,7 +3390,7 @@ const thrOrder = call('/order/create', {
   items: [{ line_no: 1, raw_name: 'Видеоштатив', qty: 1 }],
 }, actAdmin);
 check('заказ с актом записан', thrOrder.ok === true, thrOrder);
-const actMsgs = tgMsgs().filter((m) => /^<b>АКТ от /.test(m.text));
+const actMsgs = tgMsgs().filter((m) => /АКТ от /.test(m.text));
 check('акт ушёл в тему «АКТЫ»',
   actMsgs.length === 1 && actMsgs[0].message_thread_id === 456, tgMsgs());
 

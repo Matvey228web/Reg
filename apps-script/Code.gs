@@ -3698,9 +3698,10 @@ function splitExtraInput(extra) {
   return out;
 }
 
-// Текст сообщения о новой заявке с сайта — по образцу владельца (2 октября
-// 2026): номер, состав с суммой жирным, покупатель, затем приём, сдача,
-// проект, мастерская, комментарий и адрес съёмок по строке, внизу ссылка.
+// Текст сообщения о новой заявке с сайта. Сначала был по образцу владельца
+// одним жирным блоком (2 октября 2026), в тот же день владелец попросил
+// читаемее: разделы с заголовками и пустой строкой между ними — состав,
+// покупатель, сроки, съёмка, — чтобы глазом сразу находить нужное.
 // Не влезает в предел — режем список позиций, а не итог, покупателя и ссылку.
 function tgOrderMessage(parsed, fields, siteUrl) {
   var items = parsed.items || [];
@@ -3713,30 +3714,31 @@ function tgOrderMessage(parsed, fields, siteUrl) {
       (Number(it.qty) || 0) + " x " + (unit ? unit : "0.00") + ")";
   });
 
-  var tail = ["Сумма: " + total + " RUB</b>", ""];
-  var buyer = tgOrderBuyerBlock(fields);
-  tail.push("Покупатель:");
-  if (buyer) tail.push(buyer);
-  tail.push("");
-
-  function add(label, value) {
+  var tail = ["<b>Сумма: " + total + " RUB</b>"];
+  function section(title, lines) {
+    if (!lines.length) return;
+    tail.push("", "<b>" + title + "</b>");
+    tail.push.apply(tail, lines);
+  }
+  function line(label, value) {
     value = String(value || "").trim();
-    if (value) tail.push(label + ": " + tgEscape(value.length > 500 ? value.substring(0, 500) + "…" : value));
+    return value ? [label + ": " + tgEscape(value.length > 500 ? value.substring(0, 500) + "…" : value)] : [];
   }
   function when(d, t) { return d ? d + (t ? " " + t : "") : ""; }
-  add("Прием", when(fields.issue_date, fields.issue_time));
-  add("Сдача", when(fields.return_date, fields.return_time));
-  add("Проект", fields.project);
+
+  var buyer = tgOrderBuyerBlock(fields);
+  section("👤 Покупатель", buyer ? buyer.split("\n") : []);
+  section("📅 Сроки", line("Прием", when(fields.issue_date, fields.issue_time))
+    .concat(line("Сдача", when(fields.return_date, fields.return_time))));
   var extra = splitExtraInput(fields.extra_input);
-  EXTRA_LABELS.forEach(function (label) { add(label, extra[label]); });
+  section("🎬 Съёмка", EXTRA_LABELS.reduce(function (acc, label) {
+    return acc.concat(line(label, extra[label]));
+  }, line("Проект", fields.project)));
   if (siteUrl) {
-    tail.push("");
-    tail.push('<b><a href="' + tgEscape(siteUrl) + '">Сделать заказ</a></b>');
+    tail.push("", '<a href="' + tgEscape(siteUrl) + '">Сделать заказ</a>');
   }
 
-  // Жирный блок — от номера до суммы: открывающий тег в голове, закрывающий
-  // в хвосте, поэтому обрезка позиций его не разрывает.
-  var head = "Заказ №" + tgEscape(parsed.order_no) + "\n<b>";
+  var head = "<b>📦 Заказ №" + tgEscape(parsed.order_no) + "</b>\n\n";
   var tailText = tail.join("\n");
   var shown = itemLines.slice();
   function build() {
@@ -5808,8 +5810,8 @@ function buildAct(orderId) {
   // Диску, и повторная сборка не плодит документы на один заказ.
   updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
 
-  tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
-    '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
+  tgSend('<b><a href="' + tgEscape(url) + '">АКТ от ' + tgEscape(stamp) + "</a></b>\n" +
+    tgEscape(fio), "", "acts");
 
   return {
     url: url, document_id: copy.getId(), lines: lines.length,
