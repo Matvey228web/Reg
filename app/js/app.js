@@ -12,9 +12,6 @@
         ? `${escapeHtml(session.full_name)}<span>${escapeHtml(roleLabel(session))}</span>`
         : "";
       const isAdmin = !!session && session.role === "Admin";
-      // Пустая строка, а не "block": раскладку плитки задаёт стиль, а inline
-      // display её перебивал — иконка уезжала от названия.
-      document.getElementById("home-staff-card").style.display = isAdmin ? "" : "none";
       // Адрес сайта приходит в сессии вместе с настройками — отдельный запрос
       // ради одной строки стоил бы 5–8 секунд на каждом открытии главной.
       const site = ((session && session.settings) || {}).site_url || "";

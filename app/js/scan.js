@@ -405,7 +405,7 @@ const ScanScreen = (() => {
           </div>` : `
           <div class="field">
             <label for="scan-return-date">Ожидаемая дата возврата</label>
-            <input type="date" id="scan-return-date" />
+            <input type="date" id="scan-return-date" required placeholder="не задано" />
             <p class="hint">Подставляется из заказа; можно поправить.</p>
           </div>`}
           <div class="field field--stacked">
@@ -480,12 +480,31 @@ const ScanScreen = (() => {
 
   // Поле «Заказ» в форме выдачи — отдельно, чтобы подставить список, когда он
   // догрузится в фоне, не трогая остальную форму (заметки, количество, срок).
-  function orderFieldHtml() {
+  // В списке — только самые свежие заказы: за сезон открытых набирается
+  // десятки, и на телефоне нужный тонул в длинной прокрутке. Выдают почти
+  // всегда по тому, что оформили на днях. Порядок — как во вкладке «Заказы»
+  // (orders.js): новые сверху. keepId — заказ, который уже выбран в поле:
+  // если он старше шести последних, он остаётся в списке, а не пропадает.
+  const ORDERS_SHOWN = 6;
+
+  function shownOrders(keepId) {
+    const sorted = orders.slice().sort((a, b) =>
+      String(b.created_at || "").localeCompare(String(a.created_at || "")) ||
+      Number(b.order_id) - Number(a.order_id));
+    const top = sorted.slice(0, ORDERS_SHOWN);
+    if (keepId && !top.some((o) => String(o.order_id) === String(keepId))) {
+      const kept = sorted.find((o) => String(o.order_id) === String(keepId));
+      if (kept) top.push(kept);
+    }
+    return top;
+  }
+
+  function orderFieldHtml(keepId) {
     return `
             <label for="scan-order">Заказ</label>
             <select id="scan-order">
               <option value="">${ordersLoading ? "загружаем заказы…" : "— выберите —"}</option>
-              ${orders.map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
+              ${shownOrders(keepId).map((o) => `<option value="${o.order_id}" data-return="${escapeHtml(o.return_date || "")}">${escapeHtml(orderLabel(o))}</option>`).join("")}
               <option value="none">Без заказа (для склада)</option>
             </select>
             ${ordersLoading ? `<p class="hint">Список заказов подгружается — можно пока заполнить остальное.</p>`
@@ -510,7 +529,7 @@ const ScanScreen = (() => {
     const box = document.getElementById("scan-order-field");
     if (!box || lockedOrder) return;
     const was = document.getElementById("scan-order").value;
-    box.innerHTML = orderFieldHtml();
+    box.innerHTML = orderFieldHtml(was);
     const select = document.getElementById("scan-order");
     if (was && Array.from(select.options).some((o) => o.value === was)) select.value = was;
     wireOrderField();

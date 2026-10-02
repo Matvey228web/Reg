@@ -116,9 +116,30 @@ const SettingsScreen = (() => {
   // Своя учётная запись — в самом низу и отдельной зоной: это единственное на
   // экране, что меняет не склад, а вас. «Выйти» красной: на складе один телефон
   // ходит по рукам, и промах здесь выкидывает человека в форму входа.
+  // «Сотрудники» — строкой рядом со своей учётной записью: раньше это была
+  // плитка на главной, но там место под складские дела, а люди и права —
+  // настройка. Видна тем же, кому была видна плитка: администраторам.
+  // Рисуется вместе с учётной записью, поэтому есть и тогда, когда таблица не
+  // ответила, — заблокировать сотрудника бывает нужно именно в такой день.
+  function staffEntryHtml(me) {
+    if (me.role !== "Admin") return "";
+    return `
+      <div class="section section--top">
+        <div class="menu">
+          <button class="menu-row" type="button" id="settings-go-staff">
+            <span class="menu-row-main">
+              <span class="menu-row-label">Сотрудники</span>
+              <span class="menu-row-hint">кто входит, роли, PIN и блокировка</span>
+            </span>
+            <span class="menu-row-go">›</span>
+          </button>
+        </div>
+      </div>`;
+  }
+
   function accountHtml() {
     const me = Auth.getSession() || {};
-    return `
+    return `${staffEntryHtml(me)}
       <div class="section section--account section--top">
         <h2>Учётная запись</h2>
         <p class="hint">Вошли как ${escapeHtml(me.full_name || "—")}${
@@ -131,6 +152,8 @@ const SettingsScreen = (() => {
   function bindAccount() {
     const pin = document.getElementById("settings-pin");
     if (pin) pin.addEventListener("click", () => Router.navigate("pin"));
+    const staffBtn = document.getElementById("settings-go-staff");
+    if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
     const out = document.getElementById("settings-logout");
     // Раньше выход происходил молча с одного тапа, а кнопка стоит рядом со
     // «Сменить свой PIN» — промахнуться легко, а обратно только через логин
@@ -412,7 +435,6 @@ const SettingsScreen = (() => {
                  "смотрите лист Logs в таблице")}
           ${deadTileHtml()}
         </div>` : ""}
-        <button class="btn btn--secondary" id="settings-go-staff">Сотрудники и права</button>
       </div>`;
   }
 
@@ -895,8 +917,6 @@ const SettingsScreen = (() => {
       row.addEventListener("click", () => showPanel(null));
     });
 
-    const staffBtn = document.getElementById("settings-go-staff");
-    if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
     document.getElementById("settings-models").addEventListener("click", () => Router.navigate("models"));
     document.getElementById("settings-cat-add-toggle").addEventListener("click", () => {
       const form = document.getElementById("settings-cat-form");

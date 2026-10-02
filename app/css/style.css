@@ -547,6 +547,43 @@ input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
   grid-column: 1 / -1;
   margin: 2px 0 0;
 }
+/* Поле даты. На айфоне (Safari и вебвью Telegram) у него своя ширина по
+   содержимому, и width: 100% она перебивает: «Показывать до» вылезало за
+   правый край экрана. Снимаем системный вид и даём полю ширину строки.
+   Пустое поле айфон рисует пустой плашкой, а placeholder у даты не
+   показывает вовсе, — поэтому у полей даты стоит required и placeholder
+   «не задано», а текст выводим сами, пока поле :invalid (то есть пустое).
+   required здесь ничего не запрещает: форм с отправкой у нас нет, обязательность
+   проверяет код. */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: var(--tap);
+  box-sizing: border-box;
+}
+input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+input[type="date"]:invalid::before {
+  content: attr(placeholder);
+  color: var(--muted);
+  flex: 1;
+}
+/* Подсказка и значок календаря (он есть в Chrome и на Android) — в одну
+   строку: без этого значок уходил под подсказку. */
+input[type="date"]:invalid:not(:focus) { display: flex; align-items: center; }
+input[type="date"]:focus::before { content: none; }
+/* Пока пусто и не в фокусе — прячем системную заготовку («дд.мм.гггг» в
+   Chrome и на Android, пустую строку на айфоне): иначе под «не задано»
+   стояла бы ещё одна строка и поле росло вдвое. В фокусе она возвращается. */
+input[type="date"]:invalid:not(:focus)::-webkit-datetime-edit,
+input[type="date"]:invalid:not(:focus)::-webkit-date-and-time-value { display: none; }
+/* В сгруппированной строке значение стоит справа, как у остальных полей. */
+.form-group .field input[type="date"] { width: 100%; min-height: 30px; }
+.form-group .field input[type="date"]::-webkit-date-and-time-value { text-align: right; }
+.form-group .field input[type="date"]:invalid::before { text-align: right; }
 /* Строка, где значение в строку не влезает: многострочная заметка и всё, что
    набирают долго. Подпись сверху, поле на всю ширину под ней. */
 .form-group .field--stacked { grid-template-columns: 1fr; }
@@ -1069,11 +1106,6 @@ select {
 }
 .toggle-row label { font-size: 15px; }
 .toggle-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); }
-
-/* Образец этикетки нажимается — открывается крупно. Без этого он выглядит
-   картинкой, и никто по нему не бьёт. */
-.label--tappable { cursor: pointer; transition: transform 0.12s ease; }
-.label--tappable:active { transform: scale(0.97); }
 
 /* Индикатор «потянуть для обновления». Висит над содержимым у самого верха и
    выезжает вместе с пальцем; крутится, пока идёт запрос — а он стоит 5–8 секунд,
@@ -1632,20 +1664,6 @@ select {
 .size-card--on .label { border-style: solid; border-color: var(--accent); outline: 1px solid var(--accent); }
 .size-card--on .size-card-name { color: var(--accent); font-weight: 600; }
 .size-card:active .label { opacity: 0.6; }
-
-/* Образцы — тоже в строку, а не в перенос: при переносе третий уезжал вниз
-   и выглядел лишним, хотя это такой же пример, как первые два. */
-#labels-preview {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s3);
-  overflow-x: auto;
-  margin: 0 calc(var(--gutter) * -1);
-  padding: var(--s1) var(--gutter) var(--s2);
-  scrollbar-width: none;
-}
-#labels-preview::-webkit-scrollbar { display: none; }
-#labels-preview .label { flex: none; margin: 0; }
 
 #labels-print-area { display: none; }
 
