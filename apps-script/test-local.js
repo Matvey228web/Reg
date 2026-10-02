@@ -3732,6 +3732,22 @@ check('нет вкладки — публичный ответ пуст, а не
   call('/public/announcements', {}).ok === true && call('/public/announcements', {}).data.items.length === 0,
   call('/public/announcements', {}));
 
+console.log('\n== праздничные темы сайта: тумблер главного администратора ==');
+const seasonOwner = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;
+const seasonAdmin = call('/auth/login', { login: 'updadmin', pin: '888888' }).data.token;
+check('по умолчанию темы включены', call('/public/announcements', {}).data.seasons === true);
+check('главный администратор выключает',
+  call('/settings/set', { settings: { site_seasons: 0 } }, seasonOwner).ok === true &&
+  call('/public/announcements', {}).data.seasons === false);
+{
+  const adminNotOwner = call('/settings/set', { settings: { site_seasons: 1 } }, seasonAdmin);
+  check('обычный администратор — отказ', adminNotOwner.status === 400 &&
+    /главный администратор/.test(adminNotOwner.error), adminNotOwner);
+}
+check('и включает обратно',
+  call('/settings/set', { settings: { site_seasons: 1 } }, seasonOwner).ok === true &&
+  call('/public/announcements', {}).data.seasons === true);
+
 console.log('\n== нет разрешения Google: понятная фраза вместо страницы на языке аккаунта ==');
 check('немецкий отказ DocumentApp → что нажать',
   /setupTriggers/.test(missingScopeHint(new Error('Sie haben nicht die erforderliche Berechtigung, DocumentApp.openById anzurufen.'))));

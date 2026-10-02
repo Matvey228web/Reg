@@ -4125,8 +4125,11 @@ function announcementActive(row, today) {
 function handlePublicAnnouncements(payload) {
   // Вкладки может не быть, если setupSheets после выкладки ещё не запускали.
   // Сайту это не повод падать: объявлений просто нет.
+  // Праздничные темы едут с объявлениями: сайт спрашивает этот адрес на каждой
+  // странице, и второй запрос ради одного флажка был бы лишним.
+  var seasons = Number(getSettings().site_seasons) !== 0;
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.ANNOUNCEMENTS);
-  if (!sheet) return { items: [] };
+  if (!sheet) return { items: [], seasons: seasons };
   var cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
   var items = [];
   readRows(sheet).forEach(function (r) {
@@ -4139,7 +4142,7 @@ function handlePublicAnnouncements(payload) {
     if (until) item.until = until;
     items.push(item);
   });
-  return { items: items.reverse() };
+  return { items: items.reverse(), seasons: seasons };
 }
 
 function handleAnnouncementsList(payload, token) {
@@ -4582,12 +4585,16 @@ function driveIdFrom(value) {
 }
 
 function handleSettingsSet(payload, token) {
-  requireAdmin(token);
+  var me = requireAdmin(token);
   var incoming = payload.settings || {};
   var saved = {}, rejected = [];
   for (var key in incoming) {
     var spec = SETTINGS_SPEC[key];
     if (!spec) { rejected.push(key + ": неизвестная настройка"); continue; }
+    if (spec.owner && !isOwnerId(me.staff_id)) {
+      rejected.push(key + ": меняет только главный администратор");
+      continue;
+    }
     var value = spec.text ? String(incoming[key]).trim() : Number(incoming[key]);
     // Приведение до проверки: из Google люди копируют ссылку целиком, а не
     // идентификатор из её середины. Отказывать за это — издевательство.
@@ -5114,6 +5121,17 @@ var SETTINGS_SPEC = {
   // единственная ручка, в которую пишут без входа, поэтому выключатель
   // остаётся: сохранённый 0 закрывает её (getSettings подставляет умолчание
   // только для пустого значения, не для нуля). От завала — предел в час ниже.
+  // Праздничные темы сайта (site/theme.js): 1 — по календарю, 0 — выключены.
+  // Меняет только главный администратор (owner), с экрана «Объявления»: это
+  // лицо витрины, а не складская настройка. Сайт узнаёт её из ответа
+  // /public/announcements.
+  site_seasons: {
+    def: 1,
+    text: false,
+    owner: true,
+    check: function (v) { return v === 0 || v === 1; },
+    hint: "1 — праздничные темы по календарю, 0 — выключены",
+  },
   public_orders: {
     def: 1,
     text: false,
