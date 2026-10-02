@@ -240,6 +240,14 @@ function makeDocBody() {
           };
           return row;
         },
+        insertTableRow(i) {
+          const cells = [];
+          grid.splice(i, 0, cells);
+          const row = {
+            appendTableCell: (v) => { cells.push(String(v)); return row; },
+          };
+          return row;
+        },
         removeRow(i) { grid.splice(i, 1); },
       };
       body.items.push(table);
@@ -3031,12 +3039,13 @@ check('текст договора — колледжа',
 check('все подстановки на месте',
   ['{{НОМЕР}}', '{{ДАТА}}', '{{ФИО}}', '{{ТЕЛЕФОН}}', '{{ПРОЕКТ}}', '{{С}}', '{{ПО}}',
    '{{СУММА}}', '{{СУММА_СЛОВАМИ}}', '{{МАСТЕР}}', '{{МАСТЕР_КРАТКО}}', '{{ДИРЕКТОР}}',
-   '{{ПОЗИЦИИ}}'].every((k) => tplText.includes(k)),
+   '{{ПОДПИСАНТ}}', '{{ПОЗИЦИИ}}'].every((k) => tplText.includes(k)),
   (tplText.match(/\{\{[^}]+\}\}/g) || []).join(' '));
 const tplTable = __docs.get(tpl.data.template_id).body.getTables()
   .filter((t) => t.grid[0][0] === '№')[0];
-check('в таблице позиций шапка и одна строка-образец',
-  tplTable && tplTable.grid.length === 2, tplTable && tplTable.grid.length);
+check('в таблице позиций шапка, одна строка-образец и «Итого»',
+  tplTable && tplTable.grid.length === 3 && tplTable.grid[2][1] === 'Итого',
+  tplTable && tplTable.grid);
 check('столбец «КОЛ-ВО» вместо пустой «МОДЕЛЬ»',
   tplTable && tplTable.grid[0].join('|') === '№|НАИМЕНОВАНИЕ|КОЛ-ВО|ЗАВОДСКОЙ №|СТОИМОСТЬ (руб.)',
   tplTable && tplTable.grid[0]);
@@ -3049,8 +3058,8 @@ check('акт собран', act.ok === true && !!act.data.url, act);
 const built = __docs.get(act.data.document_id);
 const itemsTable = built.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
 check('таблица позиций найдена', !!itemsTable);
-check('строк по числу позиций (плюс заголовок)',
-  itemsTable && itemsTable.grid.length === act.data.lines + 1,
+check('строк по числу позиций (плюс заголовок и «Итого»)',
+  itemsTable && itemsTable.grid.length === act.data.lines + 2,
   itemsTable && itemsTable.grid.length);
 check('строки-образца не осталось',
   itemsTable && !itemsTable.getText().includes('{{'), itemsTable && itemsTable.getText());
@@ -3058,11 +3067,11 @@ check('в первой ячейке одно наименование, а не �
   itemsTable && itemsTable.grid[1][1].indexOf(';') === -1 &&
   itemsTable.grid[1][1].split(' - ').length === 1, itemsTable && itemsTable.grid[1][1]);
 check('номера строк по порядку',
-  itemsTable && itemsTable.grid.slice(1).every((r, i) => r[0] === String(i + 1)),
-  itemsTable && itemsTable.grid.slice(1).map((r) => r[0]));
+  itemsTable && itemsTable.grid.slice(1, -1).every((r, i) => r[0] === String(i + 1)),
+  itemsTable && itemsTable.grid.slice(1, -1).map((r) => r[0]));
 check('количество в своём столбце',
-  itemsTable && itemsTable.grid.slice(1).every((r) => /^\d+$/.test(r[2])),
-  itemsTable && itemsTable.grid.slice(1).map((r) => r[2]));
+  itemsTable && itemsTable.grid.slice(1, -1).every((r) => /^\d+$/.test(r[2])),
+  itemsTable && itemsTable.grid.slice(1, -1).map((r) => r[2]));
 check('подстановок в документе не осталось',
   !built.body.getText().includes('{{'),
   (built.body.getText().match(/\{\{[^}]+\}\}/g) || []).slice(0, 4));
@@ -3074,14 +3083,18 @@ check('имя файла — дата и ФИО',
 console.log('\n== акт: цены и заводские номера ==');
 // В этом заказе часть позиций с ценой из заявки (Tilda), часть без.
 check('у позиции без цены прочерк, а не ноль',
-  itemsTable && itemsTable.grid.slice(1).some((r) => r[4] === '—'),
-  itemsTable && itemsTable.grid.slice(1).map((r) => r[4]));
+  itemsTable && itemsTable.grid.slice(1, -1).some((r) => r[4] === '—'),
+  itemsTable && itemsTable.grid.slice(1, -1).map((r) => r[4]));
 check('сумма посчитана по тем, у которых цена есть',
   act.data.total > 0, act.data.total);
 check('непроставленные цены посчитаны и названы',
   act.data.unpriced > 0, act.data.unpriced);
 check('сумма прописью попала в документ',
   /рубл/.test(built.body.getText()));
+check('позиции встали над строкой «Итого», в ней сумма',
+  itemsTable && itemsTable.grid[itemsTable.grid.length - 1][1] === 'Итого' &&
+  itemsTable.grid[itemsTable.grid.length - 1][4] === moneyDigits(act.data.total),
+  itemsTable && itemsTable.grid[itemsTable.grid.length - 1]);
 
 // Предметы в этом наборе заводились без заводских номеров, поэтому сначала
 // проставим номер выданной единице — и только потом проверим, что он доехал
@@ -3095,14 +3108,54 @@ const act2 = call('/act/build', { order_id: 1 }, actAdmin);
 const built2 = __docs.get(act2.data.document_id);
 const table2 = built2.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
 check('заводской номер доехал до акта',
-  table2.grid.slice(1).some((r) => r[3] === 'SN-АКТ-001'),
-  table2.grid.slice(1).map((r) => r[3]));
+  table2.grid.slice(1, -1).some((r) => r[3] === 'SN-АКТ-001'),
+  table2.grid.slice(1, -1).map((r) => r[3]));
 check('у невыданных позиций столбец пуст, а не с чужим номером',
-  table2.grid.slice(1).filter((r) => r[3] === 'SN-АКТ-001').length === 1,
-  table2.grid.slice(1).map((r) => r[3]));
+  table2.grid.slice(1, -1).filter((r) => r[3] === 'SN-АКТ-001').length === 1,
+  table2.grid.slice(1, -1).map((r) => r[3]));
 
 check('заказа без позиций акт не делает',
   call('/act/build', { order_id: 999 }, actAdmin).status === 404);
+
+console.log('\n== акт: кто подписывает ==');
+// Обычно акт от колледжа подписывает складмен, оформивший выдачу, — это
+// выбирается в настройках акта. Мастер — прежнее поведение и умолчание.
+const signedBy = (token) => {
+  const res = call('/act/build', { order_id: 1 }, token);
+  return res.ok ? __docs.get(res.data.document_id).body.getText() : JSON.stringify(res);
+};
+check('по умолчанию подписывает мастер',
+  call('/settings/get', {}, actAdmin).data.settings.act_signer === 'master');
+call('/settings/set', { settings: { act_master: 'Гриднев Егор Олегович' } }, actAdmin);
+let signText = signedBy(helperToken);
+check('мастер: ФИО из настроек, а не вошедшего',
+  signText.includes('Гриднев Егор Олегович') && signText.includes('Гриднев Е.О.') &&
+  !signText.includes('Складмен'), signText.slice(-300));
+check('мастер: подпись «Мастер»',
+  /Мастер/.test(signText) && !signText.includes('Сотрудник склада'));
+
+check('кто подписывает: сотрудник склада принимается',
+  call('/settings/set', { settings: { act_signer: 'staff' } }, actAdmin).ok === true);
+signText = signedBy(helperToken);
+check('сотрудник склада: его ФИО, а мастер из настроек не мешает',
+  signText.includes('Складмен Актов') && signText.includes('Складмен А.') &&
+  !signText.includes('Гриднев'), signText.slice(-300));
+check('сотрудник склада: подпись «Сотрудник склада»',
+  signText.includes('Сотрудник склада') && !/Мастер/.test(signText));
+
+// Заявка с сайта: акт собирается без вошедшего (autoAct с пустым именем).
+const blankAct = buildAct('1', '');
+signText = __docs.get(blankAct.document_id).body.getText();
+check('без имени — линия под подпись от руки, а не пустота',
+  signText.includes(ACT_BLANK) && !signText.includes('{{'), signText.slice(-300));
+
+check('кто подписывает: иное значение отклонено',
+  call('/settings/set', { settings: { act_signer: 'director' } }, actAdmin).status === 400);
+check('кто подписывает: пусто отклонено',
+  call('/settings/set', { settings: { act_signer: '' } }, actAdmin).status === 400);
+check('отклонённое не сохранилось',
+  call('/settings/get', {}, actAdmin).data.settings.act_signer === 'staff');
+call('/settings/set', { settings: { act_signer: 'master', act_master: '' } }, actAdmin);
 
 console.log('\n== акт собирается сам ==');
 // Кнопки «собрать акт» нет: акт нужен всегда, а значит его незачем просить.
@@ -3179,7 +3232,7 @@ const exTable = () => exDoc.body.getTables().filter((t) => t.grid[0][0] === '№
 const legendCount = () => exDoc.body.items
   .filter((i) => i.kind === 'p' && i.text === '* — выдано сверх заявки').length;
 check('только заявленное — звёздочек нет',
-  exTable().grid.slice(1).every((r) => !/\*$/.test(r[1])), exTable().grid);
+  exTable().grid.slice(1, -1).every((r) => !/\*$/.test(r[1])), exTable().grid);
 check('только заявленное — расшифровки звёздочки нет', legendCount() === 0);
 
 const docsBefore = __docs.size;
@@ -3192,7 +3245,7 @@ check('лишнее выдаётся вне заказа',
   [exR1, exR2]);
 check('ответ выдачи прежний, без служебных полей',
   exR1.data.order_id === undefined && exR1.data.transaction_id > 0, exR1.data);
-let exRows = exTable().grid.slice(1);
+let exRows = exTable().grid.slice(1, -1);
 check('сначала заявленное, потом сверх заявки',
   exRows.length === 2 && exRows[0][1] === 'Видеоштатив' && exRows[1][0] === '2', exRows);
 check('лишнее — одной строкой на модель, со звёздочкой',
@@ -3216,7 +3269,7 @@ check('дата акта прежняя', exDoc.body.getText().includes(stampBef
 // Вернули — всё равно выдавали: акт о переданном, как и у заявленных строк.
 call('/transaction/checkin', { item_id: exA }, actAdmin);
 call('/transaction/checkout', { item_id: exC, order_id: exOrder.data.order_id }, actAdmin);
-exRows = exTable().grid.slice(1);
+exRows = exTable().grid.slice(1, -1);
 check('возвращённое лишнее из акта не пропало',
   exRows.some((r) => r[1] === 'Прожектор Сверхзаказ *' && r[3] === 'SN-EX-1, SN-EX-2'), exRows);
 check('другая модель — своя строка, без цены прочерк',
@@ -3280,13 +3333,13 @@ check('вторая единица — та же строка, 2 из 2',
 const scDoc = __docs.get((String(scCard.order.act_url).match(/\/document\/d\/([^/]+)/) || [])[1]);
 const scTable = () => scDoc.body.getTables().filter((t) => t.grid[0][0] === '№')[0];
 check('в акте у сопоставленной строки звёздочки нет',
-  !!scDoc && scTable().grid.slice(1).every((r) => !/\*$/.test(r[1])), scDoc && scTable().grid);
+  !!scDoc && scTable().grid.slice(1, -1).every((r) => !/\*$/.test(r[1])), scDoc && scTable().grid);
 
 const scR3 = call('/transaction/checkout', { item_id: scX, order_id: scOrder.data.order_id }, actAdmin);
 check('чужая вещь при несопоставленной строке — «вне заказа»',
   scR3.ok === true && scR3.data.order_line === 'off-order', scR3);
 check('и только она в акте со звёздочкой',
-  scTable().grid.slice(1).filter((r) => /\*$/.test(r[1])).map((r) => r[1]).join('|') === 'Флаг Внезаказный *',
+  scTable().grid.slice(1, -1).filter((r) => /\*$/.test(r[1])).map((r) => r[1]).join('|') === 'Флаг Внезаказный *',
   scTable().grid);
 call('/settings/set', { settings: { public_orders: 0 } }, actAdmin);
 

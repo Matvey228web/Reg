@@ -5117,6 +5117,15 @@ var SETTINGS_SPEC = {
     check: function (v) { return v === "" || v.length <= 120; },
     hint: "ФИО мастера целиком или пусто — тогда подставится вошедший",
   },
+  // Обычно акт от колледжа подписывает складмен, оформивший выдачу, а не
+  // мастер — решение владельца. Мастер остаётся умолчанием: так собирались
+  // акты до этой настройки.
+  act_signer: {
+    def: "master",
+    text: true,
+    check: function (v) { return v === "master" || v === "staff"; },
+    hint: "master — мастер из настроек, staff — сотрудник склада, оформивший выдачу",
+  },
   act_director: {
     def: "",
     text: true,
@@ -5558,18 +5567,18 @@ function moneyDigits(value) {
   return (n < 0 ? "−" : "") + out;
 }
 
-// Шаблон акта — тот самый документ, что прислал колледж: HTML-выгрузка того
-// же файла, из которой убраны данные студента, а на месте значений стоят
-// подстановки. Лежит файлом рядом с кодом (apps-script/act-template.html) и
-// попадает под версии вместе с остальным.
+// Шаблон акта — текст документа, что прислал колледж, слово в слово, без
+// данных студента и с подстановками на месте значений. Вёрстка переложена
+// под печать на A4 (поля 2 см, Times, таблицы подписей); как и прежде, это
+// HTML-файл рядом с кодом (apps-script/act-template.html), который попадает
+// под версии вместе с остальным.
 //
-// Почему выгрузка, а не рисование документа кодом: у акта своя вёрстка —
-// рамки, шрифты, ширины столбцов, серая шапка таблицы. Нарисованный заново
-// документ выглядел бы «примерно так же», а это документ о материальной
-// ответственности, и в нём «примерно» не годится.
+// Почему HTML, а не рисование документа кодом: у акта своя вёрстка — рамки,
+// шрифты, ширины столбцов, серая шапка таблицы, — и править её проще в одном
+// файле, чем в сотне вызовов DocumentApp.
 var ACT_PLACEHOLDERS = ["{{НОМЕР}}", "{{ДАТА}}", "{{ФИО}}", "{{ТЕЛЕФОН}}",
   "{{ПРОЕКТ}}", "{{С}}", "{{ПО}}", "{{СУММА}}", "{{СУММА_СЛОВАМИ}}",
-  "{{МАСТЕР}}", "{{МАСТЕР_КРАТКО}}", "{{ДИРЕКТОР}}", "{{ПОЗИЦИИ}}"];
+  "{{МАСТЕР}}", "{{МАСТЕР_КРАТКО}}", "{{ДИРЕКТОР}}", "{{ПОДПИСАНТ}}", "{{ПОЗИЦИИ}}"];
 
 function buildActTemplate() {
   var html = HtmlService.createHtmlOutputFromFile("act-template").getContent();
@@ -5904,6 +5913,7 @@ function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
   var body = doc.getBody();
 
   fillActItems(body, lines);
+  var signer = actSigner(settings, masterName);
 
   var fields = {
     "{{НОМЕР}}": String(order.order_no || orderId),
@@ -5915,8 +5925,9 @@ function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
     "{{ПО}}": humanRuDate(order.return_date),
     "{{СУММА}}": total ? moneyDigits(total) : "—",
     "{{СУММА_СЛОВАМИ}}": total ? moneyInWords(total) : "Стоимость не указана",
-    "{{МАСТЕР}}": String(settings.act_master || masterName || ""),
-    "{{МАСТЕР_КРАТКО}}": shortName(String(settings.act_master || masterName || "")),
+    "{{МАСТЕР}}": signer.name || ACT_BLANK,
+    "{{МАСТЕР_КРАТКО}}": signer.name ? shortName(signer.name) : ACT_BLANK,
+    "{{ПОДПИСАНТ}}": signer.role,
     "{{ДИРЕКТОР}}": String(settings.act_director || "Директора"),
   };
   for (var key in fields) {
@@ -5924,6 +5935,22 @@ function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
   }
 
   doc.saveAndClose();
+}
+
+// Пустое место под подпись читается как недосмотр, линия — как «впишите от
+// руки». Так бывает с заявкой с сайта: акт собирается, когда её ещё никто из
+// склада не оформлял.
+var ACT_BLANK = "____________________";
+
+// Кто подписывает акт от колледжа (настройка act_signer). staffName — тот, кто
+// оформил заказ или выдачу; у заявки с сайта его нет.
+function actSigner(settings, staffName) {
+  var staff = String(settings.act_signer || "") === "staff";
+  var name = staff ? staffName : (settings.act_master || staffName);
+  return {
+    role: staff ? "Сотрудник склада" : "Мастер",
+    name: String(name || "").trim(),
+  };
 }
 
 // Заполнение таблицы позиций. Таблицу находим по подстановке в ней самой:
@@ -5939,15 +5966,18 @@ function fillActItems(body, lines) {
       "должно стоять {{ПОЗИЦИИ}}");
   }
 
-  // Строка-образец задаёт оформление; дописываем по одной на позицию и
-  // удаляем образец последним, чтобы таблица не осталась без строк.
+  // Строка-образец задаёт оформление; позиции встают на её место, по одной
+  // строке, а образец удаляется последним, чтобы таблица не осталась без
+  // строк. Вставка, а не дописывание в конец: под образцом в шаблоне стоит
+  // строка «Итого», и позиции должны оказаться над ней.
   var sample = null;
   for (var r = 0; r < target.getNumRows(); r++) {
     if (target.getRow(r).getText().indexOf("{{ПОЗИЦИИ}}") !== -1) { sample = r; break; }
   }
+  var sampleRow = target.getRow(sample);
 
   lines.forEach(function (line, idx) {
-    var row = target.appendTableRow();
+    var row = target.insertTableRow(sample + 1 + idx);
     var cells = [
       String(idx + 1),
       line.name,
@@ -5955,7 +5985,10 @@ function fillActItems(body, lines) {
       line.serials,
       line.priced ? moneyDigits(line.sum) : "—",
     ];
-    cells.forEach(function (text) { row.appendTableCell(text); });
+    cells.forEach(function (text, c) {
+      row.appendTableCell(text);
+      actCellLike(row, sampleRow, c);
+    });
   });
 
   target.removeRow(sample);
@@ -5965,6 +5998,26 @@ function fillActItems(body, lines) {
   // таблицей и только тогда, когда выдано что-то сверх заявки.
   var hasExtra = lines.some(function (l) { return l.extra; });
   if (hasExtra) body.insertParagraph(body.getChildIndex(target) + 1, ACT_EXTRA_LEGEND);
+}
+
+// Новую ячейку Google оформляет по умолчанию — Arial и по левому краю, — и
+// посреди документа в Times это видно сразу. Поэтому шрифт, размер и
+// выравнивание берём у той же ячейки строки-образца (шрифт пустой ячейки — у
+// наименования). Не вышло — ячейка остаётся как есть: вид не повод терять акт.
+function actCellLike(row, sampleRow, c) {
+  try {
+    var to = row.getCell(c).getChild(0).asParagraph();
+    var from = sampleRow.getCell(c).getChild(0).asParagraph();
+    var named = sampleRow.getCell(Math.min(1, sampleRow.getNumCells() - 1))
+      .getChild(0).asParagraph().editAsText();
+    var align = from.getAlignment();
+    if (align) to.setAlignment(align);
+    var text = to.editAsText();
+    var font = from.editAsText().getFontFamily() || named.getFontFamily();
+    var size = from.editAsText().getFontSize() || named.getFontSize();
+    if (font) text.setFontFamily(font);
+    if (size) text.setFontSize(size);
+  } catch (e) { /* оформление по умолчанию */ }
 }
 
 var ACT_EXTRA_LEGEND = "* — выдано сверх заявки";

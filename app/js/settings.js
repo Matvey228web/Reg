@@ -323,6 +323,13 @@ const SettingsScreen = (() => {
         <div id="settings-act-error"></div>
         <div class="form-group">
           <div class="field field--stacked">
+            <label for="set-act_signer">Кто подписывает акт от колледжа</label>
+            <select id="set-act_signer">
+              <option value="master" ${s.act_signer !== "staff" ? "selected" : ""}>Мастер (ФИО из настроек)</option>
+              <option value="staff" ${s.act_signer === "staff" ? "selected" : ""}>Сотрудник склада, оформивший выдачу</option>
+            </select>
+          </div>
+          <div class="field field--stacked">
             <label for="set-act_master">Мастер, ФИО целиком</label>
             <input id="set-act_master" type="text" placeholder="Гриднев Егор Олегович"
                    value="${escapeHtml(String(s.act_master || ""))}" />
@@ -640,6 +647,7 @@ const SettingsScreen = (() => {
     try {
       const res = await apiPost("/settings/set", {
         settings: {
+          act_signer: document.getElementById("set-act_signer").value,
           act_master: document.getElementById("set-act_master").value.trim(),
           act_director: document.getElementById("set-act_director").value.trim(),
         },
