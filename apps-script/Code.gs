@@ -1370,6 +1370,7 @@ function doPost(e) {
   var endpoint = request.endpoint;
   var token = request.token || null;
   var payload = request.payload || {};
+  settingsMemo = null;
 
   try {
     var data;
@@ -1446,6 +1447,14 @@ function doPost(e) {
     return respond(envelope(true, data, null, 200));
   } catch (err) {
     if (err && err.isApiError) {
+      // В журнал из отказов — только то, что стоит увидеть потом: перебор PIN
+      // (неверный вход и блокировка), предел заявок с сайта и сбои чужих
+      // сервисов (5xx: Telegram, Диск). Прочие 4xx — ответ человеку, а не
+      // событие. Логин в журнал не пишем, как и всё тело запроса.
+      var loginFail = endpoint === "/auth/login" && err.status === 401;
+      if (!err.logged && (loginFail || err.status === 429 || err.status >= 500)) {
+        logEvent("refusal", endpoint, String(err.status), err.message);
+      }
       return respond(envelope(false, null, err.message, err.status));
     }
     // Непредвиденная ошибка — в журнал. Только имя ручки, текст и стек: ни
@@ -3279,42 +3288,48 @@ var ORDER_EDITABLE = ["project", "issue_date", "issue_time", "return_date", "ret
 
 function handleOrderUpdate(payload, token) {
   checkAuth(token);
-  var sheet = getSheet(SHEETS.ORDERS);
-  var order = findRowByValue(sheet, "order_id", String(payload.order_id || ""));
-  if (!order) throw apiError(404, "Заказ не найден");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.ORDERS);
+    var order = findRowByValue(sheet, "order_id", String(payload.order_id || ""));
+    if (!order) throw apiError(404, "Заказ не найден");
 
-  var patch = {};
-  ORDER_EDITABLE.forEach(function (field) {
-    if (payload[field] === undefined) return;
-    if (field === "issue_date" || field === "return_date") {
-      patch[field] = parseRuDate(payload[field]);
-    } else if (field === "guardian_phone") {
-      patch[field] = normalizePhone(payload[field]);
-    } else if (field === "status") {
-      // Руками можно только отменить или снять отмену: остальные статусы
-      // считаются по журналу и вводу не подлежат.
-      if (payload.status !== "Cancelled" && payload.status !== "New") {
-        throw apiError(400, "Статус заказа считается по выдачам; руками можно только отменить");
+    var patch = {};
+    ORDER_EDITABLE.forEach(function (field) {
+      if (payload[field] === undefined) return;
+      if (field === "issue_date" || field === "return_date") {
+        patch[field] = parseRuDate(payload[field]);
+      } else if (field === "guardian_phone") {
+        patch[field] = normalizePhone(payload[field]);
+      } else if (field === "status") {
+        // Руками можно только отменить или снять отмену: остальные статусы
+        // считаются по журналу и вводу не подлежат.
+        if (payload.status !== "Cancelled" && payload.status !== "New") {
+          throw apiError(400, "Статус заказа считается по выдачам; руками можно только отменить");
+        }
+        patch.status = payload.status;
+      } else {
+        patch[field] = String(payload[field]);
       }
-      patch.status = payload.status;
-    } else {
-      patch[field] = String(payload[field]);
-    }
-  });
-  if (!Object.keys(patch).length) throw apiError(400, "Нечего менять");
+    });
+    if (!Object.keys(patch).length) throw apiError(400, "Нечего менять");
 
-  // Отменить заказ, по которому техника на руках, — значит потерять след этой
-  // техники: сначала приём, потом отмена.
-  if (patch.status === "Cancelled") {
-    var counts = orderCounts(readRows(getSheet(SHEETS.TRANSACTIONS)));
-    var count = counts[String(order.order_id)];
-    if (count && count.open > 0) {
-      throw apiError(409, "По заказу " + count.open + " позиций на руках — сначала примите их");
+    // Отменить заказ, по которому техника на руках, — значит потерять след этой
+    // техники: сначала приём, потом отмена.
+    if (patch.status === "Cancelled") {
+      var counts = orderCounts(readRows(getSheet(SHEETS.TRANSACTIONS)));
+      var count = counts[String(order.order_id)];
+      if (count && count.open > 0) {
+        throw apiError(409, "По заказу " + count.open + " позиций на руках — сначала примите их");
+      }
     }
+
+    updateRow(sheet, order.__row, patch);
+    return { order_id: Number(order.order_id) };
+  } finally {
+    lock.releaseLock();
   }
-
-  updateRow(sheet, order.__row, patch);
-  return { order_id: Number(order.order_id) };
 }
 
 // Правка строки состава: сопоставить с моделью каталога или отметить выданное
@@ -3322,37 +3337,43 @@ function handleOrderUpdate(payload, token) {
 // двадцать сэндбэгов никто не станет сканировать по одному.
 function handleOrderLineUpdate(payload, token) {
   checkAuth(token);
-  var sheet = getSheet(SHEETS.ORDER_ITEMS);
-  var orderId = String(payload.order_id || "");
-  var lineNo = String(payload.line_no || "");
-  var rows = readRows(sheet);
-  var line = null;
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i].order_id) === orderId && String(rows[i].line_no) === lineNo) {
-      line = rows[i];
-      break;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.ORDER_ITEMS);
+    var orderId = String(payload.order_id || "");
+    var lineNo = String(payload.line_no || "");
+    var rows = readRows(sheet);
+    var line = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].order_id) === orderId && String(rows[i].line_no) === lineNo) {
+        line = rows[i];
+        break;
+      }
     }
-  }
-  if (!line) throw apiError(404, "Строка заказа не найдена");
+    if (!line) throw apiError(404, "Строка заказа не найдена");
 
-  var patch = {};
-  if (payload.model_code !== undefined) {
-    patch.model_code = payload.model_code ? pad2(Number(payload.model_code)) : "";
-    patch.category = String(payload.category || "");
-  }
-  if (payload.issued_qty !== undefined) {
-    var issued = Number(payload.issued_qty);
-    if (isNaN(issued) || issued < 0) throw apiError(400, "Выданное количество должно быть числом от нуля");
-    if (issued > Number(line.qty || 0)) {
-      throw apiError(400, "В заказе этой позиции " + line.qty + ", выдать больше нельзя");
+    var patch = {};
+    if (payload.model_code !== undefined) {
+      patch.model_code = payload.model_code ? pad2(Number(payload.model_code)) : "";
+      patch.category = String(payload.category || "");
     }
-    patch.issued_qty = issued;
-  }
-  if (payload.note !== undefined) patch.note = String(payload.note);
-  if (!Object.keys(patch).length) throw apiError(400, "Нечего менять");
+    if (payload.issued_qty !== undefined) {
+      var issued = Number(payload.issued_qty);
+      if (isNaN(issued) || issued < 0) throw apiError(400, "Выданное количество должно быть числом от нуля");
+      if (issued > Number(line.qty || 0)) {
+        throw apiError(400, "В заказе этой позиции " + line.qty + ", выдать больше нельзя");
+      }
+      patch.issued_qty = issued;
+    }
+    if (payload.note !== undefined) patch.note = String(payload.note);
+    if (!Object.keys(patch).length) throw apiError(400, "Нечего менять");
 
-  updateRow(sheet, line.__row, patch);
-  return { order_id: Number(orderId), line_no: Number(lineNo) };
+    updateRow(sheet, line.__row, patch);
+    return { order_id: Number(orderId), line_no: Number(lineNo) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function handleStudentHistory(payload, token) {
@@ -3479,57 +3500,75 @@ function handleStaffList(payload, token) {
 
 function handleStaffSetActive(payload, token) {
   requireAdmin(token);
-  var sheet = getSheet(SHEETS.STAFF);
-  var staffRow = findRowByValue(sheet, "staff_id", payload.staff_id);
-  if (!staffRow) throw apiError(404, "Сотрудник не найден");
-  if (isOwnerId(staffRow.staff_id)) {
-    throw apiError(409, "Главного администратора отключить нельзя — права можно только передать");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.STAFF);
+    var staffRow = findRowByValue(sheet, "staff_id", payload.staff_id);
+    if (!staffRow) throw apiError(404, "Сотрудник не найден");
+    if (isOwnerId(staffRow.staff_id)) {
+      throw apiError(409, "Главного администратора отключить нельзя — права можно только передать");
+    }
+    var patch = { active: !!payload.active };
+    // Отключение должно действовать сразу. Сессия живёт токеном в строке, и без
+    // его сброса отключённый продолжал бы работать до конца срока сессии.
+    if (!payload.active) {
+      patch.session_token = "";
+      patch.token_issued_at = "";
+    }
+    updateRow(sheet, staffRow.__row, patch);
+    return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, active: !!payload.active };
+  } finally {
+    lock.releaseLock();
   }
-  var patch = { active: !!payload.active };
-  // Отключение должно действовать сразу. Сессия живёт токеном в строке, и без
-  // его сброса отключённый продолжал бы работать до конца срока сессии.
-  if (!payload.active) {
-    patch.session_token = "";
-    patch.token_issued_at = "";
-  }
-  updateRow(sheet, staffRow.__row, patch);
-  return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, active: !!payload.active };
 }
 
 function handleStaffSetRole(payload, token) {
   requireOwner(token);
-  var role = String(payload.role || "");
-  if (role !== "Admin" && role !== "Warehouse Staff") {
-    throw apiError(400, "Роль — «Admin» или «Warehouse Staff»");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var role = String(payload.role || "");
+    if (role !== "Admin" && role !== "Warehouse Staff") {
+      throw apiError(400, "Роль — «Admin» или «Warehouse Staff»");
+    }
+    var sheet = getSheet(SHEETS.STAFF);
+    var staffRow = findRowByValue(sheet, "staff_id", payload.staff_id);
+    if (!staffRow) throw apiError(404, "Сотрудник не найден");
+    if (isOwnerId(staffRow.staff_id)) {
+      throw apiError(409, "Роль главного администратора не меняется — права можно только передать");
+    }
+    updateRow(sheet, staffRow.__row, { role: role });
+    return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, role: role };
+  } finally {
+    lock.releaseLock();
   }
-  var sheet = getSheet(SHEETS.STAFF);
-  var staffRow = findRowByValue(sheet, "staff_id", payload.staff_id);
-  if (!staffRow) throw apiError(404, "Сотрудник не найден");
-  if (isOwnerId(staffRow.staff_id)) {
-    throw apiError(409, "Роль главного администратора не меняется — права можно только передать");
-  }
-  updateRow(sheet, staffRow.__row, { role: role });
-  return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, role: role };
 }
 
 // Передача главных прав. Единственный способ перестать быть главным
 // администратором: удалить эту роль нельзя ни у себя, ни у другого.
 function handleStaffTransferOwner(payload, token) {
   var me = requireOwner(token);
-  var sheet = getSheet(SHEETS.STAFF);
-  var target = findRowByValue(sheet, "staff_id", payload.staff_id);
-  if (!target) throw apiError(404, "Сотрудник не найден");
-  if (String(target.staff_id) === String(me.staff_id)) {
-    throw apiError(409, "Вы и так главный администратор");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.STAFF);
+    var target = findRowByValue(sheet, "staff_id", payload.staff_id);
+    if (!target) throw apiError(404, "Сотрудник не найден");
+    if (String(target.staff_id) === String(me.staff_id)) {
+      throw apiError(409, "Вы и так главный администратор");
+    }
+    if (!isTruthyCell(target.active)) {
+      throw apiError(409, "Передать права можно только действующему сотруднику");
+    }
+    // Главный администратор без прав администратора — противоречие, поэтому роль
+    // поднимаем здесь же, а не оставляем это отдельным шагом, о котором забудут.
+    if (target.role !== "Admin") updateRow(sheet, target.__row, { role: "Admin" });
+    metaSet("owner_staff_id", target.staff_id);
+    return { staff_id: target.staff_id, full_name: target.full_name };
+  } finally {
+    lock.releaseLock();
   }
-  if (!isTruthyCell(target.active)) {
-    throw apiError(409, "Передать права можно только действующему сотруднику");
-  }
-  // Главный администратор без прав администратора — противоречие, поэтому роль
-  // поднимаем здесь же, а не оставляем это отдельным шагом, о котором забудут.
-  if (target.role !== "Admin") updateRow(sheet, target.__row, { role: "Admin" });
-  metaSet("owner_staff_id", target.staff_id);
-  return { staff_id: target.staff_id, full_name: target.full_name };
 }
 
 // ---------------------------------------------------------------------
@@ -3991,8 +4030,11 @@ function notifyRefusal(res) {
     throw apiError(400, "Не выбран чат склада: нажмите «Найти чат склада» и " +
       "укажите, в какой группе работает бот.");
   }
-  throw apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
+  var err = apiError(502, "Telegram отказал: " + (res.error || "неизвестная причина") +
     ". Чаще всего это значит, что бота не добавили в чат или id чата указан неверно.");
+  // Строку в журнал уже написал tgSendLog — doPost второй раз её не пишет.
+  err.logged = true;
+  throw err;
 }
 
 // ---------------------------------------------------------------------
@@ -4008,58 +4050,64 @@ function notifyRefusal(res) {
 
 function handleInventorySave(payload, token) {
   var staffRow = checkAuth(token);
-  var sheet = getSheet(SHEETS.INVENTORY);
-  var id = nextId("inventory_id", maxIdIn(sheet, "inventory_id"));
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var sheet = getSheet(SHEETS.INVENTORY);
+    var id = nextId("inventory_id", maxIdIn(sheet, "inventory_id"));
 
-  var found = payload.found || {};
-  var missing = payload.missing || [];
-  var unknown = payload.unknown || [];
-  var equipment = readRows(getSheet(SHEETS.EQUIPMENT));
-  var byId = {};
-  equipment.forEach(function (r) { byId[String(r.item_id)] = r; });
+    var found = payload.found || {};
+    var missing = payload.missing || [];
+    var unknown = payload.unknown || [];
+    var equipment = readRows(getSheet(SHEETS.EQUIPMENT));
+    var byId = {};
+    equipment.forEach(function (r) { byId[String(r.item_id)] = r; });
 
-  var scope = String(payload.scope || "all");
-  var started = String(payload.started_at || "");
-  var finished = String(payload.finished_at || new Date().toISOString());
-  var foundIds = Object.keys(found);
+    var scope = String(payload.scope || "all");
+    var started = String(payload.started_at || "");
+    var finished = String(payload.finished_at || new Date().toISOString());
+    var foundIds = Object.keys(found);
 
-  function row(kind, itemId, expectedQty, foundQty) {
-    var item = byId[String(itemId)] || {};
-    return {
-      inventory_id: id, kind: kind,
-      item_id: itemId === null || itemId === undefined ? "" : String(itemId),
-      item_name: item.name || "",
-      expected_qty: expectedQty === null ? "" : expectedQty,
-      found_qty: foundQty === null ? "" : foundQty,
-      scope: scope, started_at: started, finished_at: finished,
-      staff_id: staffRow.staff_id, staff_name: staffRow.full_name,
+    var row = function (kind, itemId, expectedQty, foundQty) {
+      var item = byId[String(itemId)] || {};
+      return {
+        inventory_id: id, kind: kind,
+        item_id: itemId === null || itemId === undefined ? "" : String(itemId),
+        item_name: item.name || "",
+        expected_qty: expectedQty === null ? "" : expectedQty,
+        found_qty: foundQty === null ? "" : foundQty,
+        scope: scope, started_at: started, finished_at: finished,
+        staff_id: staffRow.staff_id, staff_name: staffRow.full_name,
+      };
     };
+
+    var rows = [row("summary", "", foundIds.length + missing.length, foundIds.length)];
+    missing.forEach(function (itemId) {
+      var item = byId[String(itemId)] || {};
+      rows.push(row("missing", itemId, categoryByQty(item.category) ? itemQty(item) : 1, 0));
+    });
+    // Расхождение по количеству — только у штучных позиций: у поштучных «нашли»
+    // это всегда единица.
+    foundIds.forEach(function (itemId) {
+      var item = byId[String(itemId)];
+      if (!item || !categoryByQty(item.category)) return;
+      var want = itemQty(item);
+      var got = Math.floor(Number(found[itemId]));
+      if (got !== want) rows.push(row("mismatch", itemId, want, got));
+    });
+    unknown.forEach(function (code) { rows.push(row("unknown", code, "", "")); });
+
+    appendRows(sheet, rows);
+    return {
+      inventory_id: id,
+      found: foundIds.length,
+      missing: missing.length,
+      unknown: unknown.length,
+      written: rows.length,
+    };
+  } finally {
+    lock.releaseLock();
   }
-
-  var rows = [row("summary", "", foundIds.length + missing.length, foundIds.length)];
-  missing.forEach(function (itemId) {
-    var item = byId[String(itemId)] || {};
-    rows.push(row("missing", itemId, categoryByQty(item.category) ? itemQty(item) : 1, 0));
-  });
-  // Расхождение по количеству — только у штучных позиций: у поштучных «нашли»
-  // это всегда единица.
-  foundIds.forEach(function (itemId) {
-    var item = byId[String(itemId)];
-    if (!item || !categoryByQty(item.category)) return;
-    var want = itemQty(item);
-    var got = Math.floor(Number(found[itemId]));
-    if (got !== want) rows.push(row("mismatch", itemId, want, got));
-  });
-  unknown.forEach(function (code) { rows.push(row("unknown", code, "", "")); });
-
-  appendRows(sheet, rows);
-  return {
-    inventory_id: id,
-    found: foundIds.length,
-    missing: missing.length,
-    unknown: unknown.length,
-    written: rows.length,
-  };
 }
 
 // Пачкой, а не по строке: на сверке с сотней расхождений построчная запись
@@ -4224,14 +4272,20 @@ function handleAnnouncementSave(payload, token) {
 // Снятое не удаляется, а получает метку: удалять записи нельзя, «мало ли что».
 function handleAnnouncementRemove(payload, token) {
   checkAuth(token);
-  var id = String(payload.announcement_id || "").trim();
-  if (!id) throw apiError(400, "Не указано, какое объявление снять");
-  var sheet = getSheet(SHEETS.ANNOUNCEMENTS);
-  var row = findRowByValue(sheet, "announcement_id", id);
-  if (!row) throw apiError(404, "Объявление не найдено");
-  if (row.removed_at) return { announcement_id: id, changed: false };
-  updateRow(sheet, row.__row, { removed_at: new Date().toISOString() });
-  return { announcement_id: id, changed: true };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var id = String(payload.announcement_id || "").trim();
+    if (!id) throw apiError(400, "Не указано, какое объявление снять");
+    var sheet = getSheet(SHEETS.ANNOUNCEMENTS);
+    var row = findRowByValue(sheet, "announcement_id", id);
+    if (!row) throw apiError(404, "Объявление не найдено");
+    if (row.removed_at) return { announcement_id: id, changed: false };
+    updateRow(sheet, row.__row, { removed_at: new Date().toISOString() });
+    return { announcement_id: id, changed: true };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -4594,28 +4648,34 @@ function driveIdFrom(value) {
 
 function handleSettingsSet(payload, token) {
   var me = requireAdmin(token);
-  var incoming = payload.settings || {};
-  var saved = {}, rejected = [];
-  for (var key in incoming) {
-    var spec = SETTINGS_SPEC[key];
-    if (!spec) { rejected.push(key + ": неизвестная настройка"); continue; }
-    if (spec.owner && !isOwnerId(me.staff_id)) {
-      rejected.push(key + ": меняет только главный администратор");
-      continue;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var incoming = payload.settings || {};
+    var saved = {}, rejected = [];
+    for (var key in incoming) {
+      var spec = SETTINGS_SPEC[key];
+      if (!spec) { rejected.push(key + ": неизвестная настройка"); continue; }
+      if (spec.owner && !isOwnerId(me.staff_id)) {
+        rejected.push(key + ": меняет только главный администратор");
+        continue;
+      }
+      var value = spec.text ? String(incoming[key]).trim() : Number(incoming[key]);
+      // Приведение до проверки: из Google люди копируют ссылку целиком, а не
+      // идентификатор из её середины. Отказывать за это — издевательство.
+      if (spec.clean) value = spec.clean(value);
+      if (!spec.text && !isFinite(value)) { rejected.push(key + ": нужно число"); continue; }
+      if (!spec.check(value)) { rejected.push(key + ": " + spec.hint); continue; }
+      metaSet("setting_" + key, value);
+      saved[key] = value;
     }
-    var value = spec.text ? String(incoming[key]).trim() : Number(incoming[key]);
-    // Приведение до проверки: из Google люди копируют ссылку целиком, а не
-    // идентификатор из её середины. Отказывать за это — издевательство.
-    if (spec.clean) value = spec.clean(value);
-    if (!spec.text && !isFinite(value)) { rejected.push(key + ": нужно число"); continue; }
-    if (!spec.check(value)) { rejected.push(key + ": " + spec.hint); continue; }
-    metaSet("setting_" + key, value);
-    saved[key] = value;
+    // Отказ не тихий: иначе человек поменял бы значение, увидел «сохранено» и
+    // получил старое поведение.
+    if (rejected.length) throw apiError(400, "Не сохранено — " + rejected.join("; "));
+    return { settings: getSettings(), saved: saved };
+  } finally {
+    lock.releaseLock();
   }
-  // Отказ не тихий: иначе человек поменял бы значение, увидел «сохранено» и
-  // получил старое поведение.
-  if (rejected.length) throw apiError(400, "Не сохранено — " + rejected.join("; "));
-  return { settings: getSettings(), saved: saved };
 }
 
 // Сколько позиций уже собрано по этой категории. От этого зависит, можно ли
@@ -4660,48 +4720,54 @@ function handleCategoryCreate(payload, token) {
 
 function handleCategoryUpdate(payload, token) {
   requireAdmin(token);
-  var code = String(payload.code || "").trim().toUpperCase();
-  var sheet = getSheet(SHEETS.CATEGORIES);
-  var row = findRowByValue(sheet, "code", code);
-  if (!row) throw apiError(404, "Категория не найдена");
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var code = String(payload.code || "").trim().toUpperCase();
+    var sheet = getSheet(SHEETS.CATEGORIES);
+    var row = findRowByValue(sheet, "code", code);
+    if (!row) throw apiError(404, "Категория не найдена");
 
-  var patch = {};
-  if (payload.label !== undefined) {
-    var label = String(payload.label).trim();
-    if (!label) throw apiError(400, "Название не может быть пустым");
-    patch.label = label;   // название только для людей, меняется свободно
-  }
-
-  if (payload.num !== undefined && pad2(Number(payload.num)) !== pad2(Number(row.num))) {
-    var used = categoryUsage(code);
-    if (used) {
-      throw apiError(409, "В категории уже " + used + " позиций. Номер вшит в их " +
-        "номера и напечатан на этикетках — сменить его нельзя. Название менять можно.");
+    var patch = {};
+    if (payload.label !== undefined) {
+      var label = String(payload.label).trim();
+      if (!label) throw apiError(400, "Название не может быть пустым");
+      patch.label = label;   // название только для людей, меняется свободно
     }
-    var wanted = pad2(Number(payload.num));
-    if (!/^\d{2}$/.test(wanted) || Number(wanted) < 1) throw apiError(400, "Номер категории — две цифры от 01 до 99");
-    if (categories().some(function (c) { return c.code !== code && c.num === wanted; })) {
-      throw apiError(409, "Этот номер уже занят другой категорией");
-    }
-    patch.num = wanted;
-  }
 
-  // Переключение способа учёта меняет смысл уже заведённых строк: там, где была
-  // одна вещь, вдруг оказывается «одна штука из кучи». На пустой категории это
-  // безобидно, на заполненной — тихая порча данных.
-  if (payload.by_qty !== undefined && isTruthyCell(payload.by_qty) !== isTruthyCell(row.by_qty)) {
-    var filled = categoryUsage(code);
-    if (filled) {
-      throw apiError(409, "В категории уже " + filled + " позиций. Способ учёта " +
-        "меняется только у пустой категории: иначе поштучные записи молча стали бы " +
-        "количеством.");
+    if (payload.num !== undefined && pad2(Number(payload.num)) !== pad2(Number(row.num))) {
+      var used = categoryUsage(code);
+      if (used) {
+        throw apiError(409, "В категории уже " + used + " позиций. Номер вшит в их " +
+          "номера и напечатан на этикетках — сменить его нельзя. Название менять можно.");
+      }
+      var wanted = pad2(Number(payload.num));
+      if (!/^\d{2}$/.test(wanted) || Number(wanted) < 1) throw apiError(400, "Номер категории — две цифры от 01 до 99");
+      if (categories().some(function (c) { return c.code !== code && c.num === wanted; })) {
+        throw apiError(409, "Этот номер уже занят другой категорией");
+      }
+      patch.num = wanted;
     }
-    patch.by_qty = isTruthyCell(payload.by_qty) ? "TRUE" : "FALSE";
-  }
 
-  if (!Object.keys(patch).length) return { code: code, changed: false };
-  updateRow(sheet, row.__row, patch);
-  return { code: code, changed: true };
+    // Переключение способа учёта меняет смысл уже заведённых строк: там, где была
+    // одна вещь, вдруг оказывается «одна штука из кучи». На пустой категории это
+    // безобидно, на заполненной — тихая порча данных.
+    if (payload.by_qty !== undefined && isTruthyCell(payload.by_qty) !== isTruthyCell(row.by_qty)) {
+      var filled = categoryUsage(code);
+      if (filled) {
+        throw apiError(409, "В категории уже " + filled + " позиций. Способ учёта " +
+          "меняется только у пустой категории: иначе поштучные записи молча стали бы " +
+          "количеством.");
+      }
+      patch.by_qty = isTruthyCell(payload.by_qty) ? "TRUE" : "FALSE";
+    }
+
+    if (!Object.keys(patch).length) return { code: code, changed: false };
+    updateRow(sheet, row.__row, patch);
+    return { code: code, changed: true };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Обслуживание из приложения: те же функции, что в редакторе Apps Script.
@@ -4801,8 +4867,18 @@ function handleStaffSetPin(payload, token) {
     patch.token_issued_at = new Date().toISOString();
     result.token = fresh;
   }
-  updateRow(sheet, staffRow.__row, patch);
-  return result;
+  // Хэш PIN считается долго, поэтому под замком только запись: строку читаем
+  // заново, как в handleStaffDelete, — номер строки мог сдвинуться.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var current = findRowByValue(sheet, "staff_id", staffRow.staff_id);
+    if (!current) throw apiError(404, "Сотрудник не найден");
+    updateRow(sheet, current.__row, patch);
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -5166,11 +5242,33 @@ var SETTINGS_SPEC = {
   },
 };
 
+// Настройки читаются из Meta одним проходом и запоминаются до конца запроса:
+// getSettings зовётся из checkAuth почти на каждом запросе, а по metaGet на
+// ключ это было ~17 полных чтений листа. Глобальные переменные Apps Script
+// между запросами не живут, так что память сбрасывается сама; сброс в metaSet
+// и в начале doPost — для записей внутри запроса и для test-local.js, который
+// гоняет все запросы в одном процессе. Запоминаем только настройки, а не всю
+// Meta: owner_staff_id и bootstrap_done читаются под замком и должны быть
+// свежими, а счётчики nextId — тем более.
+var settingsMemo = null;
+
 function getSettings() {
+  if (!settingsMemo) settingsMemo = readSettings();
+  var copy = {};
+  for (var k in settingsMemo) copy[k] = settingsMemo[k];
+  return copy;
+}
+
+function readSettings() {
+  var stored = {};
+  readRows(getSheet(SHEETS.META)).forEach(function (r) {
+    var k = String(r.key);
+    if (!Object.prototype.hasOwnProperty.call(stored, k)) stored[k] = r.value;
+  });
   var out = {};
   for (var key in SETTINGS_SPEC) {
     var spec = SETTINGS_SPEC[key];
-    var raw = metaGet("setting_" + key);
+    var raw = Object.prototype.hasOwnProperty.call(stored, "setting_" + key) ? stored["setting_" + key] : "";
     if (raw === "" || raw === null || raw === undefined) {
       out[key] = spec.def;
       continue;
@@ -5191,6 +5289,7 @@ function metaGet(key) {
 }
 
 function metaSet(key, value) {
+  settingsMemo = null;
   var sheet = getSheet(SHEETS.META);
   var row = findRowByValue(sheet, "key", key);
   if (row) updateRow(sheet, row.__row, { value: value });
