@@ -22,7 +22,32 @@ const ItemScreen = (() => {
     }
     if (tx.order_id) return `Заказ #${tx.order_id}`;
     if (tx.client_id) return `Клиент #${tx.client_id} (старая запись)`;
-    return "Без заказа";
+    return "Без заказа (для склада)";
+  }
+
+  // Строка истории выдач. Слово «Открыт» — внутреннее имя статуса записи, и
+  // красным оно читалось как поломка. Складу важно другое: на руках ли вещь,
+  // не просрочена ли, кто выдал и кто принял. Срок — только у открытой:
+  // у вернувшейся он уже ничего не значит.
+  function txRowHtml(t) {
+    const open = t.status === "Open";
+    const due = t.expected_return_at ? new Date(t.expected_return_at) : null;
+    const overdue = open && due && !isNaN(due) && due < new Date(new Date().toDateString());
+    const chip = !open ? ""
+      : overdue ? `<span class="badge badge--open">Просрочено</span>`
+      : `<span class="badge badge--rented">На руках</span>`;
+    const qty = Number(t.qty) > 1 ? ` · ${Number(t.qty)} шт.` : "";
+    const who = (name) => (name ? escapeHtml(name) + " · " : "");
+    const order = ordersById[String(t.order_id || "")];
+    const lines = [`Выдал: ${who(t.staff_out_name)}${formatDate(t.checked_out_at)}${qty}`];
+    if (open && t.expected_return_at) lines.push(`Вернуть до: ${escapeHtml(String(t.expected_return_at).slice(0, 10))}`);
+    if (t.checked_in_at) lines.push(`Принял: ${who(t.staff_in_name)}${formatDate(t.checked_in_at)}`);
+    // Выдача по заказу ведёт в его карточку — как строка списка «Заказы».
+    return `
+        <div class="card${order ? " card--link" : ""}"${order ? ` data-order-id="${escapeHtml(String(order.order_id))}"` : ""}>
+          <div class="card-title">${escapeHtml(txLabel(t))} ${chip}</div>
+          ${lines.map((l) => `<div class="card-sub">${l}</div>`).join("")}
+        </div>`;
   }
 
   // Строка каталога годится для карточки: статус, количество и номера в ней
@@ -317,11 +342,7 @@ const ItemScreen = (() => {
     const txRows = (history.transactions || [])
       .slice()
       .sort((a, b) => new Date(b.checked_out_at) - new Date(a.checked_out_at))
-      .map((t) => `
-        <div class="card">
-          <div class="card-title">${escapeHtml(txLabel(t))} ${statusChip(t.status)}</div>
-          <div class="card-sub">Выдано: ${formatDate(t.checked_out_at)}${t.checked_in_at ? " · Принято: " + formatDate(t.checked_in_at) : ""}</div>
-        </div>`).join("") || `<p class="empty">Пока не было выдач</p>`;
+      .map(txRowHtml).join("") || `<p class="empty">Пока не было выдач</p>`;
 
     const defectRows = (history.defects || [])
       .slice()
@@ -335,6 +356,9 @@ const ItemScreen = (() => {
 
     txBox.innerHTML = txRows;
     defectBox.innerHTML = defectRows;
+    txBox.querySelectorAll("[data-order-id]").forEach((row) => {
+      row.addEventListener("click", () => Router.navigate("order", { orderId: row.dataset.orderId }));
+    });
   }
 
   // Открытые дефекты для «Скана»: из ответа /item/lookup, а если карточка
