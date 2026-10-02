@@ -3699,10 +3699,11 @@ function splitExtraInput(extra) {
 }
 
 // Текст сообщения о новой заявке с сайта. Сначала был по образцу владельца
-// одним жирным блоком (2 октября 2026), в тот же день владелец попросил
-// читаемее: разделы с заголовками и пустой строкой между ними — состав,
-// покупатель, сроки, съёмка, — чтобы глазом сразу находить нужное.
-// Не влезает в предел — режем список позиций, а не итог, покупателя и ссылку.
+// одним жирным блоком, 2 октября 2026 владелец попросил читаемее — разделы с
+// заголовками, — но так, чтобы и превью в списке чатов и в уведомлении было
+// полезным. Превью — это первые строки, поэтому сверху сводка: номер, сумма,
+// кто и когда. Сумма и сроки живут только в сводке, ниже их не повторяем.
+// Не влезает в предел — режем список позиций, а не сводку, покупателя и ссылку.
 function tgOrderMessage(parsed, fields, siteUrl) {
   var items = parsed.items || [];
   var total = 0;
@@ -3714,22 +3715,35 @@ function tgOrderMessage(parsed, fields, siteUrl) {
       (Number(it.qty) || 0) + " x " + (unit ? unit : "0.00") + ")";
   });
 
-  var tail = ["<b>Сумма: " + total + " RUB</b>"];
+  function clip(value) {
+    value = String(value || "").trim();
+    return tgEscape(value.length > 500 ? value.substring(0, 500) + "…" : value);
+  }
+  // 2026-10-05 → 05.10: в превью место дорого, год и так текущий.
+  function when(d, t) {
+    d = String(d || "").trim();
+    if (!d) return "";
+    var m = /^\d{4}-(\d{2})-(\d{2})$/.exec(d);
+    return (m ? m[2] + "." + m[1] : d) + (t ? " " + String(t).trim() : "");
+  }
+  var from = when(fields.issue_date, fields.issue_time);
+  var to = when(fields.return_date, fields.return_time);
+  var summary = [String(fields.student_name || "").trim() ? clip(fields.student_name) : "",
+    from || to ? clip(from) + " → " + clip(to) : ""].filter(String).join(" · ");
+  var head = "<b>Заказ №" + tgEscape(parsed.order_no) + " · " + total + " RUB</b>\n" +
+    (summary ? summary + "\n" : "") + "\n<b>🧾 Состав</b>\n";
+
+  var tail = [];
   function section(title, lines) {
     if (!lines.length) return;
     tail.push("", "<b>" + title + "</b>");
     tail.push.apply(tail, lines);
   }
   function line(label, value) {
-    value = String(value || "").trim();
-    return value ? [label + ": " + tgEscape(value.length > 500 ? value.substring(0, 500) + "…" : value)] : [];
+    return String(value || "").trim() ? [label + ": " + clip(value)] : [];
   }
-  function when(d, t) { return d ? d + (t ? " " + t : "") : ""; }
-
   var buyer = tgOrderBuyerBlock(fields);
   section("👤 Покупатель", buyer ? buyer.split("\n") : []);
-  section("📅 Сроки", line("Прием", when(fields.issue_date, fields.issue_time))
-    .concat(line("Сдача", when(fields.return_date, fields.return_time))));
   var extra = splitExtraInput(fields.extra_input);
   section("🎬 Съёмка", EXTRA_LABELS.reduce(function (acc, label) {
     return acc.concat(line(label, extra[label]));
@@ -3738,7 +3752,6 @@ function tgOrderMessage(parsed, fields, siteUrl) {
     tail.push("", '<a href="' + tgEscape(siteUrl) + '">Сделать заказ</a>');
   }
 
-  var head = "<b>📦 Заказ №" + tgEscape(parsed.order_no) + "</b>\n\n";
   var tailText = tail.join("\n");
   var shown = itemLines.slice();
   function build() {
@@ -3746,7 +3759,7 @@ function tgOrderMessage(parsed, fields, siteUrl) {
     if (shown.length < itemLines.length) {
       body.push("… и ещё " + (itemLines.length - shown.length) + " поз.");
     }
-    return head + body.join("\n") + (body.length ? "\n" : "") + tailText;
+    return head + body.join("\n") + (tailText ? "\n" + tailText : "");
   }
   var text = build();
   while (text.length > TG_MAX_LEN && shown.length) {
