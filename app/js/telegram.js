@@ -259,6 +259,12 @@ const TG = (() => {
     if (webApp && webApp.HapticFeedback) webApp.HapticFeedback.notificationOccurred("error");
   }
 
+  // Лёгкий щелчок под пальцем — «порог пройден» (смахивание строки до конца,
+  // SwipeRow в util.js). Не успех и не ошибка: ничего ещё не случилось.
+  function hapticTick() {
+    if (webApp && webApp.HapticFeedback) webApp.HapticFeedback.impactOccurred("light");
+  }
+
   // Окно с сообщением. Лимит у него тот же, что у showPopup, — 256 знаков, и на
   // длинном тексте клиент ОТКАЗЫВАЕТ, а не обрезает: окно просто не появляется.
   // Текст сюда приходит с сервера, и его длину не проверяет ни один экран,
@@ -331,7 +337,7 @@ const TG = (() => {
 
   return {
     init, getUser, getInitData, isAvailable, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
-    mainButton, backButton, hapticSuccess, hapticError, showAlert, showConfirm,
+    mainButton, backButton, hapticSuccess, hapticError, hapticTick, showAlert, showConfirm,
     confirmDestructive, lockVerticalSwipes, openLink, openTelegramLink,
   };
 })();

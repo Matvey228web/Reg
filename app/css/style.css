@@ -1726,7 +1726,7 @@ select {
   color: var(--accent); font: inherit; font-size: 15px; cursor: pointer;
 }
 
-/* --- Быстрые действия: акт и чат в строке списка заказов --- */
+/* --- Быстрое действие: акт в строке списка заказов --- */
 /* Кнопки мелкие по площади, но не мелкие для пальца: высота 36, отступы
    внутрь, и между ними зазор, чтобы не промахнуться по соседней. */
 .quick-row {
@@ -1813,3 +1813,106 @@ body.net-busy::after { opacity: 1; animation: net-bar 1.1s ease-in-out infinite;
   fill: none; stroke: #fff; stroke-width: 2;
   stroke-linecap: round; stroke-linejoin: round;
 }
+
+/* --- Смахивание строк списка (SwipeRow в util.js) ---
+   Как в «Почте» на айфоне: строка едет за пальцем, кнопка действия выходит
+   из-под неё у края. Кнопки стоят за границей строки (right/left: 100%) и
+   едут вместе с ней, а список их обрезает — поэтому overflow: hidden.
+   pan-y: вертикальную прокрутку браузер ведёт сам, горизонталь отдаёт нам. */
+.swipe-list { overflow: hidden; }
+.swipe-list > .card { touch-action: pan-y; }
+.swipe-list > .swipe-dragging { -webkit-user-select: none; user-select: none; }
+.swipe-act {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 84px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.swipe-act[hidden] { display: none; }
+/* Подпись держится у края строки: растянулась кнопка — подпись едет за
+   строкой, как в системе, а не остаётся у края экрана. */
+.swipe-act--leading { right: 100%; justify-content: flex-end; }
+.swipe-act--trailing { left: 100%; justify-content: flex-start; }
+.swipe-act-in {
+  flex: none;
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.swipe-act svg {
+  width: 22px; height: 22px;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* Синий Telegram — «написать», индиго — «архив», как в «Почте». Оба
+   держат белый текст с запасом по контрасту. */
+.swipe-act--chat { background: #2481cc; }
+.swipe-act--archive { background: #5856d6; }
+.swipe-act:active { filter: brightness(0.9); }
+
+/* Строка с отменой (Snackbar в util.js): над панелью разделов, тёмная в
+   любой теме — так её читают как системное сообщение, а не часть экрана. */
+.snackbar {
+  position: fixed;
+  left: var(--gutter);
+  right: var(--gutter);
+  bottom: calc(var(--tabbar-h) + var(--s2) + env(safe-area-inset-bottom, 0px));
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 48px;
+  padding: 6px 6px 6px var(--s4);
+  border-radius: var(--r-md);
+  background: rgba(28, 28, 30, 0.94);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.3;
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(12px);
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out, visibility 0.2s;
+}
+.snackbar--on { opacity: 1; visibility: visible; transform: none; }
+.snackbar-text { flex: 1; min-width: 0; padding: 6px 0; }
+.snackbar-btn {
+  flex: none;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: #64b5ff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.snackbar-btn:active { background: rgba(255, 255, 255, 0.12); }
+/* Круглая кнопка стоит там же — пока висит строка, она поднимается над ней. */
+body.snackbar-on .fab.fab--on { transform: translateY(-60px); }
+:root[data-theme="dark"] .snackbar { background: rgba(58, 58, 60, 0.96); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .snackbar { background: rgba(58, 58, 60, 0.96); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snackbar, .swipe-act { transition: none; }
+}
+
+/* Строка истории выдач, ведущая в заказ (item.js, txRowHtml). */
+.card--link { cursor: pointer; }
+.card--link:active { background: var(--surface-strong); }

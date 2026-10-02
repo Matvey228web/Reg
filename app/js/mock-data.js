@@ -221,8 +221,8 @@ const MockStore = (() => {
   let nextTransactionId = 4;
   let nextDefectId = 2;
   let nextStaffId = 4;   // 1–3 заняты демо-сотрудниками
-  let nextStudentId = 2;
-  let nextOrderId = 3;
+  let nextStudentId = 3;
+  let nextOrderId = 4;
 
   const staff = [
     { staff_id: 1, full_name: "Иван Петров", login: "ivan", pin: "1234", role: "Warehouse Staff", active: true },
@@ -323,6 +323,9 @@ const MockStore = (() => {
   const students = [
     { student_id: 1, full_name: "Ильина-Ноктина Полина Ильинична", phone: "+79257868093",
       tg_username: "@poliviks_notkina", created_at: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(), notes: "" },
+    // Без ника: на нём видно, что «Чат» в списке заказов не смахивается.
+    { student_id: 2, full_name: "Гусев Артём Олегович", phone: "+79161234567",
+      tg_username: "", created_at: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(), notes: "" },
   ];
 
   function mockDate(offsetDays) {
@@ -350,6 +353,17 @@ const MockStore = (() => {
       project: "Курсовая", issue_date: mockDate(1), return_date: mockDate(4), extra_input: "",
       amount: 0, currency: "", source_url: "", status: "New", raw_text: "",
       created_at: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
+      created_by: 1, created_by_name: "Матвей Одинцов", closed_at: "",
+    },
+    // Заказ без ника и без вещей на руках: в демо его можно смахнуть в архив
+    // и вернуть, а «Чата» у него нет.
+    {
+      order_id: 3, order_no: "1525686943", request_code: "", student_id: 2,
+      student_name: "Гусев Артём Олегович", student_phone: "+79161234567",
+      student_tg: "", is_adult: true, guardian_name: "", guardian_phone: "",
+      project: "Диплом", issue_date: mockDate(3), return_date: mockDate(6), extra_input: "",
+      amount: 0, currency: "", source_url: "", status: "New", raw_text: "",
+      created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
       created_by: 1, created_by_name: "Матвей Одинцов", closed_at: "",
     },
   ];
