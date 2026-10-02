@@ -66,57 +66,192 @@ const OrdersScreen = (() => {
     return `
       <div class="card" data-order-id="${order.order_id}">
         <div class="card-title">
-          <span class="order-no"><span class="order-no-sign">№</span>${escapeHtml(order.order_no)}</span>
+          ${orderNoHtml(order)}
           ${statusChip(order.status)}
           ${overdue ? `<span class="badge badge--open">Просрочен</span>` : ""}
         </div>
         <div class="card-sub">${escapeHtml(order.student_name || "—")}${order.is_adult ? "" : " · с представителем"}</div>
         <div class="card-sub">${parts.join(" · ")}</div>
-        ${quickRowHtml(order)}
       </div>`;
   }
 
-  // Быстрые действия в списке — акт и чат: акт смотрят перед выдачей, стоя
-  // у полки, а написать студенту («где вы?», «заказ готов») удобно, не
-  // открывая карточку. Звонка в списке нет: позвонить и скопировать номер —
-  // из карточки заказа, там номер виден целиком.
-  //
-  // «Акт» всегда первым, «Чат» за ним: акт на одном и том же месте в каждой
-  // строке, а не прыгает в зависимости от того, есть ли у студента ник.
-  // Кнопки не показываем пустыми: нет акта — нет кнопки, и сразу видно, что
-  // шаблон не создан. Нет ника — нечего открывать.
-  function quickRowHtml(order) {
-    const tg = String(order.student_tg || "").trim().replace(/^@/, "");
-    const buttons = [
-      order.act_url
-        ? `<button class="chip-btn" type="button" data-act-url="${escapeHtml(order.act_url)}">Акт</button>` : "",
-      tg ? `<button class="chip-btn" type="button" data-tg="${escapeHtml(tg)}">Чат</button>` : "",
-    ].filter(Boolean);
-    return buttons.length ? `<div class="quick-row">${buttons.join("")}</div>` : "";
+  // Акт открывается нажатием на номер заказа: его смотрят перед выдачей,
+  // стоя у полки, а отдельная кнопка «Акт» под каждой строкой занимала место.
+  // Номер-ссылка окрашен как ссылка; нет акта — обычный номер, и сразу
+  // видно, что шаблон не создан. Остальная строка открывает карточку, чат и
+  // архив — смахиванием (rowActions ниже). Так же номер и ник — сами кнопки
+  // в карточке заказа (order.js, contactRow).
+  function orderNoHtml(order) {
+    const no = `<span class="order-no-sign">№</span>${escapeHtml(order.order_no)}`;
+    return order.act_url
+      ? `<button class="order-no order-no--link" type="button" data-act-url="${escapeHtml(order.act_url)}"
+           aria-label="Открыть акт заказа №${escapeHtml(order.order_no)}">${no}</button>`
+      : `<span class="order-no">${no}</span>`;
   }
 
   // Один слушатель на список, и вешается он один раз — в init: элемент списка
   // живёт всё время, а перерисовка идёт на каждое нажатие клавиши в поиске.
   // Вешать здесь при каждом render значило копить слушатели, и одно нажатие
-  // на «Чат» открывало переписку столько раз, сколько было перерисовок.
+  // открывало бы акт столько раз, сколько было перерисовок.
   // Нажатие на кнопку карточку не открывает: каждая ветка выходит через return.
+  // Кнопки смахивания сюда не доходят — их ловит SwipeRow раньше.
   function bindList(list) {
     list.addEventListener("click", (e) => {
       const act = e.target.closest("[data-act-url]");
       if (act) { TG.openLink(act.dataset.actUrl); return; }
-      const chat = e.target.closest("[data-tg]");
-      if (chat) {
-        TG.openTelegramLink("https://t.me/" + encodeURIComponent(chat.dataset.tg));
-        return;
-      }
       if (e.target.closest("a, button, select, input")) return;
       const card = e.target.closest("[data-order-id]");
       if (card) Router.navigate("order", { orderId: card.dataset.orderId });
     });
   }
 
+  // ---- смахивание строки: чат и архив ----
+  // Как в «Почте»: влево — «Чат» (то, что раньше делала кнопка под строкой),
+  // вправо — «В архив». Механика — SwipeRow в util.js, здесь только что
+  // делать. Нет ника — нет и «Чата»: пустую кнопку не показываем, переписку
+  // по телефону открыть нельзя. «В архив» — только администратору: бэкенд
+  // (handleOrderArchive) остальным откажет.
+
+  const UNDO_MS = 5000;
+  const HINT_KEY = "mifs_hint_swipe_orders";
+  let pending = null;    // { order, timer, snack } — убран из списка, запрос ещё не ушёл
+
+  const ICON_CHAT = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.3 9 9 0 0 1-3.9-.9L3 20l1.2-4.3A8 8 0 0 1 3 11.5 8.4 8.4 0 0 1 12 3.2a8.4 8.4 0 0 1 9 8.3z"/></svg>`;
+  const ICON_ARCHIVE = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg>`;
+
+  function tgOf(order) {
+    return String(order.student_tg || "").trim().replace(/^@/, "");
+  }
+
+  function findOrder(orderId) {
+    return (Cache.items(CACHE) || []).find((o) => String(o.order_id) === String(orderId)) || null;
+  }
+
+  function isAdmin() {
+    const session = Auth.getSession();
+    return !!session && session.role === "Admin";
+  }
+
+  function rowActions(row) {
+    const order = findOrder(row.dataset.orderId);
+    if (!order) return {};
+    const tg = tgOf(order);
+    return {
+      trailing: tg ? {
+        label: "Чат", tone: "chat", icon: ICON_CHAT,
+        onTrigger: (r) => {
+          SwipeRow.close(r);
+          TG.openTelegramLink("https://t.me/" + encodeURIComponent(tg));
+        },
+      } : null,
+      leading: isAdmin() ? {
+        label: "В архив", tone: "archive", icon: ICON_ARCHIVE,
+        onTrigger: archiveRow,
+      } : null,
+    };
+  }
+
+  function dropFromCache(orderId) {
+    const cached = Cache.items(CACHE);
+    if (!cached) return;
+    const left = cached.filter((o) => String(o.order_id) !== String(orderId));
+    if (left.length !== cached.length) Cache.replace(CACHE, left);
+  }
+
+  // Порядок в списке задаёт render (свежие сверху), поэтому возвращаем строку
+  // просто в конец кэша.
+  function restoreToCache(order) {
+    const cached = Cache.items(CACHE);
+    if (!cached || cached.some((o) => String(o.order_id) === String(order.order_id))) return;
+    Cache.replace(CACHE, cached.concat([order]));
+  }
+
+  function redraw() {
+    const cached = Cache.items(CACHE);
+    if (cached) render(cached);
+  }
+
+  // Архив с отменой. Строка уходит сразу, а запрос — только когда истечёт
+  // «Отменить»: тогда отмена не требует второго запроса (и второй записи в
+  // таблицу), а нажать её можно, не дожидаясь 6–12 секунд ответа. Ушёл с
+  // экрана или свернул приложение — запрос уходит сразу (commitPending).
+  //
+  // Отказ «вещь на руках» видно ещё до запроса: issued_open приходит в
+  // списке. Строка возвращается на место, а отказ говорит, что делать, —
+  // тем же текстом, что у бэкенда. Если бэкенд откажет сам (список устарел),
+  // строка вернётся после ответа.
+  function archiveRow(row) {
+    const order = findOrder(row.dataset.orderId);
+    if (!order) { SwipeRow.close(row); return; }
+    commitPending();   // прежний отложенный архив уходит сразу — отмена у одного
+    const open = Number(order.issued_open || 0);
+    if (open > 0) {
+      SwipeRow.close(row);
+      TG.hapticError();
+      Snackbar.show("По этому заказу " + open + " ед. на руках — сначала примите их обратно");
+      return;
+    }
+    const snack = Snackbar.show(`Заказ №${order.order_no} в архиве`, {
+      action: "Отменить", onAction: undoArchive, ms: UNDO_MS,
+    });
+    pending = { order, snack, timer: setTimeout(commitPending, UNDO_MS) };
+    dropFromCache(order.order_id);
+    SwipeRow.dismiss(row, "leading").then(redraw);
+  }
+
+  function undoArchive() {
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    const order = pending.order;
+    pending = null;
+    restoreToCache(order);
+    redraw();
+    TG.hapticTick();
+  }
+
+  function commitPending() {
+    if (!pending) return;
+    const { order, timer, snack } = pending;
+    pending = null;
+    clearTimeout(timer);
+    Snackbar.hide(snack);
+    apiPost("/order/archive", { order_id: Number(order.order_id) })
+      .then(() => {
+        // Список мог перечитаться, пока запрос шёл, и вернуть заказ обратно.
+        dropFromCache(order.order_id);
+        redraw();
+      })
+      .catch((err) => {
+        restoreToCache(order);
+        redraw();
+        TG.hapticError();
+        Snackbar.show(err.message || "Не получилось убрать заказ в архив");
+      });
+  }
+
+  // Подсказка один раз на устройство: первая строка на миг приоткрывается.
+  // Флаг ставим до показа — не получилось записать (закрытое хранилище),
+  // значит, подсказка повторится, и это не беда.
+  function maybeHint(list) {
+    try {
+      if (localStorage.getItem(HINT_KEY)) return;
+    } catch (ignored) {
+      return;
+    }
+    setTimeout(() => {
+      const screen = document.getElementById("screen-orders");
+      const row = list.querySelector("[data-order-id]");
+      if (!row || !screen || !screen.classList.contains("screen--active")) return;
+      if (SwipeRow.peek(row, "trailing", rowActions) || SwipeRow.peek(row, "leading", rowActions)) {
+        try { localStorage.setItem(HINT_KEY, "1"); } catch (ignored) {}
+      }
+    }, 700);
+  }
+
   function render(orders) {
     const list = document.getElementById("orders-list");
+    const hidden = pending ? String(pending.order.order_id) : null;
+    if (hidden) orders = orders.filter((o) => String(o.order_id) !== hidden);
     const visible = orders.filter(matches);
     if (!orders.length) {
       list.innerHTML = `<p class="empty">Заказов пока нет. Вставьте сообщение бота — оно разберётся само.</p>`;
@@ -129,6 +264,7 @@ const OrdersScreen = (() => {
     // Свежие сверху: склад работает с тем, что оформлено недавно.
     visible.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
     list.innerHTML = visible.map(orderCardHtml).join("");
+    maybeHint(list);
   }
 
   async function loadList({ force = false } = {}) {
@@ -433,7 +569,20 @@ const OrdersScreen = (() => {
   }
 
   function init() {
-    bindList(document.getElementById("orders-list"));
+    const list = document.getElementById("orders-list");
+    bindList(list);
+    SwipeRow.attach(list, { row: "[data-order-id]", actions: rowActions });
+    // Ушёл с экрана или свернул приложение — отложенный архив уходит сразу:
+    // иначе «Отменить» висело бы над чужим экраном, а закрытое приложение
+    // унесло бы запрос с собой.
+    const screen = document.getElementById("screen-orders");
+    new MutationObserver(() => {
+      if (!screen.classList.contains("screen--active")) commitPending();
+    }).observe(screen, { attributes: true, attributeFilter: ["class"] });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") commitPending();
+    });
+    window.addEventListener("pagehide", commitPending);
     document.getElementById("orders-add-toggle").addEventListener("click", () => {
       const box = document.getElementById("orders-add");
       if (box.style.display === "block") hideAdd();
