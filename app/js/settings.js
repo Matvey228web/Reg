@@ -317,33 +317,16 @@ const SettingsScreen = (() => {
           ? `<p class="hint">Шаблон готов —
               <a href="https://docs.google.com/document/d/${escapeHtml(s.act_template_id)}/edit"
                  target="_blank" rel="noopener">открыть и править</a>. Это обычный документ:
-              меняйте формулировки и шапку, не трогайте только слова в двойных скобках.</p>`
+              меняйте формулировки и шапку, впишите, кто подписывает за колледж, —
+              не трогайте только слова в двойных скобках.</p>
+            <p class="hint">Правьте только как текст: без @-упоминаний, «умных» дат,
+              раскрывающихся списков и флажков — с ними Google не откроет шаблон
+              и акты перестанут собираться.</p>`
           : `<p class="hint">Шаблона пока нет — акты не собираются. Нажмите «Создать шаблон»:
               получится акт колледжа без данных студента.</p>`}
         <div id="settings-act-error"></div>
-        <div class="form-group">
-          <div class="field field--stacked">
-            <label for="set-act_signer">Кто подписывает акт от колледжа</label>
-            <select id="set-act_signer">
-              <option value="master" ${s.act_signer !== "staff" ? "selected" : ""}>Мастер (ФИО из настроек)</option>
-              <option value="staff" ${s.act_signer === "staff" ? "selected" : ""}>Сотрудник склада, оформивший выдачу</option>
-            </select>
-          </div>
-          <div class="field field--stacked">
-            <label for="set-act_master">Мастер, ФИО целиком</label>
-            <input id="set-act_master" type="text" placeholder="Гриднев Егор Олегович"
-                   value="${escapeHtml(String(s.act_master || ""))}" />
-          </div>
-          <div class="field field--stacked">
-            <label for="set-act_director">Директор в договоре</label>
-            <input id="set-act_director" type="text" placeholder="Директора Керзиной О.А."
-                   value="${escapeHtml(String(s.act_director || ""))}" />
-          </div>
-        </div>
-        <button class="btn" id="settings-act-save">Сохранить</button>
         ${data.me && data.me.is_owner
-          ? `<button class="btn btn--secondary" id="settings-act-template"
-                     style="margin-top:8px;">${s.act_template_id
+          ? `<button class="btn btn--secondary" id="settings-act-template">${s.act_template_id
                        ? "Пересоздать шаблон" : "Создать шаблон"}</button>`
           : `<p class="hint">Шаблон создаёт главный администратор.</p>`}
       </div>
@@ -636,38 +619,6 @@ const SettingsScreen = (() => {
     showStatusLine(errId + "-ok", text, { before: errId });
   }
 
-  // Приём заявок с сайта сохраняем отдельно от сроков входа: это выключатель
-  // единственного адреса, куда пишут без входа, и трогать его заодно с
-  // «блокировка, минут» человек не должен.
-  // Акт: подписи и папка. Шаблон — отдельной кнопкой, потому что это создание
-  // документа в Диске, а не правка настройки.
-  async function saveAct() {
-    const restore = busyButton(document.getElementById("settings-act-save"));
-    showBoxError("settings-act-error", "");
-    try {
-      const res = await apiPost("/settings/set", {
-        settings: {
-          act_signer: document.getElementById("set-act_signer").value,
-          act_master: document.getElementById("set-act_master").value.trim(),
-          act_director: document.getElementById("set-act_director").value.trim(),
-        },
-      });
-      data.settings = res.settings;
-      keep();
-      TG.hapticSuccess();
-      // Ссылка «открыть и править» и подпись про шаблон зависят от того, что
-      // сохранили: перерисовываем, чтобы не врать до следующего входа.
-      // Только render(): он сам зовёт bind(), а второй bind() вешал на каждую
-      // кнопку экрана второй слушатель — следующее нажатие слало два запроса.
-      render();
-      saved("settings-act-error", "Сохранено");
-    } catch (err) {
-      TG.hapticError();
-      showBoxError("settings-act-error", err.message);
-      restore();
-    }
-  }
-
   async function createActTemplate() {
     const btn = document.getElementById("settings-act-template");
     const again = !!data.settings.act_template_id;
@@ -717,6 +668,9 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => TG.openLink(url));
   }
 
+  // Приём заявок с сайта сохраняем отдельно от сроков входа: это выключатель
+  // единственного адреса, куда пишут без входа, и трогать его заодно с
+  // «блокировка, минут» человек не должен.
   async function savePublicOrders() {
     const restore = busyButton(document.getElementById("settings-public-save"));
     showBoxError("settings-public-error", "");
@@ -990,7 +944,6 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => saveFields("settings-links-save", "settings-links-error"));
     document.getElementById("settings-public-save")
       .addEventListener("click", savePublicOrders);
-    document.getElementById("settings-act-save").addEventListener("click", saveAct);
     const tplBtn = document.getElementById("settings-act-template");
     if (tplBtn) tplBtn.addEventListener("click", createActTemplate);
     document.getElementById("settings-bot-find")
