@@ -178,7 +178,9 @@
         // Поле-ловушка: человек его не видит и не заполнит.
         '<input type="text" id="trap" tabindex="-1" autocomplete="off"' +
           ' aria-hidden="true" class="trap" />' +
-        '<button class="btn btn--wide" id="send">Забронировать</button>' +
+        '<button class="btn btn--wide btn--send" id="send">' +
+          '<span class="btn-label">Отправить</span></button>' +
+        operatorHtml() +
         // Одна строка вместо раздела «Условия»: главное, что студент должен
         // понять до нажатия, — заявка ещё не бронь, её подтверждает склад.
         '<p class="send-hint">Заявка — это не бронь</p>' +
@@ -419,6 +421,14 @@
 
   }
 
+  // Ссылка на чат склада с заявками. Пока адрес не задан в common.js, кнопки нет.
+  function operatorHtml() {
+    if (!Site.OPERATOR_URL) return "";
+    return '<a class="btn btn--secondary btn--wide btn--operator" id="operator"' +
+      ' tabindex="-1" href="' + Site.escapeHtml(Site.OPERATOR_URL) + '" target="_blank"' +
+      ' rel="noopener">Операторская</a>';
+  }
+
   function bindControls() {
     $("send").addEventListener("click", send);
 
@@ -480,6 +490,18 @@
     });
   }
 
+  var CHECK_SVG = '<svg class="send-check" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="M4 12.5l5 5L20 6.5" pathLength="1"/></svg>';
+
+  // Подпись меняется с лёгким всплытием; перезапуск анимации — через reflow.
+  function setLabel(btn, html, raw) {
+    var lab = btn.firstChild;
+    if (raw) lab.innerHTML = html; else lab.textContent = html;
+    lab.classList.remove("is-swap");
+    void lab.offsetWidth;
+    lab.classList.add("is-swap");
+  }
+
   function send() {
     var note = $("sendnote");
     var gaps = missing();
@@ -509,7 +531,8 @@
 
     var btn = $("send");
     btn.disabled = true;
-    btn.textContent = "Бронируем…";
+    setLabel(btn, "Отправляем…");
+    btn.classList.add("is-sending");
     note.classList.remove("hint--bad");
     note.hidden = true;
 
@@ -518,7 +541,11 @@
         // Заявка принята — номер израсходован. Иначе вторая заявка из той же
         // вкладки ушла бы под прежним номером и столкнулась с первой.
         code = null;
-        btn.textContent = "Забронировано";
+        setLabel(btn, CHECK_SVG + "Отправлено", true);
+        btn.classList.remove("is-sending");
+        btn.classList.add("is-done");
+        var op = $("operator");
+        if (op) { op.classList.add("is-shown"); op.removeAttribute("tabindex"); }
         note.hidden = false;
         note.textContent = res.repeat
           ? "Эта заявка уже принята, номер " + res.order_no + "."
@@ -526,12 +553,13 @@
       })
       .catch(function (err) {
         btn.disabled = false;
-        btn.textContent = "Забронировать";
+        setLabel(btn, "Отправить");
+        btn.classList.remove("is-sending");
         note.hidden = false;
         note.classList.add("hint--bad");
         note.textContent = err.status === 403
           ? "Склад пока не принимает заявки с сайта. Скопируйте текст и отправьте его складу."
-          : "Забронировать не вышло: " + (err.message || "склад не ответил") +
+          : "Отправить не вышло: " + (err.message || "склад не ответил") +
             ". Скопируйте текст и отправьте его складу.";
       });
   }
