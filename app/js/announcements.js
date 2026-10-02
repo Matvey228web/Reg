@@ -196,7 +196,7 @@ const AnnouncementsScreen = (() => {
     return `
       <div class="form-group">
         <div class="toggle-row">
-          <label for="ann-seasons">Праздничные темы на сайте</label>
+          <label for="ann-seasons">Темы на сайте</label>
           <input type="checkbox" id="ann-seasons" ${on ? "checked" : ""} />
         </div>
       </div>
@@ -229,7 +229,7 @@ const AnnouncementsScreen = (() => {
       const res = await apiPost("/settings/set", { settings: { site_seasons: on ? 1 : 0 } });
       const known = Cache.one("settings");
       if (known) Cache.setOne("settings", { ...known, settings: res.settings });
-      showStatusLine("ann-status", on ? "Праздничные темы включены" : "Праздничные темы выключены",
+      showStatusLine("ann-status", on ? "Темы на сайте включены" : "Темы на сайте выключены",
         { before: "ann-list" });
     } catch (err) {
       input.checked = !on;
