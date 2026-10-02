@@ -135,14 +135,14 @@ html[data-season="xmas"] .topbar::after,
 html[data-season="xmas"] footer::before {
   content: ""; position: absolute; left: 0; right: 0;
   pointer-events: none;
-  background: url(art/xmas-garland.svg) 0 0 / 200px 40px repeat-x;
+  background: url(art/xmas-garland.svg) 0 0 / 168px 34px repeat-x;
 }
 html[data-season="xmas"][data-theme="light"] .topbar::after,
 html[data-season="xmas"][data-theme="light"] footer::before { background-image: url(art/xmas-garland-light.svg); }
 html[data-season="xmas"] footer { position: relative; }
 
-/* Шапка: провод по нижней кромке, лампы свисают на страницу (ниже кромки 38). */
-html[data-season="xmas"] .topbar::after { bottom: -38px; height: 40px; }
+/* Шапка: провод по нижней кромке, лампы свисают на страницу (ниже кромки 32). */
+html[data-season="xmas"] .topbar::after { bottom: -32px; height: 34px; }
 /* Подвал: с верхней кромки внутрь, в верхний отступ колонок; ниже и мельче,
    чтобы лампы не дошли до заголовков (отступ 28). */
 html[data-season="xmas"] footer::before { top: 0; height: 26px; background-size: 160px 32px; }
