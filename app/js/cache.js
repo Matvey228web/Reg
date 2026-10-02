@@ -9,7 +9,7 @@
 
 const Cache = (() => {
   const PREFIX = "mifs_cache_";
-  const FRESH_MS = 5 * 60 * 1000;   // сколько считаем данные свежими
+  const FRESH_MS = 5 * 60 * 1000;
 
   function key(name) { return PREFIX + name; }
 
@@ -252,8 +252,7 @@ const ItemState = (() => {
   return { blocksRental, byQty, afterCheckout, afterCheckin, afterDefect, afterResolve };
 })();
 
-// Строка над списком: когда данные получены и кнопка обновления.
-// Общая, чтобы все экраны выглядели и вели себя одинаково.
+// Строка возраста данных — общая, чтобы все экраны выглядели и вели себя одинаково.
 function refreshRowHtml(id) {
   return `<div class="refresh-row" id="${id}"></div>`;
 }

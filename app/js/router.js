@@ -78,7 +78,6 @@ const Router = (() => {
     var pushed = renderBackButton(name);
     renderTabbar(name, pushed);
     window.scrollTo(0, 0);
-    // Круглая кнопка главного действия следит за полосой этого экрана.
     if (typeof Fab !== "undefined") Fab.watch();
   }
 

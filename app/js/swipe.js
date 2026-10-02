@@ -74,7 +74,6 @@ const Swipe = (() => {
         body.setPointerCapture(e.pointerId);
       }
 
-      // Тянем только влево и не дальше ширины кнопки
       dx = Math.max(-WIDTH, Math.min(0, moveX + (opened ? -WIDTH : 0)));
       setOffset(dx);
     });

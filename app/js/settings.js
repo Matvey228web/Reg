@@ -1,6 +1,3 @@
-// Экран «Настройки» (администратор): категории, сроки и лимиты, источник
-// импорта, обслуживание.
-//
 // Зачем он есть: раньше всё это было константами в коде, и поменять что-либо
 // можно было только правкой файла. Теперь значения живут в таблице, а этот
 // экран — место, где их меняет владелец системы.
@@ -458,11 +455,35 @@ const SettingsScreen = (() => {
           ${tile(s.orders_new, "заказов ждут выдачи")}
           ${tile(s.in_repair, "в ремонте", s.in_repair > 0)}
           ${tile(s.staff_active, "сотрудников в строю")}
-          ${tile(s.logs_24h === undefined ? "—" : s.logs_24h, "ошибок за сутки", s.logs_24h > 0,
-                 "смотрите лист Logs в таблице")}
+          ${logsTileHtml(s, tile)}
           ${deadTileHtml()}
-        </div>` : ""}
+        </div>
+        <div id="settings-logs" hidden>${logsListHtml(s.logs_recent)}</div>` : ""}
       </div>`;
+  }
+
+  // Окно скользящее — последние 24 часа, а не с полуночи: повторяющаяся
+  // ошибка держит плитку красной, пока её не устранят. Чтобы понять, что
+  // падает, не открывая лист Logs, плитка раскрывает последние записи.
+  function logsTileHtml(s, tile) {
+    const n = s.logs_24h;
+    const html = tile(n === undefined ? "—" : n, "ошибок за сутки", n > 0,
+      s.logs_recent && n > 0 ? "нажмите — покажу последние" : "смотрите лист Logs в таблице");
+    return s.logs_recent && n > 0
+      ? html.replace('<div class="tile', '<div id="settings-logs-toggle" role="button" tabindex="0" class="tile-tap tile')
+      : html;
+  }
+
+  function logsListHtml(rows) {
+    if (!rows || !rows.length) return "";
+    return `<div class="menu">${rows.map((r) => `
+      <div class="menu-row">
+        <span class="menu-row-main">
+          <span class="menu-row-label">${escapeHtml(formatDate(r.at))} · ${escapeHtml([r.kind, r.endpoint, r.reason].filter(Boolean).join(" · "))}</span>
+          <span class="menu-row-hint">${escapeHtml(r.message || "—")}</span>
+        </span>
+      </div>`).join("")}</div>
+      <p class="hint">Полный журнал — лист Logs в таблице.</p>`;
   }
 
   // Сколько заявок с сайта застряло в очереди Worker. Молча: не ответил —
@@ -935,6 +956,11 @@ const SettingsScreen = (() => {
   }
 
   function bind() {
+    const logsBtn = document.getElementById("settings-logs-toggle");
+    if (logsBtn) logsBtn.addEventListener("click", () => {
+      const box = document.getElementById("settings-logs");
+      box.hidden = !box.hidden;
+    });
     // Переходы внутрь и назад: один слушатель на весь экран, потому что
     // содержимое перерисовывается целиком при каждом сохранении.
     document.querySelectorAll("[data-open]").forEach((row) => {

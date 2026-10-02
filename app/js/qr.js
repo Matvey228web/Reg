@@ -59,7 +59,7 @@ const QR = (() => {
       </div>`;
     document.body.appendChild(overlay);
 
-    // Размер под ширину экрана, но кратно модулям — иначекрая размываются
+    // Размер под ширину экрана, но кратно модулям — иначе края размываются
     const side = Math.min(window.innerWidth - 48, 420);
     render(document.getElementById("qr-overlay-canvas"), text, Math.max(4, Math.floor(side / 29)));
 

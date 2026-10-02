@@ -1,6 +1,3 @@
-// Экран "Сканировать": нативный QR-сканер Telegram → поиск предмета →
-// оформление выдачи / приёма / дефекта в зависимости от текущего статуса.
-
 const ScanScreen = (() => {
   let currentItem = null;
   let orders = [];
@@ -216,7 +213,6 @@ const ScanScreen = (() => {
     currentItem = { ...currentItem, ...changes, ...(extra || {}) };
   }
 
-  // Дефект, который только что записали, — в список открытых на экране.
   function withDefect(defectId, severity, description) {
     return {
       open_defects: (currentItem.open_defects || []).concat([{

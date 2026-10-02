@@ -17,6 +17,7 @@ const mockSettings = {
   site_url: "",
   app_link: "",
   api_url: "https://mifs-rent-api.example.workers.dev",
+  site_seasons: 1,
   public_orders: 1,
   public_orders_per_hour: 20,
   act_template_id: "",
@@ -55,6 +56,7 @@ const MOCK_SETTINGS_SPEC = {
   max_login_attempts: { min: 3, max: 20, hint: "от 3 до 20 попыток" },
   login_lock_minutes: { min: 1, max: 1440, hint: "от 1 минуты до суток" },
   import_source_id: { text: true, hint: "идентификатор таблицы Google или пусто" },
+  site_seasons: { min: 0, max: 1, hint: "1 — праздничные темы по календарю, 0 — выключены" },
   public_orders: { min: 0, max: 1, hint: "1 — сайт отправляет заявку сам, 0 — только копипастом" },
   public_orders_per_hour: { min: 1, max: 200, hint: "от 1 до 200" },
   act_template_id: { text: true, clean: mockDriveId,
@@ -1345,7 +1347,7 @@ const MockAPI = {
           return { ...rest, status: mockOrderStatus(o, open, txs.length),
                    issued_open: open, issued_total: txs.length, items_text: itemsText,
                    archived_at: o.archived_at || "",
-                   // Ссылка на акт нужна и в списке: по ней там кнопка «Акт».
+                   // Ссылка на акт нужна и в списке: по ней номер заказа открывает акт.
                    act_url: o.act_url || "" };
         })
         // Архив по умолчанию не показываем — как и настоящий бэкенд.
@@ -1673,7 +1675,13 @@ const MockAPI = {
             staff_active: MockStore.staff.filter((x) => x.active).length,
             admins: MockStore.staff.filter((x) => x.role === "Admin").length,
             // В демо журнала Logs нет — ошибок за сутки ноль, как на чистой таблице.
-            logs_24h: 0,
+            logs_24h: 2,
+            logs_recent: [
+              { at: new Date(Date.now() - 3600e3).toISOString(), kind: "act", endpoint: "autoAct", reason: "build-failed",
+                message: "Скрипту не хватает разрешения Google (DocumentApp)." },
+              { at: new Date(Date.now() - 7200e3).toISOString(), kind: "telegram", endpoint: "sendMessage", reason: "fallback",
+                message: "Тема форума не приняла сообщение, ушло в General." },
+            ],
           },
           maintenance: { journal_archived_at: "", journal_trimmed_at: "", schema_outdated: false },
         };

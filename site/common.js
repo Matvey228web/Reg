@@ -254,6 +254,30 @@ var Site = (function () {
   // Объявления склада с бэкенда. Таблица при промахе кэша отвечает до 30 секунд,
   // а блок объявлений стоит первой строкой и ждать его долго нельзя: через пять
   // секунд сдаёмся, и вызывающий берёт запасной файл.
+  // Тумблер праздничных тем пришёл с объявлениями. Запоминаем его для theme.js
+  // (тот решает до отрисовки и ответа ждать не может), а выключенную тему
+  // снимаем сразу и с этой страницы: стили темы, атрибут, приветствие на
+  // баннере и цвет строки браузера.
+  function applySeasons(on) {
+    try { localStorage.setItem("mifs_seasons", on ? "on" : "off"); } catch (e) { /* закрыто */ }
+    if (on || !window.MifsSeason || /[?&]season=/.test(location.search)) return;
+    var root = document.documentElement;
+    root.removeAttribute("data-season");
+    var links = document.querySelectorAll('link[href^="themes/"]');
+    for (var i = 0; i < links.length; i++) links[i].parentNode.removeChild(links[i]);
+    var hero = window.MifsHeroDefault;
+    if (hero) {
+      var h = document.querySelector(".hero h1"), p = document.querySelector(".hero p");
+      if (h) h.textContent = hero.title;
+      if (p) p.textContent = hero.sub;
+    }
+    var colors = window.MifsThemeColors;
+    if (colors) colors.dark = "#0d0d0f";
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && root.getAttribute("data-theme") !== "light") meta.setAttribute("content", "#0d0d0f");
+    window.MifsSeason = null;
+  }
+
   function announcements() {
     var ctl = typeof AbortController === "function" ? new AbortController() : null;
     var timer = ctl ? setTimeout(function () { ctl.abort(); }, 5000) : null;
@@ -267,6 +291,7 @@ var Site = (function () {
       .then(function (data) {
         if (timer) clearTimeout(timer);
         if (!data || !data.ok || !data.data) throw new Error("не ответил");
+        if (typeof data.data.seasons === "boolean") applySeasons(data.data.seasons);
         return data.data.items || [];
       }, function (err) {
         if (timer) clearTimeout(timer);
@@ -544,6 +569,8 @@ document.addEventListener("DOMContentLoaded", function () {
   if (!s || !s.hero) return;
   var h = document.querySelector(".hero h1");
   var p = document.querySelector(".hero p");
+  // Обычная подпись — на случай, если тему выключат ответом бэкенда (applySeasons).
+  window.MifsHeroDefault = { title: h ? h.textContent : "", sub: p ? p.textContent : "" };
   if (h) h.textContent = s.hero.title;
   if (p) p.textContent = s.hero.sub;
 })();

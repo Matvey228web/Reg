@@ -1,5 +1,4 @@
-// Единая точка обращения к бэкенду (Google Apps Script Web App) или к мокам (js/mock-data.js).
-// Все экраны вызывают только apiPost(endpoint, body) — детали транспорта скрыты здесь.
+// Единственная точка обращения к бэкенду (или к мокам): экраны зовут только apiPost.
 
 class ApiError extends Error {
   constructor(message, status) {

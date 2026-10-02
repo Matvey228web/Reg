@@ -18,12 +18,9 @@ const CONFIG = {
   // приложение — всё продолжит работать, просто медленно, как раньше.
   WEBHOOK_BASE_URL: "https://mifs-rent-api.odintsovmatvey08.workers.dev",
 
-  // true = все запросы API обслуживаются локальными фейковыми данными (js/mock-data.js),
-  // без обращения к Google Sheets/Apps Script. Удобно для разработки и демонстрации
-  // приложения до того, как настроен реальный бэкенд.
+  // true — все ответы из js/mock-data.js, без бэкенда: для разработки и демо.
   MOCK_MODE: false,
 
-  // Через сколько миллисекунд считать сессию сотрудника истёкшей (12 часов)
   SESSION_TTL_MS: 12 * 60 * 60 * 1000,
 
   SESSION_STORAGE_KEY: "mifs_session",

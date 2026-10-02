@@ -8,9 +8,9 @@
      собственном веб-вью и отдаёт из кэша старый js, даже когда на сервере лежит
      новый: выкладка проходит, а на телефоне ничего не меняется. Номер меняется
      при каждой выкладке, и веб-вью вынужден перечитать файл. -->
-<link rel="stylesheet" href="css/style.css?v=20261002i" />
+<link rel="stylesheet" href="css/style.css?v=20261002n" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="js/vendor/qrcode-generator.js?v=20261002i"></script>
+<script src="js/vendor/qrcode-generator.js?v=20261002n"></script>
 </head>
 <body>
 <div id="app">
@@ -249,6 +249,7 @@
         <button class="segmented-item" type="button" data-value="Issued" role="tab" aria-selected="false">Выданные</button>
         <button class="segmented-item" type="button" data-value="overdue" role="tab" aria-selected="false">Просроченные</button>
         <button class="segmented-item" type="button" data-value="New" role="tab" aria-selected="false">Оформленные</button>
+        <button class="segmented-item" type="button" data-value="archived" role="tab" aria-selected="false">Архив</button>
         <button class="segmented-item" type="button" data-value="Returned" role="tab" aria-selected="false">Возвращённые</button>
       </div>
     </div>
@@ -340,7 +341,6 @@
     <div id="labels-content"></div>
   </div>
 
-  <!-- Экран: настройки системы (только администратор) -->
   <!-- Экран: справочник моделей. Только для администраторов — как «Категории»,
        рядом с которыми он и открывается. -->
   <div class="screen" id="screen-models">
@@ -349,6 +349,7 @@
     <div id="models-content"></div>
   </div>
 
+  <!-- Экран: настройки -->
   <div class="screen" id="screen-settings">
     <h1>Настройки</h1>
     <div id="settings-error"></div>
@@ -402,39 +403,39 @@
 
 </div>
 
-<script src="js/config.js?v=20261002i"></script>
-<script src="js/util.js?v=20261002i"></script>
-<script src="js/suggest.js?v=20261002i"></script>
-<script src="js/cache.js?v=20261002i"></script>
+<script src="js/config.js?v=20261002n"></script>
+<script src="js/util.js?v=20261002n"></script>
+<script src="js/suggest.js?v=20261002n"></script>
+<script src="js/cache.js?v=20261002n"></script>
 <!-- Демо-данные весят 67 КБ и нужны только в демо-режиме. На рабочем
      складе MOCK_MODE выключен, и грузить их каждому открывшему незачем. -->
 <script>
   // CONFIG объявлен через const и в window не попадает — проверяем сам
   // идентификатор, а не свойство объекта окна.
   if (typeof CONFIG !== "undefined" && CONFIG.MOCK_MODE) {
-    document.write('<script src="js/mock-data.js?v=20261002i"><\/script>');
+    document.write('<script src="js/mock-data.js?v=20261002n"><\/script>');
   }
 </script>
-<script src="js/api.js?v=20261002i"></script>
-<script src="js/telegram.js?v=20261002i"></script>
-<script src="js/router.js?v=20261002i"></script>
-<script src="js/fab.js?v=20261002i"></script>
-<script src="js/qr.js?v=20261002i"></script>
-<script src="js/pull.js?v=20261002i"></script>
-<script src="js/auth.js?v=20261002i"></script>
-<script src="js/catalog.js?v=20261002i"></script>
-<script src="js/scan.js?v=20261002i"></script>
-<script src="js/item.js?v=20261002i"></script>
-<script src="js/order.js?v=20261002i"></script>
-<script src="js/repair.js?v=20261002i"></script>
-<script src="js/orders.js?v=20261002i"></script>
-<script src="js/staff.js?v=20261002i"></script>
-<script src="js/models.js?v=20261002i"></script>
-<script src="js/settings.js?v=20261002i"></script>
-<script src="js/labels.js?v=20261002i"></script>
-<script src="js/inventory.js?v=20261002i"></script>
-<script src="js/announcements.js?v=20261002i"></script>
-<script src="js/pin.js?v=20261002i"></script>
-<script src="js/app.js?v=20261002i"></script>
+<script src="js/api.js?v=20261002n"></script>
+<script src="js/telegram.js?v=20261002n"></script>
+<script src="js/router.js?v=20261002n"></script>
+<script src="js/fab.js?v=20261002n"></script>
+<script src="js/qr.js?v=20261002n"></script>
+<script src="js/pull.js?v=20261002n"></script>
+<script src="js/auth.js?v=20261002n"></script>
+<script src="js/catalog.js?v=20261002n"></script>
+<script src="js/scan.js?v=20261002n"></script>
+<script src="js/item.js?v=20261002n"></script>
+<script src="js/order.js?v=20261002n"></script>
+<script src="js/repair.js?v=20261002n"></script>
+<script src="js/orders.js?v=20261002n"></script>
+<script src="js/staff.js?v=20261002n"></script>
+<script src="js/models.js?v=20261002n"></script>
+<script src="js/settings.js?v=20261002n"></script>
+<script src="js/labels.js?v=20261002n"></script>
+<script src="js/inventory.js?v=20261002n"></script>
+<script src="js/announcements.js?v=20261002n"></script>
+<script src="js/pin.js?v=20261002n"></script>
+<script src="js/app.js?v=20261002n"></script>
 </body>
 </html>

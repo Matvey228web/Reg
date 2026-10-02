@@ -68,14 +68,14 @@ var CATEGORY_CODES = {
   MED: "14",   // карты, ридеры, диски
 };
 
-// Названия для людей. Живут рядом с кодами только как умолчания для засева:
-// после засева название правится в таблице и в админке.
 // Категории, которые учитываются количеством, а не поштучно: у мешков, флагов и
 // расходников нет и не будет личного номера — клеить QR на каждый сэндбэг никто
 // не станет. Флаг живёт в таблице (колонка by_qty) и правится в «Настройках»;
 // здесь — только значение при заведении категории.
 var CATEGORY_BY_QTY = { GRP: true, CNS: true };
 
+// Названия для людей. Живут рядом с кодами только как умолчания для засева:
+// после засева название правится в таблице и в админке.
 var CATEGORY_LABELS = {
   CAM: "Камеры",
   LEN: "Объективы",
@@ -231,7 +231,6 @@ function setupEverything() {
   return message;
 }
 
-// Заполняет лист умолчаниями, если в нём нет ни одной строки данных.
 function seedSheet(ss, name, rows) {
   var sheet = ss.getSheetByName(name);
   if (!sheet || sheet.getLastRow() > 1 || !rows.length) return;
@@ -638,7 +637,6 @@ function importInventory() {
       modelSheet.getRange(mStart, 1, mRows.length, mHeaders.length).setValues(mRows);
     }
 
-    // Сохраняем счётчики обратно в Meta
     for (var k in counters) {
       if (metaRowIndex[k]) updateRow(metaSheet, metaRowIndex[k], { value: counters[k] });
       else appendRow(metaSheet, { key: k, value: counters[k] });
@@ -793,7 +791,6 @@ function trimJournal() {
     removed.Transactions = trimSheetRows(getSheet(SHEETS.TRANSACTIONS), function (row) {
       return row.status === "Closed";
     });
-    // Дефекты: удаляем только устранённые.
     removed.Defects = trimSheetRows(getSheet(SHEETS.DEFECTS), function (row) {
       return row.status === "Resolved";
     });
@@ -3495,7 +3492,6 @@ function handleStaffSetActive(payload, token) {
   return { staff_id: staffRow.staff_id, full_name: staffRow.full_name, active: !!payload.active };
 }
 
-// Смена роли: повысить складского сотрудника до администратора и обратно.
 function handleStaffSetRole(payload, token) {
   requireOwner(token);
   var role = String(payload.role || "");
@@ -4125,8 +4121,11 @@ function announcementActive(row, today) {
 function handlePublicAnnouncements(payload) {
   // Вкладки может не быть, если setupSheets после выкладки ещё не запускали.
   // Сайту это не повод падать: объявлений просто нет.
+  // Праздничные темы едут с объявлениями: сайт спрашивает этот адрес на каждой
+  // странице, и второй запрос ради одного флажка был бы лишним.
+  var seasons = Number(getSettings().site_seasons) !== 0;
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.ANNOUNCEMENTS);
-  if (!sheet) return { items: [] };
+  if (!sheet) return { items: [], seasons: seasons };
   var cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
   var items = [];
   readRows(sheet).forEach(function (r) {
@@ -4139,7 +4138,7 @@ function handlePublicAnnouncements(payload) {
     if (until) item.until = until;
     items.push(item);
   });
-  return { items: items.reverse() };
+  return { items: items.reverse(), seasons: seasons };
 }
 
 function handleAnnouncementsList(payload, token) {
@@ -4254,7 +4253,7 @@ function handleSettingsGet(payload, token) {
     owner: ownerRow ? { staff_id: ownerRow.staff_id, full_name: ownerRow.full_name } : null,
     // Сводка отдаётся здесь же, а не отдельным запросом: таблица отвечает
     // 5–8 секунд, и второй запрос ради пяти чисел стоил бы этих секунд заново.
-    summary: warehouseSummary(),
+    summary: warehouseSummary(me.role === "Admin"),
     maintenance: {
       journal_archived_at: metaGet("journal_archived_at") || "",
       journal_trimmed_at: metaGet("journal_trimmed_at") || "",
@@ -4263,9 +4262,6 @@ function handleSettingsGet(payload, token) {
   };
 }
 
-// Что творится на складе одним взглядом: из чего состоит каталог, сколько на
-// руках, что просрочено и что сломано. Считается по тем же листам, которые всё
-// равно читаются — отдельного хранилища для этого заводить незачем.
 // ---------------------------------------------------------------------
 // Занятость по датам — то, на чём стоит бронь
 // ---------------------------------------------------------------------
@@ -4504,7 +4500,12 @@ function publicOrderQuotaTake(limit) {
   cache.put(slot, String(used + 1), 3900);
 }
 
-function warehouseSummary() {
+// Что творится на складе одним взглядом: из чего состоит каталог, сколько на
+// руках, что просрочено и что сломано. Считается по тем же листам, которые всё
+// равно читаются — отдельного хранилища для этого заводить незачем.
+// withLogs — администратору: последние записи журнала, чтобы плитка «ошибок
+// за сутки» показывала, что именно падает, без похода в лист Logs с телефона.
+function warehouseSummary(withLogs) {
   var today = new Date().toISOString().substring(0, 10);
   var out = {
     items: 0, available: 0, rented: 0, in_repair: 0, retired: 0,
@@ -4557,10 +4558,16 @@ function warehouseSummary() {
   var logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.LOGS);
   if (logSheet) {
     var since = Date.now() - 24 * 60 * 60 * 1000;
+    var recent = [];
     readRows(logSheet).forEach(function (l) {
       var t = new Date(l.timestamp).getTime();
-      if (!isNaN(t) && t >= since) out.logs_24h += 1;
+      if (isNaN(t) || t < since) return;
+      out.logs_24h += 1;
+      recent.push({ at: new Date(t).toISOString(), kind: String(l.kind || ""),
+        endpoint: String(l.endpoint || ""), reason: String(l.reason || ""),
+        message: String(l.message || "").substring(0, 300) });
     });
+    if (withLogs) out.logs_recent = recent.slice(-5).reverse();
   }
 
   return out;
@@ -4582,12 +4589,16 @@ function driveIdFrom(value) {
 }
 
 function handleSettingsSet(payload, token) {
-  requireAdmin(token);
+  var me = requireAdmin(token);
   var incoming = payload.settings || {};
   var saved = {}, rejected = [];
   for (var key in incoming) {
     var spec = SETTINGS_SPEC[key];
     if (!spec) { rejected.push(key + ": неизвестная настройка"); continue; }
+    if (spec.owner && !isOwnerId(me.staff_id)) {
+      rejected.push(key + ": меняет только главный администратор");
+      continue;
+    }
     var value = spec.text ? String(incoming[key]).trim() : Number(incoming[key]);
     // Приведение до проверки: из Google люди копируют ссылку целиком, а не
     // идентификатор из её середины. Отказывать за это — издевательство.
@@ -5114,6 +5125,17 @@ var SETTINGS_SPEC = {
   // единственная ручка, в которую пишут без входа, поэтому выключатель
   // остаётся: сохранённый 0 закрывает её (getSettings подставляет умолчание
   // только для пустого значения, не для нуля). От завала — предел в час ниже.
+  // Праздничные темы сайта (site/theme.js): 1 — по календарю, 0 — выключены.
+  // Меняет только главный администратор (owner), с экрана «Объявления»: это
+  // лицо витрины, а не складская настройка. Сайт узнаёт её из ответа
+  // /public/announcements.
+  site_seasons: {
+    def: 1,
+    text: false,
+    owner: true,
+    check: function (v) { return v === 0 || v === 1; },
+    hint: "1 — праздничные темы по календарю, 0 — выключены",
+  },
   public_orders: {
     def: 1,
     text: false,
@@ -5276,7 +5298,7 @@ function modelByCode(category, modelCode) {
   throw apiError(404, "Модель не найдена в справочнике");
 }
 
-// Находит модель по названию или заводит новую. Возвращает {model_code, model_name}.
+// Возвращает {model_code, model_name}.
 function findOrCreateModel(category, modelName) {
   var name = canonicalModelName(modelName);
   if (!name) throw apiError(400, "Укажите название модели");
@@ -5473,7 +5495,6 @@ function pluralRu(n, one, few, many) {
   return many;
 }
 
-// Одна группа из трёх цифр словами.
 function tripleInWords(value, female) {
   var out = [];
   var hundreds = Math.floor(value / 100);
@@ -5778,7 +5799,6 @@ function buildAct(orderId, masterName) {
   // Диску, и повторная сборка не плодит документы на один заказ.
   updateRow(getSheet(SHEETS.ORDERS), order.__row, { act_url: url });
 
-  // Сообщение в HTML: заголовок жирным, ссылка — кликабельной.
   tgSend("<b>АКТ от " + tgEscape(stamp) + "</b> " + tgEscape(fio) + "\n" +
     '<a href="' + tgEscape(url) + '">Открыть акт</a>', "", "acts");
 

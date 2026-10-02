@@ -80,7 +80,6 @@
       " похоже, приватный режим. Соберите и отправьте её за один заход.</p>";
   }
 
-  // Строка «когда»: подпись, поле и пример поверх пустого поля.
   function whenField(cap, id, type, value, ph) {
     return '<label class="date"><span class="cap">' + esc(cap) + "</span>" +
       '<span class="picker">' +

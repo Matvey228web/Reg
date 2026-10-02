@@ -13,7 +13,7 @@
 // Время берётся с часов посетителя. Изменили календарь или файл темы — поднимите
 // ?v= у этого скрипта в трёх html.
 (function () {
-  var VERSION = "20261002a";
+  var VERSION = "20261002b";
 
   var CALENDAR = [
     { id: "cinema", label: "День кино", from: "12-29", to: "12-29", color: "#120a0a",
@@ -42,6 +42,14 @@
   }
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
+  // Главный администратор может выключить праздничные темы (тумблер на экране
+  // «Объявления» в приложении). Ответ бэкенда приходит позже отрисовки, поэтому
+  // common.js кладёт его в localStorage `mifs_seasons`, а здесь он читается
+  // уже при следующем открытии; на текущей странице тему снимает common.js.
+  function seasonsOff() {
+    try { return localStorage.getItem("mifs_seasons") === "off"; } catch (e) { return false; }
+  }
+
   var season = null;
   try {
     var now = new Date();
@@ -53,6 +61,8 @@
       season = null;
     } else if (asked) {
       CALENDAR.forEach(function (c) { if (c.id === asked) season = c; });
+    } else if (seasonsOff()) {
+      season = null;
     } else {
       for (var i = 0; i < CALENDAR.length && !season; i++) {
         if (inRange(CALENDAR[i], md)) season = CALENDAR[i];

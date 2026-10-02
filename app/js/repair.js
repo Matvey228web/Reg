@@ -1,5 +1,3 @@
-// Экран "Ремонт": доска дефектов с фильтром по статусу и возможностью закрыть дефект.
-
 const RepairScreen = (() => {
   const CACHE = "defects";
   let itemsById = {};

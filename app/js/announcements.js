@@ -187,8 +187,62 @@ const AnnouncementsScreen = (() => {
     }
   }
 
+  // Праздничные темы сайта — тумблер главного администратора (site_seasons в
+  // SETTINGS_SPEC): лицо витрины рядом с её первой строкой. Значение берём из
+  // кэша настроек, как его кладёт settings.js; нет кэша — спрашиваем молча.
+  // Переключение сразу, при отказе тумблер возвращается (как setSection в
+  // models.js). Сайт узнаёт о нём из /public/announcements.
+  function seasonsHtml(on) {
+    return `
+      <div class="form-group">
+        <div class="toggle-row">
+          <label for="ann-seasons">Темы на сайте</label>
+          <input type="checkbox" id="ann-seasons" ${on ? "checked" : ""} />
+        </div>
+      </div>
+      <p class="hint">Новый год, Хэллоуин и День кино по календарю. Выключено — сайт всегда обычный.</p>`;
+  }
+
+  function drawSeasons() {
+    const box = ensureSlot("ann-seasons-box", "ann-list");
+    const me = Auth.getSession() || {};
+    if (!me.is_owner) { box.innerHTML = ""; return; }
+    const known = Cache.one("settings");
+    const value = known && known.settings ? known.settings.site_seasons : undefined;
+    box.innerHTML = seasonsHtml(value === undefined ? true : Number(value) !== 0);
+    document.getElementById("ann-seasons").addEventListener("change", toggleSeasons);
+    if (value === undefined) {
+      apiPost("/settings/get", {}).then((fresh) => {
+        Cache.setOne("settings", fresh);
+        const input = document.getElementById("ann-seasons");
+        if (input && fresh.settings) input.checked = Number(fresh.settings.site_seasons) !== 0;
+      }).catch(() => {});
+    }
+  }
+
+  async function toggleSeasons(e) {
+    const input = e.target;
+    const on = input.checked;
+    input.disabled = true;
+    TG.hapticTick();
+    try {
+      const res = await apiPost("/settings/set", { settings: { site_seasons: on ? 1 : 0 } });
+      const known = Cache.one("settings");
+      if (known) Cache.setOne("settings", { ...known, settings: res.settings });
+      showStatusLine("ann-status", on ? "Темы на сайте включены" : "Темы на сайте выключены",
+        { before: "ann-list" });
+    } catch (err) {
+      input.checked = !on;
+      TG.hapticError();
+      showBoxError("ann-list-error", err.message);
+    } finally {
+      input.disabled = false;
+    }
+  }
+
   function onShow() {
     resetForm();
+    drawSeasons();
     loadList();
   }
 
