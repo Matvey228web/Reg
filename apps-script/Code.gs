@@ -2283,7 +2283,7 @@ function handleTransactionCheckout(payload, token) {
   // Пересобираем после снятия замка (документ — это секунды), и неудача
   // выдачу не отменяет: предмет уже записан как выданный.
   if (res.order_line === "off-order" && res.order_id) {
-    rebuildActQuietly(res.order_id, staffRow.full_name);
+    rebuildActQuietly(res.order_id);
   }
   delete res.order_id;
   return res;
@@ -2291,9 +2291,9 @@ function handleTransactionCheckout(payload, token) {
 
 // Пересборка акта, которая никогда не бросает: причина неудачи — в Logs, как у
 // autoAct. Акта у заказа ещё нет (шаблона не было) — нечего и пересобирать.
-function rebuildActQuietly(orderId, masterName) {
+function rebuildActQuietly(orderId) {
   try {
-    return rebuildAct(orderId, masterName);
+    return rebuildAct(orderId);
   } catch (err) {
     logEvent("act", "rebuild", "rebuild-failed", err && err.message ? err.message : String(err),
       { order_id: orderId });
@@ -3054,7 +3054,7 @@ function findOrCreateStudent(order) {
 function handleOrderCreate(payload, token) {
   var staffRow = checkAuth(token);
   var res = writeOrder(payload, staffRow.staff_id, staffRow.full_name);
-  res.act_url = autoAct(res.order_id, staffRow.full_name);
+  res.act_url = autoAct(res.order_id);
   return res;
 }
 
@@ -3066,11 +3066,11 @@ function handleOrderCreate(payload, token) {
 // секунды, и держать на это время замок — значит подвесить всех остальных.
 // Неудача акта заказ не отменяет: заказ уже записан, а причина уходит в журнал
 // Logs — в чат склада служебное не пишем.
-function autoAct(orderId, masterName) {
+function autoAct(orderId) {
   var settings = getSettings();
   if (!String(settings.act_template_id || "")) return "";
   try {
-    var res = buildAct(orderId, masterName || "");
+    var res = buildAct(orderId);
     return res.url;
   } catch (err) {
     logEvent("act", "autoAct", "build-failed", err && err.message ? err.message : String(err),
@@ -4480,7 +4480,7 @@ function handlePublicOrder(payload) {
   // Тело собирает tgOrderMessage, блок покупателя — tgOrderBuyerBlock.
   //
   // Ссылка — из настройки site_url; не задана — строки со ссылкой нет вовсе.
-  var actUrl = autoAct(order.order_id, "");
+  var actUrl = autoAct(order.order_id);
 
   // Сборка текста внутри try: сбой уведомления не должен ронять приём заявки.
   try {
@@ -5109,29 +5109,6 @@ var SETTINGS_SPEC = {
     check: function (v) { return v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v); },
     hint: "ссылка на папку для готовых актов или пусто — тогда рядом с таблицей",
   },
-  // Кто подписывает акт. В настройках, а не в коде: мастера и директора
-  // меняют, и правка фамилии не должна требовать выкладки.
-  act_master: {
-    def: "",
-    text: true,
-    check: function (v) { return v === "" || v.length <= 120; },
-    hint: "ФИО мастера целиком или пусто — тогда подставится вошедший",
-  },
-  // Обычно акт от колледжа подписывает складмен, оформивший выдачу, а не
-  // мастер — решение владельца. Мастер остаётся умолчанием: так собирались
-  // акты до этой настройки.
-  act_signer: {
-    def: "master",
-    text: true,
-    check: function (v) { return v === "master" || v === "staff"; },
-    hint: "master — мастер из настроек, staff — сотрудник склада, оформивший выдачу",
-  },
-  act_director: {
-    def: "",
-    text: true,
-    check: function (v) { return v === "" || v.length <= 120; },
-    hint: "как указывать директора в договоре, например «Директора Керзиной О.А.»",
-  },
 
   // Приём заявок прямо с сайта. Включён по умолчанию — решение владельца:
   // заявка с сайта и есть основной путь, а копипаст — запасной. Это
@@ -5567,9 +5544,10 @@ function moneyDigits(value) {
   return (n < 0 ? "−" : "") + out;
 }
 
-// Шаблон акта — текст документа, что прислал колледж, слово в слово, без
-// данных студента и с подстановками на месте значений. Вёрстка переложена
-// под печать на A4 (поля 2 см, Times, таблицы подписей); как и прежде, это
+// Шаблон акта — бланк колледжа «Акт приема-передачи материальных ценностей
+// №…-МТО» слово в слово (исправлены только опечатки), без данных студента и с
+// подстановками на месте значений. Вёрстка переложена под печать на A4 (поля
+// 2 см, Times, таблицы подписей); как и прежде, это
 // HTML-файл рядом с кодом (apps-script/act-template.html), который попадает
 // под версии вместе с остальным.
 //
@@ -5577,8 +5555,8 @@ function moneyDigits(value) {
 // шрифты, ширины столбцов, серая шапка таблицы, — и править её проще в одном
 // файле, чем в сотне вызовов DocumentApp.
 var ACT_PLACEHOLDERS = ["{{НОМЕР}}", "{{ДАТА}}", "{{ФИО}}", "{{ТЕЛЕФОН}}",
-  "{{ПРОЕКТ}}", "{{С}}", "{{ПО}}", "{{СУММА}}", "{{СУММА_СЛОВАМИ}}",
-  "{{МАСТЕР}}", "{{МАСТЕР_КРАТКО}}", "{{ДИРЕКТОР}}", "{{ПОДПИСАНТ}}", "{{ПОЗИЦИИ}}"];
+  "{{ПРОЕКТ}}", "{{АДРЕС}}", "{{С}}", "{{ПО}}", "{{СУММА}}", "{{СУММА_СЛОВАМИ}}",
+  "{{ПОЗИЦИИ}}"];
 
 function buildActTemplate() {
   var html = HtmlService.createHtmlOutputFromFile("act-template").getContent();
@@ -5770,8 +5748,8 @@ function actExtraLines(txRows, byId, priceOf, modelName) {
 // Ручной путь остался запаской: настройки поправили, шаблон появился — акт по
 // давнему заказу собирается этой ручкой. В приложении кнопки нет.
 function handleActBuild(payload, token) {
-  var staffRow = checkAuth(token);
-  return buildAct(String(payload.order_id || ""), staffRow.full_name);
+  checkAuth(token);
+  return buildAct(String(payload.order_id || ""));
 }
 
 // Свежую копию документа Google отдаёт не сразу: DocumentApp.openById в ту же
@@ -5792,7 +5770,7 @@ function openDoc(id) {
   }
 }
 
-function buildAct(orderId, masterName) {
+function buildAct(orderId) {
   var settings = getSettings();
   var templateId = String(settings.act_template_id || "");
   if (!templateId) {
@@ -5823,7 +5801,7 @@ function buildAct(orderId, masterName) {
       ". Проверьте идентификатор шаблона в настройках");
   }
 
-  fillAct(openDoc(copy.getId()), order, orderId, lines, settings, stamp, masterName);
+  fillAct(openDoc(copy.getId()), order, orderId, lines, stamp);
   var url = "https://docs.google.com/document/d/" + copy.getId() + "/edit";
 
   // Ссылку держим в строке заказа: карточка показывает её без обращения к
@@ -5855,7 +5833,7 @@ function actTotal(lines) {
 //
 // Открыть прежний документ не вышло (удалили, нет доступа) — собираем новый
 // обычным buildAct: он и ссылку в строке заказа заменит, и новую в чат пошлёт.
-function rebuildAct(orderId, masterName) {
+function rebuildAct(orderId) {
   var settings = getSettings();
   var templateId = String(settings.act_template_id || "");
   if (!templateId) return { skipped: "no-template" };
@@ -5870,7 +5848,7 @@ function rebuildAct(orderId, masterName) {
   var doc = null;
   try { if (docId) doc = openDoc(docId); } catch (e) { doc = null; }
   if (!doc) {
-    var fresh = buildAct(orderId, masterName);
+    var fresh = buildAct(orderId);
     fresh.same_document = false;
     return fresh;
   }
@@ -5881,7 +5859,7 @@ function rebuildAct(orderId, masterName) {
     .match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/) || [])[0] || actStamp();
 
   resetActBody(doc.getBody(), openDoc(templateId).getBody());
-  fillAct(doc, order, orderId, lines, settings, stamp, masterName);
+  fillAct(doc, order, orderId, lines, stamp);
   return {
     url: oldUrl, document_id: docId, lines: lines.length, same_document: true,
     total: actTotal(lines), unpriced: lines.filter(function (l) { return !l.priced; }).length,
@@ -5907,29 +5885,30 @@ function resetActBody(body, templateBody) {
 
 // Заполнение документа, уже скопированного из шаблона: таблица позиций и
 // подстановки. Общее у первой сборки (buildAct) и пересборки (rebuildAct).
-function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
+function fillAct(doc, order, orderId, lines, stamp) {
   var total = actTotal(lines);
   var fio = String(order.student_name || "").trim() || "без имени";
   var body = doc.getBody();
 
   fillActItems(body, lines);
-  var signer = actSigner(settings, masterName);
+  var extra = splitExtraInput(order.extra_input);
 
   var fields = {
     "{{НОМЕР}}": String(order.order_no || orderId),
     "{{ДАТА}}": stamp,
     "{{ФИО}}": fio,
     "{{ТЕЛЕФОН}}": String(order.student_phone || ""),
-    "{{ПРОЕКТ}}": String(order.project || ""),
+    "{{ПРОЕКТ}}": String(order.project || "").trim() || ACT_BLANK,
+    "{{АДРЕС}}": extra["Адрес"] || ACT_BLANK + ACT_BLANK,
     "{{С}}": humanRuDate(order.issue_date),
     "{{ПО}}": humanRuDate(order.return_date),
     "{{СУММА}}": total ? moneyDigits(total) : "—",
     "{{СУММА_СЛОВАМИ}}": total ? moneyInWords(total) : "Стоимость не указана",
-    "{{МАСТЕР}}": signer.name || ACT_BLANK,
-    "{{МАСТЕР_КРАТКО}}": signer.name ? shortName(signer.name) : ACT_BLANK,
-    "{{ПОДПИСАНТ}}": signer.role,
-    "{{ДИРЕКТОР}}": String(settings.act_director || "Директора"),
   };
+  // Подстановки шаблонов, собранных до нынешнего бланка: кто подписывает за
+  // колледж, владелец теперь вписывает в сам шаблон, а в старом акте вместо
+  // «{{МАСТЕР}}» пусть будет линия от руки.
+  ACT_OLD_PLACEHOLDERS.forEach(function (k) { fields[k] = ACT_BLANK; });
   for (var key in fields) {
     body.replaceText(escapeForReplace(key), fields[key]);
   }
@@ -5937,21 +5916,10 @@ function fillAct(doc, order, orderId, lines, settings, stamp, masterName) {
   doc.saveAndClose();
 }
 
-// Пустое место под подпись читается как недосмотр, линия — как «впишите от
-// руки». Так бывает с заявкой с сайта: акт собирается, когда её ещё никто из
-// склада не оформлял.
+// Пустое место читается как недосмотр, линия — как «впишите от руки»: адреса
+// в заявке может не быть, а проект — не указан.
 var ACT_BLANK = "____________________";
-
-// Кто подписывает акт от колледжа (настройка act_signer). staffName — тот, кто
-// оформил заказ или выдачу; у заявки с сайта его нет.
-function actSigner(settings, staffName) {
-  var staff = String(settings.act_signer || "") === "staff";
-  var name = staff ? staffName : (settings.act_master || staffName);
-  return {
-    role: staff ? "Сотрудник склада" : "Мастер",
-    name: String(name || "").trim(),
-  };
-}
+var ACT_OLD_PLACEHOLDERS = ["{{МАСТЕР}}", "{{МАСТЕР_КРАТКО}}", "{{ПОДПИСАНТ}}", "{{ДИРЕКТОР}}"];
 
 // Заполнение таблицы позиций. Таблицу находим по подстановке в ней самой:
 // привязываться к «третьей таблице от начала» нельзя — шаблон правят руками.
@@ -5978,11 +5946,13 @@ function fillActItems(body, lines) {
 
   lines.forEach(function (line, idx) {
     var row = target.insertTableRow(sample + 1 + idx);
+    // Порядок столбцов — как в бланке колледжа: заводской номер перед
+    // количеством.
     var cells = [
       String(idx + 1),
       line.name,
-      String(line.qty),
       line.serials,
+      String(line.qty),
       line.priced ? moneyDigits(line.sum) : "—",
     ];
     cells.forEach(function (text, c) {
@@ -6037,14 +6007,6 @@ function humanRuDate(value) {
   return m ? m[3] + "-" + m[2] + "-" + m[1] + "г." : s;
 }
 
-// «Гриднев Егор Олегович» → «Гриднев Е.О.»
-function shortName(full) {
-  var parts = String(full || "").trim().split(/\s+/);
-  if (parts.length < 2) return String(full || "");
-  var initials = "";
-  for (var i = 1; i < parts.length && i < 3; i++) initials += parts[i].charAt(0) + ".";
-  return parts[0] + " " + initials;
-}
 
 // replaceText принимает регулярное выражение, а в подстановках фигурные скобки.
 function escapeForReplace(text) {
@@ -6155,7 +6117,7 @@ function handleOrderIssue(payload, token) {
   // Как у одиночной выдачи: акт пересобирается после замка и один раз на
   // запрос. По строке заказа вне состава выдача лечь не должна, но если
   // легла (строки той же модели уже заполнены) — акт должен это показать.
-  if (offOrder) rebuildActQuietly(Number(orderId), staffRow.full_name);
+  if (offOrder) rebuildActQuietly(Number(orderId));
   return { order_id: Number(orderId), line_no: lineNo, issued: issued, left: rest };
 }
 
