@@ -8,6 +8,17 @@
 
 const OrdersScreen = (() => {
   const CACHE = "orders";
+  // Архив — отдельным списком и своим кэшем: /orders/list отдаёт его только по
+  // archived: true, а в основном списке архивных нет. Открывается сегментом
+  // «Архив» в фильтре; оттуда заказ смахиванием вправо возвращается.
+  const ARCH = "orders_archived";
+
+  function inArchive() {
+    return segmentedValue("orders-filter-status") === "archived";
+  }
+  function source() {
+    return inArchive() ? ARCH : CACHE;
+  }
   let busy = false;
   let draft = null;      // разобранный заказ, ждёт подтверждения
 
@@ -22,7 +33,7 @@ const OrdersScreen = (() => {
   }
 
   function drawRefreshRow() {
-    renderRefreshRow("orders-refresh", CACHE, () => loadList({ force: true }), busy);
+    renderRefreshRow("orders-refresh", source(), () => loadList({ force: true }), busy);
   }
 
   // ---- список ----
@@ -31,7 +42,7 @@ const OrdersScreen = (() => {
     const status = segmentedValue("orders-filter-status");
     if (status === "overdue") {
       if (!isOverdue(order)) return false;
-    } else if (status !== "all" && order.status !== status) {
+    } else if (status !== "all" && status !== "archived" && order.status !== status) {
       return false;
     }
     const q = document.getElementById("orders-search").value.trim().toLowerCase();
@@ -124,7 +135,8 @@ const OrdersScreen = (() => {
   }
 
   function findOrder(orderId) {
-    return (Cache.items(CACHE) || []).find((o) => String(o.order_id) === String(orderId)) || null;
+    const all = (Cache.items(CACHE) || []).concat(Cache.items(ARCH) || []);
+    return all.find((o) => String(o.order_id) === String(orderId)) || null;
   }
 
   function isAdmin() {
@@ -144,10 +156,13 @@ const OrdersScreen = (() => {
           TG.openTelegramLink("https://t.me/" + encodeURIComponent(tg));
         },
       } : null,
-      leading: isAdmin() ? {
+      leading: !isAdmin() ? null : inArchive() ? {
+        label: "Вернуть", tone: "archive", icon: ICON_ARCHIVE,
+        onTrigger: unarchiveRow,
+      } : {
         label: "В архив", tone: "archive", icon: ICON_ARCHIVE,
         onTrigger: archiveRow,
-      } : null,
+      },
     };
   }
 
@@ -167,8 +182,31 @@ const OrdersScreen = (() => {
   }
 
   function redraw() {
-    const cached = Cache.items(CACHE);
+    const cached = Cache.items(source());
     if (cached) render(cached);
+  }
+
+  // Из архива — обратно в список. Здесь без отложенной отмены: возврат ничего
+  // не прячет, и промахнуться им нельзя. Строка уходит сразу, при отказе
+  // возвращается. В основном списке заказ появится при его перечитывании.
+  function unarchiveRow(row) {
+    const order = findOrder(row.dataset.orderId);
+    if (!order) { SwipeRow.close(row); return; }
+    const cached = Cache.items(ARCH) || [];
+    Cache.replace(ARCH, cached.filter((o) => String(o.order_id) !== String(order.order_id)));
+    SwipeRow.dismiss(row, "leading").then(redraw);
+    TG.hapticTick();
+    apiPost("/order/archive", { order_id: Number(order.order_id), back: true })
+      .then(() => {
+        Cache.stale(CACHE);
+        Snackbar.show(`Заказ №${order.order_no} вернулся в список`);
+      })
+      .catch((err) => {
+        Cache.replace(ARCH, (Cache.items(ARCH) || []).concat([order]));
+        redraw();
+        TG.hapticError();
+        Snackbar.show(err.message || "Не получилось вернуть заказ из архива");
+      });
   }
 
   // Архив с отменой. Строка уходит сразу, а запрос — только когда истечёт
@@ -219,6 +257,7 @@ const OrdersScreen = (() => {
       .then(() => {
         // Список мог перечитаться, пока запрос шёл, и вернуть заказ обратно.
         dropFromCache(order.order_id);
+        Cache.stale(ARCH);
         redraw();
       })
       .catch((err) => {
@@ -254,7 +293,9 @@ const OrdersScreen = (() => {
     if (hidden) orders = orders.filter((o) => String(o.order_id) !== hidden);
     const visible = orders.filter(matches);
     if (!orders.length) {
-      list.innerHTML = `<p class="empty">Заказов пока нет. Вставьте сообщение бота — оно разберётся само.</p>`;
+      list.innerHTML = inArchive()
+        ? `<p class="empty">Архив пуст. Заказ попадает сюда смахиванием вправо в списке.</p>`
+        : `<p class="empty">Заказов пока нет. Вставьте сообщение бота — оно разберётся само.</p>`;
       return;
     }
     if (!visible.length) {
@@ -269,12 +310,13 @@ const OrdersScreen = (() => {
 
   async function loadList({ force = false } = {}) {
     const list = document.getElementById("orders-list");
-    const cached = Cache.items(CACHE);
+    const name = source();
+    const cached = Cache.items(name);
 
-    if (cached && cached.length) render(cached);
+    if (cached) render(cached);
     drawRefreshRow();
 
-    if (!force && cached && cached.length && Cache.isFresh(CACHE)) return;
+    if (!force && cached && Cache.isFresh(name)) return;
 
     if (!cached || !cached.length) list.innerHTML = skeleton(3);
     busy = true;
@@ -282,8 +324,11 @@ const OrdersScreen = (() => {
     try {
       // Через Cache.load: если список уже тянет главная (Cache.warm), ждём
       // тот же ответ, а не заводим второй запрос.
-      const orders = await Cache.load(CACHE, "/orders/list", { status: "all" }, { fresh: force });
-      render(orders);
+      const orders = name === ARCH
+        ? await Cache.load(ARCH, "/orders/list", { status: "all", archived: true }, { fresh: force })
+        : await Cache.load(CACHE, "/orders/list", { status: "all" }, { fresh: force });
+      // Пока шёл запрос, могли переключить сегмент — рисуем то, что выбрано.
+      if (name === source()) render(orders);
     } catch (err) {
       if (!cached || !cached.length) {
         list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
@@ -589,15 +634,18 @@ const OrdersScreen = (() => {
       else showAdd(pasteFormHtml());
     });
     // Подсказывает и номер, и арендатора, и ник, и позицию из состава заказа.
-    Suggest.attach("orders-search", (q) => Suggest.orders(Cache.items(CACHE) || [], q));
+    Suggest.attach("orders-search", (q) => Suggest.orders(Cache.items(source()) || [], q));
     // Поиск — поле, фильтр — сегменты: события у них разные, и общий цикл по
     // именам больше не годится.
     const refilter = () => {
-      const cached = Cache.items(CACHE);
+      const cached = Cache.items(source());
       if (cached) render(cached);
     };
     document.getElementById("orders-search").addEventListener("input", refilter);
-    bindSegmented("orders-filter-status", refilter);
+    // «Архив» — свой список: впервые открытый, он грузится.
+    bindSegmented("orders-filter-status", () => {
+      if (inArchive()) loadList(); else { refilter(); drawRefreshRow(); }
+    });
     Pull.register("orders", () => loadList({ force: true }));
     Router.register("orders", { onShow });
   }

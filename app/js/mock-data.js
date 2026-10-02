@@ -1345,7 +1345,7 @@ const MockAPI = {
           return { ...rest, status: mockOrderStatus(o, open, txs.length),
                    issued_open: open, issued_total: txs.length, items_text: itemsText,
                    archived_at: o.archived_at || "",
-                   // Ссылка на акт нужна и в списке: по ней там кнопка «Акт».
+                   // Ссылка на акт нужна и в списке: по ней номер заказа открывает акт.
                    act_url: o.act_url || "" };
         })
         // Архив по умолчанию не показываем — как и настоящий бэкенд.
