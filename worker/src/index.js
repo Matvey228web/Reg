@@ -67,7 +67,9 @@ const HARMLESS = new Set([
 // мимо кэша не идут тоже: ключ получает ещё и отпечаток токена, то есть у
 // каждого он свой. Иначе самый медленный экран — «Настройки» — остался бы
 // медленным, а именно про него и спрашивают.
-const PERSONAL = new Set(["/settings/get"]);
+// Сюда же — чтения, которые таблица отдаёт не всем вошедшим (requireAdmin):
+// в общем кэше ответ админа достался бы складмену мимо проверки роли.
+const PERSONAL = new Set(["/settings/get", "/staff/list"]);
 
 export default {
   async fetch(request, env, ctx) {
@@ -113,9 +115,12 @@ export default {
     const who = PERSONAL.has(endpoint) ? token : "";
     // Подтверждён ли токен — undefined, пока KV не спрашивали.
     let known;
+    // Ключ берётся до похода в таблицу, по поколению на момент запроса. Иначе
+    // чтение, начатое до чужой записи, легло бы под новое поколение уже
+    // устаревшим ответом и прожило бы под ним пять минут.
+    const key = cacheable ? await cacheKey(env, endpoint, body.payload, who) : "";
 
     if (cacheable && PUBLIC_READS.has(endpoint)) {
-      const key = await cacheKey(env, endpoint, body.payload, who);
       const hit = await env.CACHE.get(key);
       if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
     } else if (cacheable && token) {
@@ -123,14 +128,19 @@ export default {
       // подделанный токен получил бы весь каталог, не заходя в систему.
       known = await env.CACHE.get("sess:" + token);
       if (known) {
-        const key = await cacheKey(env, endpoint, body.payload, who);
         const hit = await env.CACHE.get(key);
         if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
       }
     }
 
+    const write = enabled && !READS.has(endpoint) && !HARMLESS.has(endpoint);
     const upstream = await callUpstream(env, body);
-    if (!upstream.ok) return cors(json(upstream.envelope, { "X-Mifs-Cache": "error" }));
+    if (!upstream.ok) {
+      // Таблица не ответила, но запись до неё могла дойти: исход неизвестен.
+      // Лишний промах кэша дешевле вещи, которая числится свободной.
+      if (write) await bumpGeneration(env);
+      return cors(json(upstream.envelope, { "X-Mifs-Cache": "error" }));
+    }
 
     const answer = upstream.envelope;
 
@@ -150,7 +160,11 @@ export default {
     // Уже запомненный не переписываем: записей в KV на бесплатном тарифе
     // около тысячи в сутки, а чтений — в сто раз больше. Срок от этого не
     // продлевается — через пять минут токен просто подтвердится заново.
-    if (token && answer.ok) {
+    // Только для ручек, где таблица токен проверяет: публичные отвечают ok на
+    // любой, и выдуманный токен, пройдя через каталог сайта, получил бы кэш
+    // складских списков.
+    const checksToken = !endpoint.startsWith("/public/") && !endpoint.startsWith("/auth/");
+    if (token && answer.ok && checksToken) {
       if (known === undefined) known = await env.CACHE.get("sess:" + token);
       if (!known) ctx.waitUntil(env.CACHE.put("sess:" + token, "1", { expirationTtl: TTL.session }));
     }
@@ -160,15 +174,15 @@ export default {
       ctx.waitUntil(env.CACHE.put("sess:" + answer.data.token, "1", { expirationTtl: TTL.session }));
     }
 
-    if (enabled && !READS.has(endpoint) && !HARMLESS.has(endpoint) && answer.ok) {
+    if (write && answer.ok) {
       // Любая запись сбрасывает кэш. Не удалением ключей — их не перебрать
       // дёшево, — а сменой поколения: старые ключи просто перестают
-      // существовать и истекают сами.
-      ctx.waitUntil(bumpGeneration(env));
+      // существовать и истекают сами. До ответа, а не после: склад сразу
+      // после выдачи перечитывает список и не должен попасть на старое.
+      await bumpGeneration(env);
     }
 
     if (cacheable && answer.ok && (token || PUBLIC_READS.has(endpoint))) {
-      const key = await cacheKey(env, endpoint, body.payload, who);
       ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answer), { expirationTtl: TTL.cache }));
     }
 
@@ -445,6 +459,9 @@ async function deliver(env, key) {
   // Повтор того же текста таблица сама отвечает ok+repeat — это тоже «доставлено».
   if (answer && answer.ok) {
     await env.CACHE.delete(key);
+    // Заявка — запись в таблицу, как и любая другая: без этого список заказов
+    // и наличие на сайте до пяти минут не знали бы о ней.
+    await bumpGeneration(env);
     return;
   }
   // 400 и 403 — «так не бывает» и «приём выключен». 409 — номер в таблице уже
