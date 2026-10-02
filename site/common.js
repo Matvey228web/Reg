@@ -535,14 +535,27 @@ document.addEventListener("DOMContentLoaded", function () {
     .catch(function () { /* нет ни ответа, ни файла — объявлений просто нет */ });
 });
 
-// ВРЕМЕННО: переключатель темы — убрать, когда определимся с темой по умолчанию.
-// Сама тема выставляется ещё до отрисовки скриптом в <head> каждой страницы
-// (data-theme на <html>, выбор в localStorage `mifs_theme`); здесь только кнопка.
-// Без кнопки тема продолжает работать.
+// Сезонное приветствие на баннере. Какой сезон идёт, решает theme.js (календарь
+// лежит там); здесь только подмена текста. Подмена сразу, а не по
+// DOMContentLoaded: скрипт стоит в конце страницы, баннер уже разобран, и
+// обычная подпись не успевает мелькнуть.
+(function () {
+  var s = window.MifsSeason;
+  if (!s || !s.hero) return;
+  var h = document.querySelector(".hero h1");
+  var p = document.querySelector(".hero p");
+  if (h) h.textContent = s.hero.title;
+  if (p) p.textContent = s.hero.sub;
+})();
+
+// Переключатель светлой/тёмной темы — постоянный. Сама тема выставляется ещё до
+// отрисовки скриптом theme.js в <head> (data-theme на <html>, выбор в
+// localStorage `mifs_theme`); здесь только кнопка. Без кнопки тема работает.
 document.addEventListener("DOMContentLoaded", function () {
   var btn = Site.$("theme-toggle");
   if (!btn) return;
-  var COLORS = { light: "#f4f3f0", dark: "#0d0d0f" };
+  // Цвета строки браузера считает theme.js: у сезонной темы своя тёмная.
+  var COLORS = window.MifsThemeColors || { light: "#f4f3f0", dark: "#0d0d0f" };
 
   function now() {
     return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";

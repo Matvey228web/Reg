@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 44" width="84" height="44">
+<!-- Три тонких золотых блика: мерцают по очереди. -->
+<defs><path id="s" fill="#d9a441" d="M0-7Q.9-.9 7 0Q.9.9 0 7Q-.9.9-7 0Q-.9-.9 0-7Z"/></defs>
+<g transform="translate(18 28)"><g><use href="#s" transform="scale(1.9)" opacity=".6"/></g></g>
+<g transform="translate(52 12)"><g><use href="#s" transform="scale(1.2)" opacity=".6"/></g></g>
+<g transform="translate(70 30)"><g><use href="#s" transform="scale(0.8)" opacity=".6"/></g></g>
+</svg>

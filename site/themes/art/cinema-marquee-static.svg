@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 60 22" width="60" height="22">
+<!-- Маркиза: металлическая планка и лампы-колпаки. Три фазы бегут по кругу за 0,9 с. -->
+<defs>
+<linearGradient id="m" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6a5240"/><stop offset=".12" stop-color="#46332a"/><stop offset=".55" stop-color="#26170f"/><stop offset="1" stop-color="#120a07"/></linearGradient>
+<radialGradient id="s" cx=".5" cy=".4" r=".6"><stop offset="0" stop-color="#d7b06a"/><stop offset="1" stop-color="#4f3515"/></radialGradient>
+<radialGradient id="d" cx=".38" cy=".32" r=".8"><stop offset="0" stop-color="#cdb48a"/><stop offset=".6" stop-color="#7a5f35"/><stop offset="1" stop-color="#3b2810"/></radialGradient>
+<radialGradient id="g" cx=".38" cy=".32" r=".8"><stop offset="0" stop-color="#fffef2"/><stop offset=".3" stop-color="#ffeaa8"/><stop offset=".7" stop-color="#f4b640"/><stop offset="1" stop-color="#b8701a"/></radialGradient>
+<radialGradient id="h"><stop offset="0" stop-color="#ffcf66" stop-opacity=".75"/><stop offset=".45" stop-color="#ffb23a" stop-opacity=".3"/><stop offset="1" stop-color="#ff9e1f" stop-opacity="0"/></radialGradient>
+<g id="b"><circle cx="0" cy="11" r="6.9" fill="url(#s)"/><circle cx="0" cy="11" r="5.5" fill="url(#d)"/><ellipse cx="-1.7" cy="9" rx="1.6" ry=".9" fill="#fff" fill-opacity=".4"/></g>
+<g id="l"><circle cx="0" cy="11" r="10.4" fill="url(#h)"/><circle cx="0" cy="11" r="5.5" fill="url(#g)"/><ellipse cx="-1.7" cy="9" rx="1.8" ry="1" fill="#fff"/></g>
+</defs>
+<rect width="60" height="22" fill="url(#m)"/>
+<path d="M0 .5H60" stroke="#e9b44c" stroke-opacity=".6"/>
+<path d="M0 21.5H60" stroke="#000" stroke-opacity=".6"/>
+<use href="#b" x="10"/>
+<use href="#b" x="30"/>
+<use href="#b" x="50"/>
+<use href="#l" x="10" opacity=".9"/>
+<use href="#l" x="30" opacity=".9"/>
+<use href="#l" x="50" opacity=".9"/>
+</svg>
