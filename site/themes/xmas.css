@@ -156,15 +156,15 @@ html[data-season="xmas"] .hero-in::before,
 html[data-season="xmas"] .hero-in::after { content: ""; position: absolute; pointer-events: none; z-index: 0; }
 html[data-season="xmas"] .hero-in::before {
   top: 0; right: max(calc(var(--pad) + 8px), calc((100% - 1280px) / 2 + var(--pad) + 8px));
-  width: 72px; height: 63px;
-  background: url(art/xmas-bells.svg) 0 0 / 72px 63px no-repeat;
+  width: 96px; height: 84px;
+  background: url(art/xmas-bells.svg) 0 0 / 96px 84px no-repeat;
 }
 html[data-season="xmas"] .hero-in::after {
-  top: 0; right: max(calc(var(--pad) + 96px), calc((100% - 1280px) / 2 + var(--pad) + 96px));
-  width: 28px; height: 58px;
+  top: 0; right: max(calc(var(--pad) + 120px), calc((100% - 1280px) / 2 + var(--pad) + 120px));
+  width: 36px; height: 76px;
   background:
-    linear-gradient(var(--gold-line), var(--gold-line)) 50% 0 / 1px 30px no-repeat,
-    url(art/star.svg) 50% 100% / 26px 26px no-repeat;
+    linear-gradient(var(--gold-line), var(--gold-line)) 50% 0 / 1px 40px no-repeat,
+    url(art/star.svg) 50% 100% / 34px 34px no-repeat;
   filter: drop-shadow(0 0 5px rgba(var(--glow-rgb), .6));
   transform-origin: 50% 0;
   animation: xmas-star 4.2s ease-in-out infinite;
