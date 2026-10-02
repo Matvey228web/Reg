@@ -32,10 +32,17 @@ const ScanScreen = (() => {
   function renderCameraState() {
     const box = document.getElementById("scan-no-camera");
     const hint = document.getElementById("scan-manual-hint");
-    if (TG.hasScanQr()) {
+    if (QR.canCamera()) {
       box.innerHTML = "";
       hint.textContent = "Наведите камеру на QR — она открылась сама. " +
         "Чтобы открыть её снова, нажмите «Скан» в панели внизу.";
+      return;
+    }
+    // На компьютере камеры у Telegram нет, зато есть сканер штрихкодов: он
+    // печатает номер сам, куда бы ни стоял курсор.
+    if (QR.isDesktop()) {
+      box.innerHTML = "";
+      hint.textContent = "Сканируйте QR сканером или введите номер с наклейки и нажмите Enter.";
       return;
     }
     box.innerHTML = `<p class="hint">Сканер доступен только в Telegram от версии 6.4. Введите номер руками — он
@@ -48,7 +55,7 @@ const ScanScreen = (() => {
   // отсутствии сказано отдельной строкой над полем.
   async function startScan(silent) {
     showBoxError("scan-error", "");
-    if (silent && !TG.hasScanQr()) return;
+    if (silent && !QR.canCamera()) { focusManual(); return; }
     QR.scan(async (code, error) => {
       if (error) {
         if (!silent) showBoxError("scan-error", error);
@@ -57,6 +64,28 @@ const ScanScreen = (() => {
       if (!code) return;
       await handleCode(code.trim());
     });
+  }
+
+  // На телефоне не фокусируем: всплывшая клавиатура закроет пол-экрана.
+  function focusManual() {
+    if (!QR.isDesktop()) return;
+    const input = document.getElementById("scan-manual-input");
+    if (input) input.focus({ preventScroll: true });
+  }
+
+  // Сканер штрихкодов присылает номера быстрее, чем таблица отвечает (6–9
+  // секунд): второй номер, пришедший во время поиска первого, ждать не будет,
+  // а перерисует экран под ногами у первого. Поэтому один за раз, как quickBusy.
+  let codeBusy = false;
+  async function takeCode(code) {
+    if (!code || codeBusy) return;
+    codeBusy = true;
+    showBoxError("scan-error", "");
+    try {
+      await handleCode(code);
+    } finally {
+      codeBusy = false;
+    }
   }
 
   // Что делать с номером, который прочитали камерой или ввели руками.
@@ -709,14 +738,20 @@ const ScanScreen = (() => {
   }
 
   function init() {
-    document.getElementById("scan-manual-submit").addEventListener("click", async () => {
-      // На этикетке номер напечатан группами — «01 01 01»: так его диктуют и
-      // набирают. Пробелы и дефисы при вводе поэтому просто выкидываем, иначе
-      // человек вводит ровно то, что видит, и получает «предмет не найден».
-      const val = document.getElementById("scan-manual-input").value.replace(/[\s\-]/g, "");
-      if (!val) return;
-      showBoxError("scan-error", "");
-      await handleCode(val);
+    const input = document.getElementById("scan-manual-input");
+    const submit = () => takeCode(QR.normalize(input.value));
+    document.getElementById("scan-manual-submit").addEventListener("click", submit);
+    // Enter от сканера сюда не доходит — его забирает QR.wedge, — так что
+    // здесь только Enter, нажатый человеком.
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      submit();
+    });
+    QR.wedge(takeCode, (target) => {
+      if (!document.getElementById("screen-scan").classList.contains("screen--active")) return false;
+      // В заметках и описании дефекта печатают текст — сканер там не ждём.
+      return !/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target === input;
     });
     Router.register("scan", { onShow });
   }

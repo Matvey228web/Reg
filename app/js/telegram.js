@@ -130,6 +130,10 @@ const TG = (() => {
     try { return !!webApp.isVersionAtLeast(version); } catch (e) { return false; }
   }
 
+  function platform() {
+    return (webApp && webApp.platform) || "";
+  }
+
   function hasScanQr() {
     return !!(webApp && typeof webApp.showScanQrPopup === "function");
   }
@@ -336,7 +340,7 @@ const TG = (() => {
   }
 
   return {
-    init, getUser, getInitData, isAvailable, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
+    init, getUser, getInitData, isAvailable, platform, hasScanQr, scanQr, scanQrContinuous, closeScanQr,
     mainButton, backButton, hapticSuccess, hapticError, hapticTick, showAlert, showConfirm,
     confirmDestructive, lockVerticalSwipes, openLink, openTelegramLink,
   };

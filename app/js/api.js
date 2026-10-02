@@ -44,6 +44,7 @@ function getStoredSession() {
 function sessionExpired(endpoint, token) {
   localStorage.removeItem(CONFIG.SESSION_STORAGE_KEY);
   if (!token || endpoint === "/auth/login") return;
+  Cache.clearAll();
   if (typeof Router !== "undefined") Router.reset("login");
 }
 
