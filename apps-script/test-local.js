@@ -2369,16 +2369,15 @@ so = call('/public/order', { raw_text: botOrderText('270101-0001', [
 check('заявка для сообщения принята', so.ok === true, so);
 let tgm = siteTg();
 check('parse_mode HTML в сообщении о заявке', tgm && tgm.parse_mode === 'HTML', tgm);
-check('превью: номер и сумма, затем кто и когда, затем состав',
-  /^<b>Заказ №270101-0001 · 77000 RUB<\/b>\nТестов Тест Тестович · 01\.10 10:00 → 05\.10 18:00\n\n<b>🧾 Состав<\/b>\n1\. /.test(tgm.text), tgm.text);
+check('заголовок с номером, через строку состав', /^<b>📦 Заказ №270101-0001<\/b>\n\n1\. /.test(tgm.text), tgm.text);
 check('строка позиции: сумма и (кол-во x цена)',
   tgm.text.indexOf('1. ' + siteCat.model_name + ': 77000 (2 x 38500)') !== -1, tgm.text);
 check('нулевая цена печатается как у Tilda',
   tgm.text.indexOf('2. Бесплатная вещь: 0 (1 x 0.00)') !== -1, tgm.text);
-check('сумма и сроки только в сводке, ниже не повторяются', !/Сумма:|Прием:|Сдача:/.test(tgm.text), tgm.text);
+check('сумма — по строкам, жирным', /\n<b>Сумма: 77000 RUB<\/b>\n/.test(tgm.text), tgm.text);
 check('блок покупателя для взрослого: ФИО, телефон, ник',
   /<b>👤 Покупатель<\/b>\nТестов Тест Тестович\nТелефон: \+70000000000\nTelegram: @testov/.test(tgm.text), tgm.text);
-check('разделы через пустую строку', /0\.00\)\n\n<b>👤 Покупатель<\/b>\n[^]*\n\n<b>🎬 Съёмка<\/b>\n/.test(tgm.text), tgm.text);
+check('приём и сдача со временем', /\n\n<b>📅 Сроки<\/b>\nПрием: 2026-10-01 10:00\nСдача: 2026-10-05 18:00\n\n<b>🎬 Съёмка<\/b>\n/.test(tgm.text), tgm.text);
 check('проект отдельной строкой', /Проект: курсовая/.test(tgm.text), tgm.text);
 check('без Input строк мастерской, комментария и адреса нет',
   !/Мастерская:|Комментарий:|Адрес:/.test(tgm.text), tgm.text);
@@ -2433,7 +2432,7 @@ check('длинная заявка принята', so.ok === true, so);
 tgm = siteTg();
 check('сообщение укладывается в предел Telegram', tgm.text.length <= 4096, tgm.text.length);
 check('список урезан пометкой «… и ещё N поз.»', /… и ещё \d+ поз\./.test(tgm.text), tgm.text.slice(0, 200));
-check('сумма по всем позициям сохранена', /^<b>Заказ №270101-0005 · 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(0, 200));
+check('сумма по всем позициям сохранена', /<b>Сумма: 3000 RUB<\/b>/.test(tgm.text), tgm.text.slice(-400));
 check('покупатель и ссылка уцелели',
   /Тестов Тест Тестович/.test(tgm.text) && /<a href="https:\/\/example\.test\/">/.test(tgm.text), tgm.text.slice(-400));
 metaSet('setting_site_url', '');
