@@ -624,7 +624,22 @@ input:focus-visible, textarea:focus-visible {
   display: grid; place-items: center;
   overflow: hidden;
 }
-.item-shot img { width: 100%; height: 100%; object-fit: contain; }
+/* Снимок со своим фоном (обычно белым) на фоне страницы смотрелся бы вырезанной
+   плиткой. Края гасим маской: под ними проступает --shot, то есть тёмное в
+   тёмной теме и светлое в светлой. Ширина по снимку, а не по рамке: иначе
+   маска легла бы на пустые поля по бокам, а не на края фото. */
+.item-shot img {
+  position: absolute; inset: 0; margin: auto;
+  width: auto; height: auto; max-width: 100%; max-height: 100%;
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 14%, #000 86%, transparent),
+    linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent, #000 14%, #000 86%, transparent),
+    linear-gradient(to bottom, transparent, #000 14%, #000 86%, transparent);
+  mask-composite: intersect;
+}
 .item-shot .shot-ico { width: 64px; height: 64px; stroke-width: 1.3; }
 .item-shot img + .shot-ico { display: none; }
 
