@@ -25,7 +25,7 @@ var Site = (function () {
   var SECTIONS = [
     { code: "cine", label: "Кино", mark: "CINE" },
     { code: "photo", label: "Фото", mark: "PHOTO" },
-    { code: "my", label: "My mifs rent", mark: "" },
+    { code: "my", label: "My rent", mark: "" },
   ];
 
   // --- Мелочи ---

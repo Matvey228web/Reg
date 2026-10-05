@@ -163,12 +163,12 @@
           '<input type="text" id="project" /></label>' +
         '<label class="field"><span class="cap">Мастерская и курс</span>' +
           '<input type="text" id="workshop" /></label>' +
-        '<label class="field"><span class="cap">Комментарий</span>' +
-          '<textarea id="note" rows="3"></textarea></label>' +
-        // Адрес — по желанию: съёмка бывает и в павильоне колледжа. Складу
-        // он нужен, чтобы знать, куда уезжает техника.
+        // Адрес обязателен, как было на Tilda: складу нужно знать, куда
+        // уезжает техника. Комментарий — последним, он единственный по желанию.
         '<label class="field"><span class="cap">Адрес</span>' +
           '<input type="text" id="address" autocomplete="off" /></label>' +
+        '<label class="field"><span class="cap">Комментарий</span>' +
+          '<textarea id="note" rows="3"></textarea></label>' +
         // Данные лежат в этом телефоне, и убрать их человек должен уметь сам:
         // на складе один телефон иногда ходит по рукам.
         '<button class="link-danger" type="button" id="forget">Забыть мои данные</button>' +
@@ -288,7 +288,7 @@
     if (el && el.classList) el.classList.remove("is-bad");
   }
 
-  // Мастерская, комментарий и адрес съёмок едут одной строкой «Input»: в таблице под них
+  // Мастерская, адрес съёмок и комментарий едут одной строкой «Input»: в таблице под них
   // одна колонка (extra_input), и так же называлось поле в форме на Tilda —
   // старые сообщения бота и новые заявки лягут в одно место.
   //
@@ -298,12 +298,12 @@
     var parts = [];
     var workshop = flat(val("workshop"));
     var note = flat(val("note"));
+    var address = flat(val("address"));
     if (workshop) parts.push("Мастерская: " + workshop);
-    if (note) parts.push("Комментарий: " + note);
     // Метки разбирает бэкенд (splitExtraInput в Code.gs) — в сообщении бота
     // каждая встаёт своей строкой.
-    var address = flat(val("address"));
     if (address) parts.push("Адрес: " + address);
+    if (note) parts.push("Комментарий: " + note);
     return parts.join(". ");
   }
 
@@ -467,7 +467,7 @@
   // ожидания — худший способ узнать, что не введён телефон.
   // Обязательно всё, кроме комментария: заявка без времени возврата или без
   // мастерской всё равно вернётся вопросом в чат, только через час и уже от
-  // человека. По желанию — только комментарий и адрес съёмок.
+  // человека. По желанию — только комментарий.
   var REQUIRED = [
     { id: "name", what: "ФИО" },
     { id: "phone", what: "телефон" },
@@ -476,6 +476,7 @@
     { id: "gphone", what: "телефон представителя", minor: true },
     { id: "project", what: "проект" },
     { id: "workshop", what: "мастерскую и курс" },
+    { id: "address", what: "адрес съёмок" },
     { id: "from", what: "дату выдачи" },
     { id: "from-time", what: "время выдачи" },
     { id: "to", what: "дату возврата" },

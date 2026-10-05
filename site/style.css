@@ -555,7 +555,15 @@ input:focus-visible, textarea:focus-visible {
   overflow: hidden;
   background: var(--shot);
 }
-.shot img { width: 100%; height: 100%; object-fit: cover; }
+.shot img {
+  /* Поверх ячейки, а не в ней: в сетке строка растягивалась под 800 точек
+     снимка, и contain вписывал его в эту строку, а не в карточку — низ обрезался. */
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: contain;
+}
+/* Снимки на белом, как в оригинале (photos.py), — и поле вокруг квадрата в
+   карточке 4:3 белое, иначе снимок читается вклейкой. */
+.shot:has(img), .item-shot:has(img) { background: #fff; }
 .shot-ico { width: 34px; height: 34px; stroke-width: 1.5; color: var(--ink); opacity: .8; }
 .shot img + .shot-ico { display: none; }
 
@@ -581,6 +589,13 @@ input:focus-visible, textarea:focus-visible {
 
 .card-body { padding: 10px 12px 12px; display: grid; gap: 5px; }
 .card-name { font-size: 14px; line-height: 18px; font-weight: 600; }
+
+/* My rent: вместо корзины — владельцы со ссылкой на Telegram. */
+.my-note { margin: 0; font-size: 12px; line-height: 16px; color: var(--dim); white-space: pre-line; }
+.my-offers li .my-note { display: block; }
+.my-mark { font-size: 12px; line-height: 16px; color: var(--accent); }
+.my-offers { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; line-height: 18px; }
+.my-offers a { color: var(--ink); }
 .card-free { font-variant-numeric: tabular-nums; }
 .card-free b { color: var(--ink); font-weight: 700; }
 .card-free.none { color: var(--accent-text); }

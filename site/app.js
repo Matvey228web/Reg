@@ -99,13 +99,59 @@
     $("status").textContent = "";
   }
 
-  // Свои вещи студентов. Механики нет — и раздел не делает вида, что есть.
+  // Свои вещи студентов: каталог отдельный (my.json, перенесён с Tilda), склад
+  // их не выдаёт — о цене и аренде договариваются с владельцем напрямую, поэтому
+  // вместо корзины ссылка на его Telegram. Это единственное место сайта, где
+  // Telegram разрешён: так решил владелец, иначе связаться не с кем.
+  var my = null;
+
+  function myOffer(o) {
+    var bits = [];
+    if (o.qty) bits.push(o.qty + " шт.");
+    bits.push(o.price ? o.price + " ₽" : "цена по договорённости");
+    return '<li><a href="https://t.me/' + encodeURIComponent(o.tg) +
+      '" target="_blank" rel="noopener">@' + esc(o.tg) + "</a> · " + esc(bits.join(" · ")) +
+      (o.note ? '<span class="my-note">' + esc(o.note) + "</span>" : "") + "</li>";
+  }
+
   function renderMy() {
     $("controls").hidden = true;
     $("status").textContent = "";
     $("empty").hidden = true;
-    $("groups").className = "soonwrap";
-    $("groups").innerHTML = '<p class="soon">soon…</p>';
+    if (!my) {
+      fetch("my.json")
+        .then(function (res) { return res.json(); })
+        .then(function (data) { my = data; if (Site.section() === "my") renderMy(); })
+        .catch(function () { $("status").textContent = "Раздел не загрузился. Обновите страницу."; });
+      return;
+    }
+    // Открытие назначил владелец (15 октября, 12:00 по Москве). Файл к этому
+    // времени уже выложен — прячем только витрину, это не защита данных.
+    if (Date.now() < Date.parse(my.opens_at)) {
+      $("groups").className = "soonwrap";
+      $("groups").innerHTML = '<p class="soon">soon…</p>';
+      return;
+    }
+    var html = "";
+    my.categories.forEach(function (c) {
+      var list = my.items.filter(function (m) { return m.category === c.code; });
+      if (!list.length) return;
+      html += '<h2 class="group-title">' + esc(c.label) + "</h2>" +
+        '<div class="grid">' + list.map(function (m) {
+          return '<div class="cell my-cell">' +
+            '<div class="shot">' + (m.photo
+              ? '<img src="photos/' + esc(m.key) + '.jpg" alt="" loading="lazy" decoding="async" onerror="this.remove()" />'
+              : "") + Site.shotIcon(m) + "</div>" +
+            '<div class="card-body"><div class="card-name">' + esc(m.name) + "</div>" +
+              (m.mark ? '<div class="my-mark">' + esc(m.mark) + "</div>" : "") +
+              (m.note ? '<p class="my-note">' + esc(m.note) + "</p>" : "") +
+              '<ul class="my-offers">' + m.offers.map(myOffer).join("") + "</ul>" +
+            "</div>" +
+          "</div>";
+        }).join("") + "</div>";
+    });
+    $("groups").className = "";
+    $("groups").innerHTML = html;
   }
 
   // Короткий заход содержимого. Перезапуск честный: класс снимаем и ставим
