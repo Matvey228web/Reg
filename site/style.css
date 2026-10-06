@@ -645,7 +645,7 @@ a.add {
   display: grid; place-items: center;
   overflow: hidden;
 }
-.item-shot img { width: 100%; height: 100%; object-fit: contain; }
+.item-shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .item-shot .shot-ico { width: 64px; height: 64px; stroke-width: 1.3; }
 .item-shot img + .shot-ico { display: none; }
 

@@ -15,7 +15,7 @@
 import sys
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 SIZE = 800
 PAD = 48                    # поле вокруг предмета
@@ -27,28 +27,35 @@ OUT = Path(__file__).parent / "photos"
 
 
 def trim(img):
-    """Убрать однотонные поля исходника, чтобы предмет занимал кадр целиком.
+    """Убрать поля исходника, чтобы предмет занимал кадр целиком.
 
     Без этого фотографии с разным запасом по краям выглядят на витрине
-    разномасштабными, хотя сами предметы сопоставимы.
+    разномасштабными, хотя сами предметы сопоставимы. Фон — цвет углов, если
+    они сходятся, иначе белый: у снимков магазинов фон бывает чуть неровным
+    (тень, градиент, рамка), и строгое «все углы одного цвета» оставляло их
+    мелкими (владелец заметил на витрине 6 октября 2026).
     """
     rgb = img.convert("RGB")
     corners = [rgb.getpixel(p) for p in
                ((0, 0), (rgb.width - 1, 0), (0, rgb.height - 1),
                 (rgb.width - 1, rgb.height - 1))]
-    # Углы разного цвета — значит поля нет, и обрезать нечего.
-    if max(max(c) - min(c) for c in zip(*corners)) > 12:
-        return img
-    bg = corners[0]
-    mask = Image.new("L", rgb.size, 0)
-    px, mp = rgb.load(), mask.load()
-    for y in range(rgb.height):
-        for x in range(rgb.width):
-            r, g, b = px[x, y]
-            if abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2]) > 30:
-                mp[x, y] = 255
+    even = max(max(c) - min(c) for c in zip(*corners)) <= 24
+    bg = corners[0] if even else (255, 255, 255)
+    diff = ImageChops.difference(rgb, Image.new("RGB", rgb.size, bg)).convert("L")
+    # Пыль, шум JPEG и тонкие рамки не должны держать границу кадра: после
+    # сужения маски остаются только крупные пятна — сам предмет.
+    mask = diff.point(lambda v: 255 if v > 40 else 0).filter(ImageFilter.MinFilter(5))
     box = mask.getbbox()
-    return img.crop(box) if box else img
+    if not box:
+        return img
+    l, t, r, b = box
+    pad = 3
+    box = (max(l - pad, 0), max(t - pad, 0), min(r + pad, rgb.width), min(b + pad, rgb.height))
+    # Почти весь кадр — значит, фон не однотонный (снимок в интерьере):
+    # обрезать нечего.
+    if (box[2] - box[0]) * (box[3] - box[1]) > 0.97 * rgb.width * rgb.height:
+        return img
+    return img.crop(box)
 
 
 def convert(src: Path) -> Path:
@@ -61,7 +68,11 @@ def convert(src: Path) -> Path:
     img = trim(img.convert("RGB"))
 
     box = SIZE - PAD * 2
-    img.thumbnail((box, box), Image.LANCZOS)
+    # Не thumbnail: тот только уменьшает, и исходник меньше кадра (с Tilda
+    # приходили 225–500 точек) оставался мелким пятном посреди белого поля.
+    scale = box / max(img.width, img.height)
+    img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+                     Image.LANCZOS)
 
     canvas = Image.new("RGB", (SIZE, SIZE), BG)
     canvas.paste(img, ((SIZE - img.width) // 2, (SIZE - img.height) // 2))
