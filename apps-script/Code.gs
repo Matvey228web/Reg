@@ -1260,9 +1260,11 @@ function cleanupReport(plan, title) {
 // --- Разовая правка каталога ---
 //
 // Решения владельца от 6 октября 2026 (сверка каталога с сайтом): какие модели
-// слить, какие удалить, как назвать, почём и в каком разделе витрины. Ключи —
-// «КАТ-код», как в site/catalog.json, и указывают на модели ДО слияний:
-// переименование, цена и раздел слитой модели уходят той, в которую она слита.
+// слить, какие удалить, какие перенести в другую категорию, как назвать, почём
+// и в каком разделе витрины. Ключи — «КАТ-код», как в site/catalog.json, и
+// указывают на модели ДО слияний: переименование, цена и раздел слитой модели
+// уходят той, в которую она слита. Первый план (слияния, названия, цены,
+// разделы) уже применён; здесь — второй: категория STB и переносы.
 //
 // Запуск — руками из редактора: сначала catalogFixPreview(), потом catalogFix().
 // Ход тот же, что у уборки (cleanupRun): копия таблицы, план заново под замком,
@@ -1281,180 +1283,17 @@ function cleanupReport(plan, title) {
 
 var CATALOG_FIX = {
   categories: [
-    { action: "relabel", code: "MED", label: "Память" },
-    { action: "create", code: "TRN", label: "Транспортировка", by_qty: false },
-    { action: "create", code: "CBL", label: "Кабели", by_qty: true },
+    // Количеством, как грип: штативы оттуда и переезжают, а перенос между
+    // поштучной и «количеством» запрещён (moveModel).
+    { action: "create", code: "STB", label: "Стабилизация", by_qty: true },
   ],
-  // LGT-12 и LGT-14 — не модели, а строки-заголовки разделов, попавшие в
-  // импорт: слияние прибавило бы по лишней штуке к LGT-13 и LGT-15.
-  delete_models: ["GRP-02", "GRP-04", "LEN-36", "LGT-12", "LGT-14"],
-  // Дубли с повторно импортированной вкладки КИНО — правило в catalogFixTodo.
-  // Вещи по номерам — { item_ids: ["010203", …] }. Отказы те же, что у модели.
-  delete_units: { import_tab: "КИНО" },
-  merges: [
-    { from: "CAM-06", into: "CAM-14" },
-    { from: "CAM-15", into: "CAM-07" },
-    { from: "OTH-03", into: "RIG-01" },
-    { from: "OTH-04", into: "MON-03" },
-    { from: "LEN-28", into: "LEN-14" },
-    { from: "LEN-15", into: "LEN-29" },
-    { from: "LEN-30", into: "LEN-16" },
-    { from: "LEN-31", into: "LEN-18" },
-    { from: "LEN-32", into: "LEN-19" },
-    { from: "LEN-20", into: "LEN-37" },
-    { from: "LEN-38", into: "LEN-21" },
-    { from: "LEN-22", into: "LEN-39" },
-    { from: "LEN-23", into: "LEN-40" },
-    { from: "LEN-24", into: "LEN-41" },
-    { from: "LEN-42", into: "LEN-26" },
-    { from: "LEN-43", into: "LEN-25" },
-  ],
-  renames: [
-    { key: "OTH-05", to: "TVLogic F-7HS" },
-    { key: "OTH-06", to: "TVLogic LVM-246A" },
-    { key: "AUD-01", to: "Hollyland Lark Max Duo" },
-    { key: "CAM-09", to: "Blackmagic 6K G2" },
-    { key: "CAM-02", to: "Blackmagic Pyxis EF" },
-    { key: "CAM-03", to: "Blackmagic Pyxis PL" },
-    { key: "CAM-11", to: "Canon XA60" },
-    { key: "CAM-14", to: "Sony A7 IV" },
-    { key: "CAM-01", to: "Sony Burano" },
-    { key: "CAM-07", to: "Sony A7R III" },
-    { key: "CAM-05", to: "Sony FX3" },
-    { key: "MON-02", to: "Accsoon CineView HE" },
-    { key: "MON-01", to: "SWIT FLOW2000 1:1" },
-    { key: "MON-03", to: "TVLogic F-5A" },
-    { key: "RIG-01", to: "Tilta Nucleus-m Kit IV" },
-    { key: "LEN-02", to: "Ломо Illumina MK-III 25мм" },
-    { key: "LEN-03", to: "Ломо Illumina MK-III 35мм" },
-    { key: "LEN-04", to: "Ломо Illumina MK-III 50мм" },
-    { key: "LEN-05", to: "Ломо Illumina MK-III 85мм" },
-    { key: "LEN-11", to: "Canon RF 24-105mm F4 L IS USM" },
-    { key: "LEN-06", to: "DZOFilm Pictor Zoom Kit EF" },
-    { key: "LEN-07", to: "DZOFilm Vespid 25mm EF" },
-    { key: "LEN-08", to: "DZOFilm Vespid 35mm EF" },
-    { key: "LEN-09", to: "DZOFilm Vespid 50mm EF" },
-    { key: "LEN-10", to: "DZOFilm Vespid 75mm EF" },
-    { key: "LEN-19", to: "Samyang 135mm F2.2" },
-    { key: "LEN-14", to: "Samyang 24mm F1.5" },
-    { key: "LEN-18", to: "Samyang 85mm F1.5" },
-    { key: "LEN-33", to: "Samyang AF 24-70mm F/2.8" },
-    { key: "LEN-35", to: "Sigma 70-200mm F/2.8 Dg Dn Os Sports" },
-    { key: "LEN-34", to: "Tamron 17-28mm F/2.8 Di III RXD" },
-    { key: "LEN-21", to: "Zenit 16mm F2.8" },
-    { key: "LEN-25", to: "Zenit 85mm F1.5" },
-    { key: "LEN-26", to: "Zenit 85mm F2.2" },
-    { key: "LEN-40", to: "Zenit 58mm F1.9" },
-    { key: "LEN-39", to: "Zenit 50mm F1.2" },
-    { key: "LEN-41", to: "Zenit 60mm F2.8" },
-    { key: "LEN-37", to: "Zenit 8mm F3.5" },
-    { key: "LGT-08", to: "Godox Octabox 80" },
-    { key: "LGT-10", to: "Nanlite Forza II 150B Bi-color LED" },
-    { key: "LGT-11", to: "Nanlite Forza II 300B Bi-color LED" },
-    { key: "LGT-13", to: "Nanlite Forza 720 LED" },
-    { key: "LGT-04", to: "Godox Knowled MG1200BI" },
-    { key: "LGT-06", to: "Godox Lantern 85" },
-    { key: "LGT-02", to: "Godox Knowled M300BI" },
-    { key: "LGT-03", to: "Godox Knowled M600BI" },
-    { key: "LGT-01", to: "Godox SL300R RGB" },
-    { key: "LGT-09", to: "Godox VSA-19K" },
-  ],
-  prices: [
-    { key: "GRP-03", price: 160778 },
-    { key: "OTH-05", price: 220500 },
-    { key: "OTH-06", price: 361000 },
-    { key: "AUD-01", price: 24255 },
-    { key: "CAM-09", price: 316929 },
-    { key: "CAM-02", price: 1262735 },
-    { key: "CAM-03", price: 1262735 },
-    { key: "CAM-04", price: 589109 },
-    { key: "CAM-11", price: 184633 },
-    { key: "CAM-14", price: 144753 },
-    { key: "CAM-01", price: 2485000 },
-    { key: "CAM-07", price: 238912 },
-    { key: "CAM-05", price: 289829 },
-    { key: "MON-01", price: 294930 },
-    { key: "MON-03", price: 141600 },
-    { key: "RIG-01", price: 100350 },
-    { key: "LEN-02", price: 636762 },
-    { key: "LEN-03", price: 636762 },
-    { key: "LEN-04", price: 636762 },
-    { key: "LEN-05", price: 636762 },
-    { key: "LEN-11", price: 132706 },
-    { key: "LEN-06", price: 747680 },
-    { key: "LEN-07", price: 248425 },
-    { key: "LEN-08", price: 248425 },
-    { key: "LEN-09", price: 248425 },
-    { key: "LEN-10", price: 248425 },
-    { key: "LEN-19", price: 45000 },
-    { key: "LEN-14", price: 48000 },
-    { key: "LEN-29", price: 45000 },
-    { key: "LEN-16", price: 41000 },
-    { key: "LEN-18", price: 23000 },
-    { key: "LEN-21", price: 16600 },
-    { key: "LEN-25", price: 33528 },
-    { key: "LEN-26", price: 31926 },
-    { key: "LEN-40", price: 26822 },
-    { key: "LEN-39", price: 19155 },
-    { key: "LEN-41", price: 26822 },
-    { key: "LEN-37", price: 16207 },
-    { key: "LGT-10", price: 56800 },
-    { key: "LGT-11", price: 123800 },
-    { key: "LGT-13", price: 155000 },
-  ],
-  sections: [
-    { key: "GRP-03", section: "CINE" },
-    { key: "OTH-05", section: "CINE" },
-    { key: "OTH-06", section: "CINE" },
-    { key: "AUD-01", section: "CINE" },
-    { key: "CAM-09", section: "CINE" },
-    { key: "CAM-02", section: "CINE" },
-    { key: "CAM-03", section: "CINE" },
-    { key: "CAM-04", section: "CINE" },
-    { key: "CAM-11", section: "CINE,PHOTO" },
-    { key: "CAM-14", section: "PHOTO" },
-    { key: "CAM-01", section: "CINE" },
-    { key: "CAM-07", section: "PHOTO" },
-    { key: "CAM-05", section: "CINE" },
-    { key: "MON-02", section: "CINE" },
-    { key: "MON-01", section: "CINE" },
-    { key: "MON-03", section: "CINE" },
-    { key: "RIG-01", section: "CINE" },
-    { key: "LEN-02", section: "CINE" },
-    { key: "LEN-03", section: "CINE" },
-    { key: "LEN-04", section: "CINE" },
-    { key: "LEN-05", section: "CINE" },
-    { key: "LEN-11", section: "PHOTO" },
-    { key: "LEN-06", section: "CINE" },
-    { key: "LEN-07", section: "CINE" },
-    { key: "LEN-08", section: "CINE" },
-    { key: "LEN-09", section: "CINE" },
-    { key: "LEN-10", section: "CINE" },
-    { key: "LEN-19", section: "CINE" },
-    { key: "LEN-14", section: "CINE" },
-    { key: "LEN-29", section: "CINE" },
-    { key: "LEN-16", section: "CINE" },
-    { key: "LEN-18", section: "CINE" },
-    { key: "LEN-33", section: "CINE" },
-    { key: "LEN-35", section: "PHOTO" },
-    { key: "LEN-34", section: "PHOTO" },
-    { key: "LEN-21", section: "PHOTO" },
-    { key: "LEN-25", section: "PHOTO" },
-    { key: "LEN-26", section: "PHOTO" },
-    { key: "LEN-40", section: "PHOTO" },
-    { key: "LEN-39", section: "PHOTO" },
-    { key: "LEN-41", section: "PHOTO" },
-    { key: "LEN-37", section: "PHOTO" },
-    { key: "LGT-08", section: "CINE" },
-    { key: "LGT-10", section: "CINE" },
-    { key: "LGT-11", section: "CINE" },
-    { key: "LGT-13", section: "CINE" },
-    { key: "LGT-04", section: "CINE" },
-    { key: "LGT-06", section: "CINE" },
-    { key: "LGT-02", section: "CINE" },
-    { key: "LGT-03", section: "CINE" },
-    { key: "LGT-01", section: "CINE" },
-    { key: "LGT-09", section: "CINE" },
+  // Тестовая запись: на складе такой камеры нет.
+  delete_models: ["CAM-16"],
+  moves: [
+    { from: "OTH-05", to: "MON" },
+    { from: "OTH-06", to: "MON" },
+    { from: "GRP-01", to: "STB" },
+    { from: "GRP-03", to: "STB" },
   ],
 };
 
@@ -1530,7 +1369,7 @@ function catalogFixPlanKey(key) {
 
 // Что сделать и что не выйдет. Только читает таблицу.
 function catalogFixTodo(plan) {
-  var todo = { categories: [], deletes: [], merges: [], renames: [], prices: [], sections: [],
+  var todo = { categories: [], deletes: [], merges: [], moves: [], renames: [], prices: [], sections: [],
                missing: [], errors: [], notes: [], check: [], keys: {} };
   var cats = categories();
   var catBy = {};
@@ -1727,6 +1566,34 @@ function catalogFixTodo(plan) {
     });
   });
 
+  // Переезд в другую категорию — тем же ходом, что /model/move (moveModel):
+  // новый код модели, номера вещей, журналы и строки заказов. Категория могла
+  // появиться в этом же плане — её способ учёта берём оттуда.
+  var planned = {};
+  todo.categories.forEach(function (c) { if (c.action === "create") planned[c.code] = c; });
+  (plan.moves || []).forEach(function (mv) {
+    var from = resolve(catalogFixPlanKey(mv.from));
+    var to = String(mv.to || "").trim().toUpperCase();
+    var src = modelBy[from];
+    if (!src || deleted[from]) { todo.missing.push(catalogFixPlanKey(mv.from) + " (перенести в " + to + ")"); return; }
+    if (src.category === to) return;
+    var fc = catBy[src.category], tc = catBy[to] || planned[to];
+    if (!fc || !tc) { todo.errors.push(named(from) + " → " + to + ": категории нет в справочнике"); return; }
+    if (!!isTruthyCell(fc.by_qty) !== !!isTruthyCell(tc.by_qty)) {
+      todo.errors.push(named(from) + " → " + to + ": у категорий разный способ учёта — " +
+        "одна считается количеством, другая поштучно");
+      return;
+    }
+    try {
+      assertModelNotOut(src.category, src.model_code);
+    } catch (e) {
+      todo.errors.push(named(from) + ": " + e.message);
+      return;
+    }
+    todo.moves.push({ from: from, fromCat: src.category, fromCode: pad2(Number(src.model_code)),
+                      to: to, name: src.model_name, units: unitsLeft(from).length });
+  });
+
   // Что останется после удалений и слияний — среди этого ищем совпадения названий.
   var gone = function (key) { return !!deleted[key] || !!mergeTo[key]; };
   var target = function (k, what) {
@@ -1825,6 +1692,7 @@ function catalogFixTodo(plan) {
     deleted_journal: sum(todo.deletes, "transactions") + sum(todo.deletes, "defects") + sum(todo.deletes, "inventory"),
     merges: todo.merges.length,
     moved_units: sum(todo.merges, "units"),
+    moves: todo.moves.length,
     renamed_models: todo.renames.filter(function (r) { return String(r.was || "") !== r.to; }).length,
     renamed_units: sum(todo.renames, "units"),
     prices: todo.prices.length,
@@ -1836,7 +1704,7 @@ function catalogFixTodo(plan) {
 // Запись по плану, без замка и без проверок — их сделал catalogFixTodo.
 function catalogFixApply(todo) {
   var counts = { categories: 0, deleted_models: 0, deleted_units: 0, deleted_journal: 0, merges: 0,
-                 moved_units: 0, renamed_models: 0, renamed_units: 0, prices: 0, sections: 0 };
+                 moved_units: 0, moves: 0, renamed_models: 0, renamed_units: 0, prices: 0, sections: 0 };
   var items = {};
   var keyOf = function (r) { return catalogFixKey(r.category, r.model_code); };
 
@@ -1879,6 +1747,14 @@ function catalogFixApply(todo) {
     });
   });
 
+  todo.moves.forEach(function (m) {
+    var done = moveModel(m.fromCat, m.to, m.fromCode);
+    todo.keys[m.from] = catalogFixKey(m.to, done.model_code);
+    counts.moves += 1;
+    counts.moved_units += done.moved;
+    (done.renames || []).forEach(function (x) { items[x.old] = x.fresh; });
+  });
+
   var modelsSheet = getSheet(SHEETS.MODELS);
   ensureColumns(modelsSheet, ["section", "price"]);
   var pick = function (list, field) {
@@ -1916,7 +1792,8 @@ function catalogFixHeadline(todo, counts) {
   return "Правка каталога: категорий " + counts.categories +
     ", удалено моделей " + counts.deleted_models + " (вещей " + counts.deleted_units +
     ", записей журналов " + counts.deleted_journal + ")" +
-    ", слито моделей " + counts.merges + " (вещей " + counts.moved_units + ")" +
+    ", слито моделей " + counts.merges + ", перенесено в другую категорию " + (counts.moves || 0) +
+    " (вещей " + counts.moved_units + ")" +
     ", переименовано моделей " + counts.renamed_models + " (вещей " + counts.renamed_units + ")" +
     ", цен " + counts.prices + ", разделов " + counts.sections +
     (todo.missing.length ? "; нет в таблице: " + todo.missing.length : "") +
@@ -1959,6 +1836,9 @@ function catalogFixReport(todo, counts, title) {
         ", заводской " + u.serial_number);
     });
   }
+  section("Перенести в другую категорию", todo.moves, function (m) {
+    return m.from + " «" + m.name + "» → " + m.to + ": вещей " + m.units;
+  });
   section("Слить модели", todo.merges, function (m) {
     return m.from + " «" + m.name + "» → " + m.into + " «" + m.intoName + "»: вещей " + m.units;
   });

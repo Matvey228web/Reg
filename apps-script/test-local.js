@@ -3928,7 +3928,7 @@ check('переименование в соседнюю модель — отк�
 check('отказ записан в Logs',
   logRows().slice(-1).some(l => l.kind === 'catalog_fix' && l.reason === 'refused'));
 r = catalogFixPlan(Object.assign({}, kfPlan, { delete_units: { item_ids: [kfOut.ids[0]] } }), 'копия есть');
-check('вещь на руках не удалить и поштучно', r.ok === false && /на руках/.test(r.message), r.message);
+check('вещь на руках не удалить и поштучно', r.ok === false && /на руках/i.test(r.message), r.message);
 
 logBefore = logRows().length;
 global.__driveFail = 'Диск недоступен';
@@ -4044,6 +4044,38 @@ check('отчёт считает по моделям', r.counts.deleted_units ==
 r = catalogFixPlan({ delete_units: { import_tab: 'КИНО' } }, 'копия есть');
 check('повтор: удалять больше нечего', r.ok === true && r.counts.deleted_units === 0 && kinoHas(kinoOwn), r.counts);
 sh('Equipment').data = kfEqSnapshot;
+
+console.log('\n== правка каталога: перенос в другую категорию ==');
+const mvTripod = kfModel('GRP', 'МВ Штатив', 1, { qty: 4 });
+const mvMon = kfModel('OTH', 'МВ Монитор', 2);
+const mvOut = kfModel('OTH', 'МВ Выданный', 1, { status: 'Rented', current_transaction_id: 9921 });
+appendRow(sh('Transactions'), { transaction_id: 9921, item_id: mvOut.ids[0], status: 'Open', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9922, item_id: mvMon.ids[0], status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('OrderItems'), { order_id: 9923, line_no: 1, raw_name: 'МВ Монитор', model_code: mvMon.code, category: 'OTH', qty: 1 });
+const mvPlan = {
+  categories: [{ action: 'create', code: 'MVS', label: 'МВ Стабилизация', by_qty: true }],
+  moves: [{ from: mvTripod.key, to: 'MVS' }, { from: mvMon.key, to: 'MON' }],
+};
+r = catalogFixPlan(Object.assign({}, mvPlan, { moves: mvPlan.moves.concat([{ from: mvMon.key, to: 'MVS' }]) }), 'копия есть');
+check('перенос между «количеством» и поштучной — отказ, ничего не меняется',
+  r.ok === false && /способ учёта/.test(r.message) && !categories().some(c => c.code === 'MVS'), r.message);
+r = catalogFixPlan(Object.assign({}, mvPlan, { moves: [{ from: mvOut.key, to: 'MON' }] }), 'копия есть');
+check('перенос модели с вещью на руках — отказ', r.ok === false && /на руках/i.test(r.message), r.message);
+r = catalogFixPlan(mvPlan, 'копия есть');
+const mvTripodKey = r.keys && r.keys[mvTripod.key];
+const mvMonKey = r.keys && r.keys[mvMon.key];
+check('новая категория создана, штатив переехал в неё', r.ok === true && categories().some(c => c.code === 'MVS') &&
+  /^MVS-\d\d$/.test(mvTripodKey || '') && rowsOf('Models').some(m => catalogFixKey(m.category, m.model_code) === mvTripodKey), r.message);
+const mvMonCode = (mvMonKey || '').split('-')[1];
+check('монитор переехал в MON, старой модели нет', /^MON-\d\d$/.test(mvMonKey || '') &&
+  !rowsOf('Models').some(m => catalogFixKey(m.category, m.model_code) === mvMon.key), r.keys);
+check('вещи монитора перенумерованы под MON', rowsOf('Equipment').filter(u => u.category === 'MON' && pad2(u.model_code) === mvMonCode).length === 2);
+check('выдача и строка заказа переписаны на новые номера', !rowsOf('Transactions').some(t => t.item_id === mvMon.ids[0]) &&
+  rowsOf('OrderItems').some(l => String(l.order_id) === '9923' && l.category === 'MON' && pad2(l.model_code) === mvMonCode));
+r = catalogFixPlan(mvPlan, 'копия есть');
+check('повторный перенос ничего не делает', r.ok === true && r.counts.moves === 0 && r.counts.categories === 0, r.message);
+appendRow(sh('Transactions'), { transaction_id: 9924, item_id: mvOut.ids[0], status: 'Closed' });
+updateRow(sh('Transactions'), findRowByValue(sh('Transactions'), 'transaction_id', 9921).__row, { status: 'Closed' });
 
 console.log('\n== объявления склада ==');
 // Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.
