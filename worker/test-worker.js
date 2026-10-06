@@ -444,6 +444,24 @@ ok("а в фоне таблицу спросили", upstream.calls.includes("/p
 r = await call("/public/announcements", {});
 ok("следующий ответ уже свежий", r.cache === "hit" && r.data.data.items[0].id === "a6", { c: r.cache, d: r.data });
 
+console.log("== переименование и фото модели сбрасывают кэш каталога ==");
+let catName = "Старое";
+upstream.reply = (b) => b.endpoint === "/public/catalog"
+  ? { ok: true, data: { models: [{ model_name: catName }], orders_open: 0 }, error: null, status: 200 }
+  : { ok: true, data: { model_name: catName }, error: null, status: 200 };
+await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
+catName = "Новое";
+await call("/models/rename", { category: "CAM", model_code: "01", model_name: "Новое" }, "tok-1");
+// Свежей копии нет — первый посетитель получит долгую (старую), а фон её
+// обновит: так устроены все публичные чтения (наличие тоже).
+r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
+ok("после /models/rename кэш сброшен: ответ не из свежей копии", r.cache !== "hit", r.cache);
+r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
+ok("следующий посетитель видит новое имя", r.data.data.models[0].model_name === "Новое", r.data);
+await call("/models/photo", { category: "CAM", model_code: "01", image: "" }, "tok-1");
+r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
+ok("после /models/photo каталог спрошен заново", r.cache !== "hit", r.cache);
+
 console.log("\n== нажатия, которые не должны выбрасывать кэш ==");
 // Поиск чата, проверка связи и пачка этикеток ничего в складе не меняют.
 // Раньше они считались записью, и одно нажатие «Найти чат склада» стоило

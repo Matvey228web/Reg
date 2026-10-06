@@ -2067,6 +2067,8 @@ function doPost(e) {
       case "/models/list": data = handleModelsList(payload, token); break;
       case "/models/sections": data = handleModelsSections(payload, token); break;
       case "/models/price": data = handleModelsPrice(payload, token); break;
+      case "/models/rename": data = handleModelsRename(payload, token); break;
+      case "/models/photo": data = handleModelsPhoto(payload, token); break;
       case "/model/create": data = handleModelCreate(payload, token); break;
       case "/order/parse": data = handleOrderParse(payload, token); break;
       case "/order/create": data = handleOrderCreate(payload, token); break;
@@ -2508,14 +2510,9 @@ function handleItemUpdate(payload, token) {
     var storedName = null;
     if (allModel && Object.prototype.hasOwnProperty.call(next, "name")) {
       storedName = next.name;
-      var modelRenamed = String(modelRow.model_name || "") !== next.name;
-      if (modelRenamed) updateRow(modelsSheet, modelRow.__row, { model_name: next.name });
-      rows.forEach(function (r) {
-        if (r.category !== from || pad2(Number(r.model_code)) !== code) return;
-        if (String(r.name || "") === next.name) return;
-        updateRow(sheet, r.__row, { name: next.name });
-        renamed += 1;
-      });
+      var wrote = writeModelName(modelsSheet, modelRow, sheet, rows, from, code, next.name);
+      var modelRenamed = wrote.model_renamed;
+      renamed = wrote.units;
       if (modelRenamed || renamed) changed.name = { was: String(item.name || ""), now: next.name };
       item.name = next.name;
       delete next.name;
@@ -2589,6 +2586,175 @@ function handleItemUpdate(payload, token) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Запись названия модели: строка Models и все вещи модели. Общий путь для
+// «Применить ко всем вещам» (handleItemUpdate) и /models/rename. Вызывать под
+// замком; rows — уже прочитанный Equipment.
+function writeModelName(modelsSheet, modelRow, equipSheet, rows, category, code, name) {
+  var modelRenamed = String(modelRow.model_name || "") !== name;
+  if (modelRenamed) updateRow(modelsSheet, modelRow.__row, { model_name: name });
+  var units = 0;
+  rows.forEach(function (r) {
+    if (r.category !== category || pad2(Number(r.model_code)) !== code) return;
+    if (String(r.name || "") === name) return;
+    updateRow(equipSheet, r.__row, { name: name });
+    units += 1;
+  });
+  return { model_renamed: modelRenamed, units: units };
+}
+
+// Переименование модели администратором. Название хранится ровно так, как
+// набрано («Sony A7 IV» остаётся таким — решение владельца 6 октября 2026), в
+// отличие от handleItemUpdate, где оно идёт через MODEL_ALIASES. Цена такого
+// решения: следующий импорт назовёт модель каноническим именем, поэтому
+// отвечаем warning и приложение говорит об этом админу.
+// «:» и перенос строки нельзя: строка заказа «N. название: 0 (qty x 0)»
+// разбирается parseOrderMessage по двоеточию.
+function handleModelsRename(payload, token) {
+  requireAdmin(token);
+  var category = String(payload.category || "").trim().toUpperCase();
+  var code = pad2(Number(payload.model_code));
+  var raw = String(payload.model_name === undefined || payload.model_name === null ? "" : payload.model_name);
+  if (/[:\r\n\u2028\u2029]/.test(raw)) {
+    throw apiError(400, "В названии нельзя двоеточие и перенос строки: по двоеточию " +
+      "разбирается строка заказа.");
+  }
+  var name = raw.replace(/\s+/g, " ").trim();
+  if (!name) throw apiError(400, "Название не может быть пустым");
+  if (name.length > 120) throw apiError(400, "Название длиннее 120 знаков");
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var modelsSheet = getSheet(SHEETS.MODELS);
+    var models = readRows(modelsSheet);
+    var modelRow = null;
+    models.forEach(function (r) {
+      if (r.category === category && pad2(Number(r.model_code)) === code) modelRow = r;
+    });
+    if (!modelRow) throw apiError(404, "Такой модели нет: " + category + "·" + code);
+    var needle = normalizeModelName(canonicalModelName(name));
+    var clash = models.filter(function (r) {
+      return r.category === category && r.__row !== modelRow.__row &&
+             normalizeModelName(canonicalModelName(r.model_name)) === needle;
+    })[0];
+    if (clash) {
+      throw apiError(409, "В этой категории уже есть модель «" + String(clash.model_name) +
+        "» — это то же название. Две модели с одним названием — две нумерации одной вещи.");
+    }
+    var equipSheet = getSheet(SHEETS.EQUIPMENT);
+    var wrote = writeModelName(modelsSheet, modelRow, equipSheet, readRows(equipSheet), category, code, name);
+    var out = { category: category, model_code: code, model_name: name, renamed_units: wrote.units };
+    var canon = canonicalModelName(name);
+    if (canon !== name) {
+      out.warning = "Следующий импорт назовёт эту модель «" + canon + "» — так она записана " +
+        "в списке синонимов. Чтобы название не вернулось, скажите разработчику.";
+    }
+    return out;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Фото моделей лежат на Диске в своей папке, а в Models.photo — ссылка на
+// миниатюру. Файлы открыты «всем, у кого есть ссылка»: сайт показывает их
+// посетителям без входа. Ссылку не угадать, но она публичная — личного в
+// фото быть не должно.
+var PHOTO_FOLDER_NAME = "Mifs Rent — фото";
+var PHOTO_MAX_BYTES = 700 * 1024;
+
+function photoFolder() {
+  var folders = DriveApp.getFoldersByName(PHOTO_FOLDER_NAME);
+  return folders.hasNext() ? folders.next() : DriveApp.createFolder(PHOTO_FOLDER_NAME);
+}
+
+// По первым байтам, а не по заголовку data URL: тип в нём пишет клиент.
+function sniffImage(b) {
+  function u(i) { return (b[i] + 256) % 256; }
+  if (b.length > 12 && u(0) === 0xFF && u(1) === 0xD8 && u(2) === 0xFF) return { mime: "image/jpeg", ext: "jpg" };
+  if (b.length > 12 && u(0) === 0x89 && u(1) === 0x50 && u(2) === 0x4E && u(3) === 0x47) return { mime: "image/png", ext: "png" };
+  if (b.length > 12 && u(0) === 0x52 && u(1) === 0x49 && u(2) === 0x46 && u(3) === 0x46 &&
+      u(8) === 0x57 && u(9) === 0x45 && u(10) === 0x42 && u(11) === 0x50) return { mime: "image/webp", ext: "webp" };
+  return null;
+}
+
+function photoIdFromUrl(url) {
+  var m = String(url || "").match(/[?&]id=([\w-]+)/) || String(url || "").match(/\/d\/([\w-]+)/);
+  return m ? m[1] : "";
+}
+
+// В корзину — только файл из папки фото: ссылка в ячейке может быть чужая
+// (внешний https, файл с другого места Диска), и трогать её нельзя.
+function trashOwnPhoto(folder, oldUrl) {
+  var id = photoIdFromUrl(oldUrl);
+  if (!id) return false;
+  var it = folder.getFiles();
+  while (it.hasNext()) {
+    var f = it.next();
+    if (f.getId() === id) { f.setTrashed(true); return true; }
+  }
+  return false;
+}
+
+// Фото модели. Диск — до замка (он медленный), под замком только запись в
+// таблицу. Старый файл убираем после успешной записи: упавшая запись не
+// должна оставить модель без фото.
+function handleModelsPhoto(payload, token) {
+  requireAdmin(token);
+  var category = String(payload.category || "").trim().toUpperCase();
+  var code = pad2(Number(payload.model_code));
+  var image = String(payload.image === undefined || payload.image === null ? "" : payload.image);
+
+  var bytes = null, kind = null;
+  if (image) {
+    var m = image.match(/^data:image\/(?:jpeg|jpg|png|webp);base64,([A-Za-z0-9+\/=\s]+)$/);
+    if (!m) throw apiError(400, "Нужна картинка JPEG, PNG или WebP");
+    if (m[1].length > PHOTO_MAX_BYTES * 4 / 3 + 8) throw apiError(413, "Фото больше 700 КБ");
+    bytes = Utilities.base64Decode(m[1].replace(/\s/g, ""));
+    if (bytes.length > PHOTO_MAX_BYTES) throw apiError(413, "Фото больше 700 КБ");
+    kind = sniffImage(bytes);
+    if (!kind) throw apiError(400, "Файл не похож на JPEG, PNG или WebP");
+  }
+
+  var sheet = getSheet(SHEETS.MODELS);
+  function findModel() {
+    var found = null;
+    readRows(sheet).forEach(function (r) {
+      if (r.category === category && pad2(Number(r.model_code)) === code) found = r;
+    });
+    if (!found) throw apiError(404, "Такой модели нет: " + category + "·" + code);
+    return found;
+  }
+  findModel();
+
+  var folder = photoFolder();
+  var file = null, url = "";
+  if (bytes) {
+    var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMddHHmmss");
+    file = folder.createFile(Utilities.newBlob(bytes, kind.mime, category + "-" + code + "-" + stamp + "." + kind.ext));
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    url = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w800";
+  }
+
+  var oldUrl = "";
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    ensureColumns(sheet, ["photo"]);
+    var row = findModel();
+    oldUrl = String(row.photo || "");
+    updateRow(sheet, row.__row, { photo: url });
+  } catch (e) {
+    if (file) { try { file.setTrashed(true); } catch (ignored) {} }
+    throw e;
+  } finally {
+    lock.releaseLock();
+  }
+  try { trashOwnPhoto(folder, oldUrl); } catch (e) {
+    logEvent("models", "photo", "trash_failed", e && e.message ? e.message : String(e), { url: oldUrl });
+  }
+  return { category: category, model_code: code, photo: url };
 }
 
 var SECTIONS = ["CINE", "PHOTO"];

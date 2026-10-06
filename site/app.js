@@ -299,6 +299,20 @@
     });
   }
 
+  // Живой каталог заменил снимок (переименование, раздел, фото). Поиск и
+  // категория остаются, пропавшая категория сбрасывается на «Всё»; место
+  // прокрутки возвращаем, анимации входа нет — мигать нечему.
+  document.addEventListener("catalog-live", function () {
+    if (category !== "all" && !catalog.categories.some(function (c) { return c.code === category; })) {
+      category = "all";
+      keepInUrl();
+    }
+    var y = window.scrollY;
+    renderCatalog();
+    render();
+    window.scrollTo(0, y);
+  });
+
   Site.loadCatalog()
     .then(function (data) {
       catalog = data;

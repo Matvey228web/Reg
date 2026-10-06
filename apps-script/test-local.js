@@ -551,20 +551,27 @@ function fakeFolder(name) {
         hasNext: () => i < list.length,
         next: () => {
           const f = list[i++];
-          return { getName: () => f.name, isTrashed: () => !!f.trashed,
+          return { getName: () => f.name, getId: () => f.id, isTrashed: () => !!f.trashed,
                    getDateCreated: () => f.created || new Date(0),
                    setTrashed(v) { f.trashed = v; } };
         },
       };
     },
     createFile(fileName, content) {
-      const file = { name: fileName, content, id: 'file-' + (folder.files.length + 1) };
+      // Фото модели: createFile(blob) — один аргумент, имя берётся из блоба.
+      const blob = typeof fileName === 'object' ? fileName : null;
+      const file = { name: blob ? blob._name : fileName, content: blob || content,
+                     id: 'file-' + (folder.files.length + 1), trashed: false };
       folder.files.push(file);
-      return { getId: () => file.id, getName: () => file.name };
+      return { getId: () => file.id, getName: () => file.name,
+               setSharing(a, p) { file.sharing = [a, p]; },
+               setTrashed(v) { file.trashed = v; } };
     },
   };
 }
 global.DriveApp = {
+  Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
+  Permission: { VIEW: 'VIEW' },
   getFoldersByName(name) {
     const exists = !!drive.folders[name];
     let taken = false;
@@ -2420,6 +2427,86 @@ setupPhotoPreview();
 check('повторный запуск добавляет превью новой строке',
   phSheet.getRange(phSheet.getLastRow(), phPrevCol, 1, 1).getFormulas()[0][0].indexOf('IMAGE(') > 0);
 phSheet.getRange(phRow.__row, phCol(), 1, 1).setValues([['']]);
+
+console.log('\n== админская правка модели: название и фото ==');
+{
+  const adm = secToken;
+  call('/staff/create', { full_name: 'Склад Правка', login: 'modeledit', pin: '246802', role: 'Warehouse Staff' }, adm);
+  const staff = call('/auth/login', { login: 'modeledit', pin: '246802' }).data.token;
+  const mk = (n) => call('/item/create', { category: 'CAM', model_name: n }, adm).data.item_id.slice(2, 4);
+  const cA = mk('Редакт Альфа'), cB = mk('Редакт Бета');
+  const eqNames = (c) => readRows(getSheet(SHEETS.EQUIPMENT))
+    .filter(r => r.category === 'CAM' && pad2(Number(r.model_code)) === c).map(r => r.name);
+  const mrow = (c) => readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'CAM' && pad2(Number(r.model_code)) === c)[0];
+
+  check('переименование: сотруднику 403',
+    call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Икс' }, staff).status === 403);
+  check('фото: сотруднику 403',
+    call('/models/photo', { category: 'CAM', model_code: cA, image: '' }, staff).status === 403);
+  let rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: '  Zenit   60mm ' }, adm);
+  check('имя хранится как набрано', rn.ok && rn.data.model_name === 'Zenit 60mm' && mrow(cA).model_name === 'Zenit 60mm', rn);
+  check('вещи модели переименованы', eqNames(cA).every(n => n === 'Zenit 60mm') && rn.data.renamed_units >= 1, eqNames(cA));
+  check('синоним даёт warning', /Zenit 60mm F2.8/.test(rn.data.warning || ''), rn.data);
+  rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Редакт Альфа 2' }, adm);
+  check('обычное имя без warning', rn.ok && rn.data.warning === undefined, rn);
+  rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'редакт-бета' }, adm);
+  check('занятое имя — 409 с именем соседа', rn.ok === false && rn.status === 409 && /Редакт Бета/.test(rn.error), rn);
+  check('при 409 ничего не записано', mrow(cA).model_name === 'Редакт Альфа 2');
+  check('двоеточие отклонено', call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'A: B' }, adm).status === 400);
+  check('перенос строки отклонён', call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'A\nB' }, adm).status === 400);
+  check('пустое имя отклонено', call('/models/rename', { category: 'CAM', model_code: cA, model_name: '   ' }, adm).status === 400);
+  check('длинное имя отклонено', call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'x'.repeat(121) }, adm).status === 400);
+  check('неизвестная модель — 404', call('/models/rename', { category: 'CAM', model_code: '98', model_name: 'Нет' }, adm).status === 404);
+  rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Альфа · Kit' }, adm);
+  check('разделитель « · » разрешён', rn.ok === true, rn);
+
+  const b64 = (arr) => 'data:image/jpeg;base64,' + Buffer.from(arr).toString('base64');
+  const jpg = (n) => b64([0xFF, 0xD8, 0xFF, 0xE0].concat(new Array(n || 40).fill(7)));
+  const folder = () => drive.folders['Mifs Rent — фото'];
+  const live = () => folder().files.filter(f => !f.trashed);
+  let ph = call('/models/photo', { category: 'CAM', model_code: cA, image: jpg() }, adm);
+  check('фото сохранено', ph.ok && /^https:\/\/drive\.google\.com\/thumbnail\?id=file-\d+&sz=w800$/.test(ph.data.photo), ph);
+  check('файл открыт по ссылке', live().length === 1 && live()[0].sharing[0] === 'ANYONE_WITH_LINK' && live()[0].sharing[1] === 'VIEW');
+  check('имя файла CAT-код-метка', /^CAM-\d\d-.+\.jpg$/.test(live()[0].name), live()[0].name);
+  check('ссылка в Models.photo', mrow(cA).photo === ph.data.photo);
+  const pubM = () => call('/public/catalog', {}).data.models.filter(m => m.category === 'CAM' && m.model_code === cA)[0];
+  check('/public/catalog: новое имя и фото', pubM() && pubM().model_name === 'Альфа · Kit' && pubM().photo === ph.data.photo, pubM());
+  check('/models/list отдаёт фото', call('/models/list', { category: 'CAM' }, adm).data.filter(m => m.model_code === cA)[0].photo === ph.data.photo);
+
+  const firstId = photoIdFromUrl(ph.data.photo);
+  ph = call('/models/photo', { category: 'CAM', model_code: cA, image: jpg(60) }, adm);
+  check('замена: старый файл в корзине, новый жив',
+    ph.ok && folder().files.filter(f => f.id === firstId)[0].trashed === true && live().length === 1, ph);
+
+  check('не картинка отклонена',
+    call('/models/photo', { category: 'CAM', model_code: cA, image: b64([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) }, adm).status === 400);
+  check('не data URL отклонён', call('/models/photo', { category: 'CAM', model_code: cA, image: 'https://x.y/a.jpg' }, adm).status === 400);
+  check('слишком большое отклонено',
+    call('/models/photo', { category: 'CAM', model_code: cA, image: jpg(701 * 1024) }, adm).status === 413);
+  check('неизвестная модель — 404, файл не создан',
+    call('/models/photo', { category: 'CAM', model_code: '98', image: jpg() }, adm).status === 404 && live().length === 1);
+  const png = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0]).toString('base64');
+  check('PNG принят', call('/models/photo', { category: 'CAM', model_code: cB, image: png }, adm).ok === true);
+
+  // Чужой файл: ссылка в ячейке на то, чего нет в папке фото.
+  const outsider = { name: 'чужой', id: 'file-outside', trashed: false };
+  drive.folders['Чужая папка'] = { name: 'Чужая папка', files: [outsider] };
+  getSheet(SHEETS.MODELS).getRange(mrow(cA).__row, sheetHeaders(getSheet(SHEETS.MODELS)).indexOf('photo') + 1, 1, 1)
+    .setValues([['https://drive.google.com/thumbnail?id=file-outside&sz=w800']]);
+  ph = call('/models/photo', { category: 'CAM', model_code: cA, image: jpg(70) }, adm);
+  check('чужой файл не тронут', ph.ok && outsider.trashed === false, ph);
+  const lastId = photoIdFromUrl(ph.data.photo);
+
+  ph = call('/models/photo', { category: 'CAM', model_code: cA, image: '' }, adm);
+  check('убрать: колонка пуста, файл в корзине', ph.ok && ph.data.photo === '' && mrow(cA).photo === '' &&
+    folder().files.filter(f => f.id === lastId)[0].trashed === true, ph);
+  check('/public/catalog без фото', pubM().photo === '');
+  const fcol = sheetHeaders(phSheet).indexOf('photo_preview') + 1;
+  call('/models/photo', { category: phRow.category, model_code: pad2(Number(phRow.model_code)), image: jpg() }, adm);
+  check('формула превью пережила запись фото',
+    fcol > 0 && phSheet.getRange(phRow.__row, fcol, 1, 1).getFormulas()[0][0].indexOf('IMAGE(') > 0);
+  call('/models/photo', { category: phRow.category, model_code: pad2(Number(phRow.model_code)), image: '' }, adm);
+}
 
 console.log('\n== заявка с сайта ==');
 const siteAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;

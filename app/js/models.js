@@ -10,6 +10,9 @@ const ModelsScreen = (() => {
   let models = [];      // [{ category, model_code, model_name }]
   let counts = {};      // "CAM|01" -> сколько позиций
   let query = "";
+  let warnings = {};    // "CAM|01" -> подсказка после переименования (до ухода с экрана)
+
+  const isAdmin = () => ((Auth.getSession() || {}).role === "Admin");
 
   // Пусто — «не размечено»: такая модель видна на сайте в обоих разделах.
   // Забытая отметка не должна прятать технику с витрины.
@@ -125,10 +128,35 @@ const ModelsScreen = (() => {
 
   function rowHtml(m, cats) {
     const n = counts[key(m)] || 0;
+    const k = escapeHtml(key(m));
+    const admin = isAdmin();
+    // Название и фото правят только администраторы (бэкенд проверяет роль сам;
+    // здесь контролы скрыты, чтобы не звать заведомо отказную ручку).
+    const nameField = admin
+      ? `<div class="field">
+          <label for="model-name-${k}">Название</label>
+          <input id="model-name-${k}" type="text" maxlength="120" data-name="${k}"
+                 value="${escapeHtml(m.model_name)}" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          ${warnings[key(m)] ? `<p class="hint">${escapeHtml(warnings[key(m)])}</p>` : ""}
+        </div>
+        <div class="field">
+          <label>Фото</label>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+            ${m.photo
+              ? `<img src="${escapeHtml(m.photo)}" alt="" width="56" height="56"
+                      style="width:56px;height:56px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--border, #ddd)" />`
+              : `<div style="width:56px;height:56px;border-radius:8px;border:1px dashed var(--muted, #999)"></div>`}
+            <button type="button" class="btn btn--secondary" style="width:auto;min-height:36px;padding:6px 12px" data-photo-pick="${k}">Фото</button>
+            ${m.photo ? `<button type="button" class="btn btn--secondary" style="width:auto;min-height:36px;padding:6px 12px" data-photo-remove="${k}">Убрать</button>` : ""}
+            <input type="file" accept="image/*" hidden data-photo-file="${k}" />
+          </div>
+        </div>`
+      : `<p><b>${escapeHtml(m.model_name)}</b></p>`;
     return `
+      ${nameField}
       <div class="field">
-        <label for="model-cat-${escapeHtml(key(m))}">${escapeHtml(m.model_name)}</label>
-        <select id="model-cat-${escapeHtml(key(m))}" data-move="${escapeHtml(key(m))}">
+        <label for="model-cat-${k}">Категория</label>
+        <select id="model-cat-${k}" data-move="${k}">
           ${cats.map((c) => `<option value="${escapeHtml(c.code)}"${
             c.code === m.category ? " selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
         </select>
@@ -136,16 +164,16 @@ const ModelsScreen = (() => {
           ${n} ${plural(n, "позиция", "позиции", "позиций")}</p>
       </div>
       <div class="field">
-        <label for="model-sec-${escapeHtml(key(m))}">Раздел на сайте</label>
-        <select id="model-sec-${escapeHtml(key(m))}" data-section="${escapeHtml(key(m))}">
+        <label for="model-sec-${k}">Раздел на сайте</label>
+        <select id="model-sec-${k}" data-section="${k}">
           ${SECTION_CHOICES.map((c) => `<option value="${escapeHtml(c.value)}"${
             c.value === (m.section || "") ? " selected" : ""}>${escapeHtml(c.label)}</option>`).join("")}
         </select>
       </div>
       <div class="field">
-        <label for="model-price-${escapeHtml(key(m))}">Цена, ₽</label>
-        <input id="model-price-${escapeHtml(key(m))}" type="number" inputmode="numeric"
-               data-price="${escapeHtml(key(m))}"
+        <label for="model-price-${k}">Цена, ₽</label>
+        <input id="model-price-${k}" type="number" inputmode="numeric"
+               data-price="${k}"
                value="${escapeHtml(String(m.price === undefined || m.price === null ? "" : m.price))}" />
       </div>`;
   }
@@ -167,6 +195,24 @@ const ModelsScreen = (() => {
     });
     document.querySelectorAll("[data-price]").forEach((input) => {
       input.addEventListener("change", (e) => setPrice(e.target.dataset.price, e.target.value, e.target));
+    });
+    document.querySelectorAll("[data-name]").forEach((input) => {
+      input.addEventListener("change", (e) => setName(e.target.dataset.name, e.target.value, e.target));
+    });
+    document.querySelectorAll("[data-photo-pick]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const file = document.querySelector(`[data-photo-file="${btn.dataset.photoPick}"]`);
+        if (file) file.click();
+      });
+    });
+    document.querySelectorAll("[data-photo-file]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const f = input.files && input.files[0];
+        if (f) setPhoto(input.dataset.photoFile, f, input);
+      });
+    });
+    document.querySelectorAll("[data-photo-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => setPhoto(btn.dataset.photoRemove, null, btn));
     });
     document.querySelectorAll("[data-section]").forEach((sel) => {
       sel.addEventListener("change", () => setSection(sel.dataset.section, sel.value, sel));
@@ -202,6 +248,176 @@ const ModelsScreen = (() => {
     } finally {
       input.disabled = false;
     }
+  }
+
+  // Название: сохраняем по Enter или уходу из поля, если текст изменился.
+  // Бэкенд хранит набранное как есть и сам переписывает вещи модели.
+  async function setName(modelKey, value, input) {
+    const model = models.filter((m) => key(m) === modelKey)[0];
+    if (!model) return;
+    const typed = String(value).replace(/\s+/g, " ").trim();
+    if (typed === model.model_name) { input.value = model.model_name; return; }
+    const parts = modelKey.split("|");
+    input.disabled = true;
+    showBoxError("models-error", "");
+    try {
+      const res = await apiPost("/models/rename", {
+        category: parts[0], model_code: parts[1], model_name: typed,
+      });
+      model.model_name = res.model_name;
+      if (res.warning) warnings[modelKey] = res.warning; else delete warnings[modelKey];
+      Cache.replace(CACHE, models);
+      // Названия вещей в каталоге изменились — старый кэш показал бы прежнее.
+      if (res.renamed_units) Cache.clear("equipment");
+      TG.hapticSuccess();
+      render();
+    } catch (err) {
+      TG.hapticError();
+      input.value = model.model_name;
+      showBoxError("models-error", err.message);
+      TG.showAlert(err.message);
+    } finally {
+      input.disabled = false;
+    }
+  }
+
+  async function setPhoto(modelKey, file, control) {
+    const model = models.filter((m) => key(m) === modelKey)[0];
+    if (!model) return;
+    const parts = modelKey.split("|");
+    control.disabled = true;
+    showBoxError("models-error", "");
+    try {
+      const image = file ? await preparePhoto(file) : "";
+      const res = await apiPost("/models/photo", {
+        category: parts[0], model_code: parts[1], image,
+      });
+      model.photo = res.photo;
+      Cache.replace(CACHE, models);
+      TG.hapticSuccess();
+      render();
+    } catch (err) {
+      TG.hapticError();
+      showBoxError("models-error", err.message);
+      TG.showAlert(err.message);
+    } finally {
+      control.disabled = false;
+      if (control.value) control.value = "";
+    }
+  }
+
+  // Подготовка снимка — как site/photos.py: срезать однотонные поля, вписать
+  // предмет в 704×704 (поле 48), по центру белого 800×800, JPEG. На сайте
+  // витрина рассчитана на такой кадр; без обработки фото с разным запасом по
+  // краям выглядели бы разномасштабными. Размер держим меньше ~300 КБ: запрос
+  // идёт через Worker и Apps Script, и толстое тело им в тягость.
+  const PHOTO_SIZE = 800, PHOTO_PAD = 48, PHOTO_MAX_BYTES = 300 * 1024;
+
+  async function loadBitmap(file) {
+    if (window.createImageBitmap) {
+      try { return await createImageBitmap(file, { imageOrientation: "from-image" }); }
+      catch (e) { /* старый WebView: падаем на <img> ниже */ }
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Не удалось прочитать картинку"));
+        img.src = url;
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function newCanvas(w, h) {
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    return c;
+  }
+
+  // Рамка предмета: фон — цвет углов, если они сходятся, иначе белый; пятном
+  // считается пиксель, у которого сумма отличий по каналам > 30; пыль и тонкие
+  // рамки отсекаются сужением маски (5 подряд по обеим осям, как MinFilter(5)).
+  function subjectBox(canvas) {
+    const scale = Math.min(1, 400 / Math.max(canvas.width, canvas.height));
+    const w = Math.max(1, Math.round(canvas.width * scale));
+    const h = Math.max(1, Math.round(canvas.height * scale));
+    const small = newCanvas(w, h);
+    small.getContext("2d").drawImage(canvas, 0, 0, w, h);
+    const d = small.getContext("2d").getImageData(0, 0, w, h).data;
+    const px = (x, y) => { const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+    const corners = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
+    const spread = [0, 1, 2].map((c) => Math.max(...corners.map((p) => p[c])) - Math.min(...corners.map((p) => p[c])));
+    const bg = Math.max(...spread) <= 24 ? corners[0] : [255, 255, 255];
+    const on = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const p = px(x, y);
+      if (Math.abs(p[0] - bg[0]) + Math.abs(p[1] - bg[1]) + Math.abs(p[2] - bg[2]) > 30) on[y * w + x] = 1;
+    }
+    const R = 5;
+    const run = (src, len, step, lines, lineStep) => {
+      const out = new Uint8Array(src.length);
+      for (let l = 0; l < lines; l++) {
+        let streak = 0;
+        for (let i = 0; i < len; i++) {
+          streak = src[l * lineStep + i * step] ? streak + 1 : 0;
+          if (streak >= R) for (let j = 0; j < R; j++) out[l * lineStep + (i - j) * step] = 1;
+        }
+      }
+      return out;
+    };
+    const eroded = run(run(on, w, 1, h, w), h, w, w, 1);
+    let l = w, t = h, r = -1, b = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!eroded[y * w + x]) continue;
+      if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y;
+    }
+    const full = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+    if (r < 0) return full;
+    const pad = 3;
+    const x0 = Math.max(l - pad, 0), y0 = Math.max(t - pad, 0);
+    const x1 = Math.min(r + 1 + pad, w), y1 = Math.min(b + 1 + pad, h);
+    // Почти весь кадр — фон не однотонный, обрезать нечего.
+    if ((x1 - x0) * (y1 - y0) > 0.97 * w * h) return full;
+    return { x: Math.floor(x0 / scale), y: Math.floor(y0 / scale),
+             w: Math.min(canvas.width, Math.ceil((x1 - x0) / scale)),
+             h: Math.min(canvas.height, Math.ceil((y1 - y0) / scale)) };
+  }
+
+  async function preparePhoto(file) {
+    const bmp = await loadBitmap(file);
+    const sw = bmp.width, sh = bmp.height;
+    if (!sw || !sh) throw new Error("Не удалось прочитать картинку");
+    // Огромные снимки с камеры сжимаем сразу: на телефоне 12 Мп в getImageData
+    // не уложатся в память.
+    const cap = Math.min(1, 1600 / Math.max(sw, sh));
+    const src = newCanvas(Math.round(sw * cap), Math.round(sh * cap));
+    const sctx = src.getContext("2d");
+    // Белая подложка: прозрачность в JPEG иначе станет чёрной.
+    sctx.fillStyle = "#fff";
+    sctx.fillRect(0, 0, src.width, src.height);
+    sctx.drawImage(bmp, 0, 0, src.width, src.height);
+    if (bmp.close) bmp.close();
+
+    const box = subjectBox(src);
+    const fit = (PHOTO_SIZE - PHOTO_PAD * 2) / Math.max(box.w, box.h);
+    const dw = Math.max(1, Math.round(box.w * fit)), dh = Math.max(1, Math.round(box.h * fit));
+    const out = newCanvas(PHOTO_SIZE, PHOTO_SIZE);
+    const ctx = out.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, PHOTO_SIZE, PHOTO_SIZE);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, box.x, box.y, box.w, box.h,
+      Math.floor((PHOTO_SIZE - dw) / 2), Math.floor((PHOTO_SIZE - dh) / 2), dw, dh);
+
+    let quality = 0.85, url = out.toDataURL("image/jpeg", quality);
+    while (url.length * 3 / 4 > PHOTO_MAX_BYTES && quality > 0.4) {
+      quality -= 0.1;
+      url = out.toDataURL("image/jpeg", quality);
+    }
+    return url;
   }
 
   async function setSection(modelKey, value, select) {
@@ -307,6 +523,7 @@ const ModelsScreen = (() => {
 
   function onShow() {
     query = "";
+    warnings = {};
     showBoxError("models-error", "");
     load();
   }
