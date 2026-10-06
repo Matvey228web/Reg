@@ -90,7 +90,7 @@ var CATEGORY_LABELS = {
   RIG: "Обвес камеры",
   FLT: "Фильтры",
   PWR: "Питание",
-  MED: "Носители",
+  MED: "Память",
 };
 
 // Единственное описание структуры таблицы: используется и при создании
@@ -1257,6 +1257,707 @@ function cleanupReport(plan, title) {
   return out.join("\n");
 }
 
+// --- Разовая правка каталога ---
+//
+// Решения владельца от 6 октября 2026 (сверка каталога с сайтом): какие модели
+// слить, какие удалить, как назвать, почём и в каком разделе витрины. Ключи —
+// «КАТ-код», как в site/catalog.json, и указывают на модели ДО слияний:
+// переименование, цена и раздел слитой модели уходят той, в которую она слита.
+//
+// Запуск — руками из редактора: сначала catalogFixPreview(), потом catalogFix().
+// Ход тот же, что у уборки (cleanupRun): копия таблицы, план заново под замком,
+// все проверки до первой записи — один отказ отменяет весь запуск, иначе
+// половина правки осталась бы в таблице без объяснения. Повторный запуск
+// ничего не меняет: сделанное уже совпадает с планом. Ключа нет в таблице —
+// он назван в отчёте и пропущен, а не роняет запуск.
+//
+// Удаление модели — полное (решение владельца): строка Models, все её вещи и
+// записи журналов о них. Вещь на руках или неустранённый дефект — отказ.
+// Строки заказов, указывавшие на удалённую модель, теряют код модели и
+// остаются с названием из заявки: код потом может достаться другой модели.
+//
+// Кэш: как и после уборки, приложение и сайт увидят правку не позже чем через
+// пять минут.
+
+var CATALOG_FIX = {
+  categories: [
+    { action: "relabel", code: "MED", label: "Память" },
+    { action: "create", code: "TRN", label: "Транспортировка", by_qty: false },
+    { action: "create", code: "CBL", label: "Кабели", by_qty: true },
+  ],
+  // LGT-12 и LGT-14 — не модели, а строки-заголовки разделов, попавшие в
+  // импорт: слияние прибавило бы по лишней штуке к LGT-13 и LGT-15.
+  delete_models: ["GRP-02", "GRP-04", "LEN-36", "LGT-12", "LGT-14"],
+  // Вещи по одной, с теми же отказами, что у модели: { import_tab: "КИНО" } —
+  // всё, что импорт взял с этой вкладки исходной таблицы, или
+  // { item_ids: ["010203", …] }. Пока не включено: ждёт подтверждения
+  // владельца (дубли с повторной вкладки КИНО).
+  // delete_units: { import_tab: "КИНО" },
+  merges: [
+    { from: "CAM-06", into: "CAM-14" },
+    { from: "CAM-15", into: "CAM-07" },
+    { from: "OTH-03", into: "RIG-01" },
+    { from: "OTH-04", into: "MON-03" },
+    { from: "LEN-28", into: "LEN-14" },
+    { from: "LEN-15", into: "LEN-29" },
+    { from: "LEN-30", into: "LEN-16" },
+    { from: "LEN-31", into: "LEN-18" },
+    { from: "LEN-32", into: "LEN-19" },
+    { from: "LEN-20", into: "LEN-37" },
+    { from: "LEN-38", into: "LEN-21" },
+    { from: "LEN-22", into: "LEN-39" },
+    { from: "LEN-23", into: "LEN-40" },
+    { from: "LEN-24", into: "LEN-41" },
+    { from: "LEN-42", into: "LEN-26" },
+    { from: "LEN-43", into: "LEN-25" },
+  ],
+  renames: [
+    { key: "OTH-05", to: "TVLogic F-7HS" },
+    { key: "OTH-06", to: "TVLogic LVM-246A" },
+    { key: "AUD-01", to: "Hollyland Lark Max Duo" },
+    { key: "CAM-09", to: "Blackmagic 6K G2" },
+    { key: "CAM-02", to: "Blackmagic Pyxis EF" },
+    { key: "CAM-03", to: "Blackmagic Pyxis PL" },
+    { key: "CAM-11", to: "Canon XA60" },
+    { key: "CAM-14", to: "Sony A7 IV" },
+    { key: "CAM-01", to: "Sony Burano" },
+    { key: "CAM-07", to: "Sony A7R III" },
+    { key: "CAM-05", to: "Sony FX3" },
+    { key: "MON-02", to: "Accsoon CineView HE" },
+    { key: "MON-01", to: "SWIT FLOW2000 1:1" },
+    { key: "MON-03", to: "TVLogic F-5A" },
+    { key: "RIG-01", to: "Tilta Nucleus-m Kit IV" },
+    { key: "LEN-02", to: "Ломо Illumina MK-III 25мм" },
+    { key: "LEN-03", to: "Ломо Illumina MK-III 35мм" },
+    { key: "LEN-04", to: "Ломо Illumina MK-III 50мм" },
+    { key: "LEN-05", to: "Ломо Illumina MK-III 85мм" },
+    { key: "LEN-11", to: "Canon RF 24-105mm F4 L IS USM" },
+    { key: "LEN-06", to: "DZOFilm Pictor Zoom Kit EF" },
+    { key: "LEN-07", to: "DZOFilm Vespid 25mm EF" },
+    { key: "LEN-08", to: "DZOFilm Vespid 35mm EF" },
+    { key: "LEN-09", to: "DZOFilm Vespid 50mm EF" },
+    { key: "LEN-10", to: "DZOFilm Vespid 75mm EF" },
+    { key: "LEN-19", to: "Samyang 135mm F2.2" },
+    { key: "LEN-14", to: "Samyang 24mm F1.5" },
+    { key: "LEN-18", to: "Samyang 85mm F1.5" },
+    { key: "LEN-33", to: "Samyang AF 24-70mm F/2.8" },
+    { key: "LEN-35", to: "Sigma 70-200mm F/2.8 Dg Dn Os Sports" },
+    { key: "LEN-34", to: "Tamron 17-28mm F/2.8 Di III RXD" },
+    { key: "LEN-21", to: "Zenit 16mm F2.8" },
+    { key: "LEN-25", to: "Zenit 85mm F1.5" },
+    { key: "LEN-26", to: "Zenit 85mm F2.2" },
+    { key: "LEN-40", to: "Zenit 58mm F1.9" },
+    { key: "LEN-39", to: "Zenit 50mm F1.2" },
+    { key: "LEN-41", to: "Zenit 60mm F2.8" },
+    { key: "LEN-37", to: "Zenit 8mm F3.5" },
+    { key: "LGT-08", to: "Godox Octabox 80" },
+    { key: "LGT-10", to: "Nanlite Forza II 150B Bi-color LED" },
+    { key: "LGT-11", to: "Nanlite Forza II 300B Bi-color LED" },
+    { key: "LGT-13", to: "Nanlite Forza 720 LED" },
+    { key: "LGT-04", to: "Godox Knowled MG1200BI" },
+    { key: "LGT-06", to: "Godox Lantern 85" },
+    { key: "LGT-02", to: "Godox Knowled M300BI" },
+    { key: "LGT-03", to: "Godox Knowled M600BI" },
+    { key: "LGT-01", to: "Godox SL300R RGB" },
+    { key: "LGT-09", to: "Godox VSA-19K" },
+  ],
+  prices: [
+    { key: "GRP-03", price: 160778 },
+    { key: "OTH-05", price: 220500 },
+    { key: "OTH-06", price: 361000 },
+    { key: "AUD-01", price: 24255 },
+    { key: "CAM-09", price: 316929 },
+    { key: "CAM-02", price: 1262735 },
+    { key: "CAM-03", price: 1262735 },
+    { key: "CAM-04", price: 589109 },
+    { key: "CAM-11", price: 184633 },
+    { key: "CAM-14", price: 144753 },
+    { key: "CAM-01", price: 2485000 },
+    { key: "CAM-07", price: 238912 },
+    { key: "CAM-05", price: 289829 },
+    { key: "MON-02", price: 0 },
+    { key: "MON-01", price: 294930 },
+    { key: "MON-03", price: 141600 },
+    { key: "RIG-01", price: 100350 },
+    { key: "LEN-02", price: 636762 },
+    { key: "LEN-03", price: 636762 },
+    { key: "LEN-04", price: 636762 },
+    { key: "LEN-05", price: 636762 },
+    { key: "LEN-11", price: 132706 },
+    { key: "LEN-06", price: 747680 },
+    { key: "LEN-07", price: 248425 },
+    { key: "LEN-08", price: 248425 },
+    { key: "LEN-09", price: 248425 },
+    { key: "LEN-10", price: 248425 },
+    { key: "LEN-19", price: 45000 },
+    { key: "LEN-14", price: 48000 },
+    { key: "LEN-29", price: 45000 },
+    { key: "LEN-16", price: 41000 },
+    { key: "LEN-18", price: 23000 },
+    { key: "LEN-33", price: 0 },
+    { key: "LEN-35", price: 0 },
+    { key: "LEN-34", price: 0 },
+    { key: "LEN-21", price: 16600 },
+    { key: "LEN-25", price: 33528 },
+    { key: "LEN-26", price: 31926 },
+    { key: "LEN-40", price: 26822 },
+    { key: "LEN-39", price: 19155 },
+    { key: "LEN-41", price: 26822 },
+    { key: "LEN-37", price: 16207 },
+    { key: "LGT-08", price: 0 },
+    { key: "LGT-10", price: 56800 },
+    { key: "LGT-11", price: 123800 },
+    { key: "LGT-13", price: 155000 },
+    { key: "LGT-04", price: 0 },
+    { key: "LGT-06", price: 0 },
+    { key: "LGT-02", price: 0 },
+    { key: "LGT-03", price: 0 },
+    { key: "LGT-01", price: 0 },
+    { key: "LGT-09", price: 0 },
+  ],
+  sections: [
+    { key: "GRP-03", section: "CINE" },
+    { key: "OTH-05", section: "CINE" },
+    { key: "OTH-06", section: "CINE" },
+    { key: "AUD-01", section: "CINE" },
+    { key: "CAM-09", section: "CINE" },
+    { key: "CAM-02", section: "CINE" },
+    { key: "CAM-03", section: "CINE" },
+    { key: "CAM-04", section: "CINE" },
+    { key: "CAM-11", section: "CINE,PHOTO" },
+    { key: "CAM-14", section: "PHOTO" },
+    { key: "CAM-01", section: "CINE" },
+    { key: "CAM-07", section: "PHOTO" },
+    { key: "CAM-05", section: "CINE" },
+    { key: "MON-02", section: "CINE" },
+    { key: "MON-01", section: "CINE" },
+    { key: "MON-03", section: "CINE" },
+    { key: "RIG-01", section: "CINE" },
+    { key: "LEN-02", section: "CINE" },
+    { key: "LEN-03", section: "CINE" },
+    { key: "LEN-04", section: "CINE" },
+    { key: "LEN-05", section: "CINE" },
+    { key: "LEN-11", section: "PHOTO" },
+    { key: "LEN-06", section: "CINE" },
+    { key: "LEN-07", section: "CINE" },
+    { key: "LEN-08", section: "CINE" },
+    { key: "LEN-09", section: "CINE" },
+    { key: "LEN-10", section: "CINE" },
+    { key: "LEN-19", section: "CINE" },
+    { key: "LEN-14", section: "CINE" },
+    { key: "LEN-29", section: "CINE" },
+    { key: "LEN-16", section: "CINE" },
+    { key: "LEN-18", section: "CINE" },
+    { key: "LEN-33", section: "CINE" },
+    { key: "LEN-35", section: "PHOTO" },
+    { key: "LEN-34", section: "PHOTO" },
+    { key: "LEN-21", section: "PHOTO" },
+    { key: "LEN-25", section: "PHOTO" },
+    { key: "LEN-26", section: "PHOTO" },
+    { key: "LEN-40", section: "PHOTO" },
+    { key: "LEN-39", section: "PHOTO" },
+    { key: "LEN-41", section: "PHOTO" },
+    { key: "LEN-37", section: "PHOTO" },
+    { key: "LGT-08", section: "CINE" },
+    { key: "LGT-10", section: "CINE" },
+    { key: "LGT-11", section: "CINE" },
+    { key: "LGT-13", section: "CINE" },
+    { key: "LGT-04", section: "CINE" },
+    { key: "LGT-06", section: "CINE" },
+    { key: "LGT-02", section: "CINE" },
+    { key: "LGT-03", section: "CINE" },
+    { key: "LGT-01", section: "CINE" },
+    { key: "LGT-09", section: "CINE" },
+  ],
+};
+
+/**
+ * Показывает, что сделает catalogFix(), и ничего не меняет.
+ */
+function catalogFixPreview() {
+  var todo = catalogFixTodo(CATALOG_FIX);
+  var message = catalogFixReport(todo, todo.counts, "Просмотр: будет сделано");
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(catalogFixHeadline(todo, todo.counts), "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
+/**
+ * Применяет CATALOG_FIX. Сначала копия всей таблицы (dailyBackup): не
+ * получилась копия — не меняется ничего.
+ */
+function catalogFix() {
+  return catalogFixPlan(CATALOG_FIX);
+}
+
+// Ход как у cleanupRun. Возвращает карту ключей моделей {"CAM-06": "CAM-14"}
+// и карту номеров вещей, сменившихся при слиянии: по первой пересобирается
+// site/catalog.json, по второй ищут старую наклейку.
+function catalogFixPlan(plan, backup) {
+  backup = backup || dailyBackup();
+  if (String(backup).indexOf(BACKUP_FAILED) === 0) {
+    var refuse = "Правка каталога отменена, ничего не изменено: " + backup;
+    logEvent("catalog_fix", "catalogFix", "backup_failed", refuse);
+    Logger.log(refuse);
+    try { SpreadsheetApp.getActiveSpreadsheet().toast(refuse, "Mifs Rent", 15); } catch (ignored) {}
+    return { ok: false, message: refuse, keys: {}, items: {} };
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  var todo, done = null;
+  try {
+    // План заново под замком: между просмотром и запуском могла пройти выдача.
+    todo = catalogFixTodo(plan);
+    if (!todo.errors.length) done = catalogFixApply(todo);
+  } finally {
+    lock.releaseLock();
+  }
+
+  if (!done) {
+    var refused = catalogFixReport(todo, todo.counts, "Правка каталога отменена, ничего не изменено");
+    logEvent("catalog_fix", "catalogFix", "refused", todo.errors.join("; "));
+    Logger.log(refused);
+    try { SpreadsheetApp.getActiveSpreadsheet().toast("Правка каталога отменена: отказов " + todo.errors.length, "Mifs Rent", 15); } catch (ignored) {}
+    return { ok: false, message: refused, keys: {}, items: {} };
+  }
+
+  logEvent("catalog_fix", "catalogFix", "done", catalogFixHeadline(todo, done.counts),
+           { keys: todo.keys, counts: done.counts, missing: todo.missing });
+  var message = catalogFixReport(todo, done.counts, "Сделано") +
+    "\nКарта ключей: " + JSON.stringify(todo.keys) +
+    "\nНовые номера вещей: " + JSON.stringify(done.items) + "\n" + backup;
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(catalogFixHeadline(todo, done.counts), "Mifs Rent", 15); } catch (ignored) {}
+  return { ok: true, message: message, keys: todo.keys, items: done.items, counts: done.counts };
+}
+
+function catalogFixKey(category, code) {
+  return String(category || "").trim().toUpperCase() + "-" + pad2(Number(code));
+}
+
+function catalogFixPlanKey(key) {
+  var parts = String(key || "").trim().split("-");
+  return catalogFixKey(parts[0], parts[1]);
+}
+
+// Что сделать и что не выйдет. Только читает таблицу.
+function catalogFixTodo(plan) {
+  var todo = { categories: [], deletes: [], merges: [], renames: [], prices: [], sections: [],
+               missing: [], errors: [], notes: [], keys: {} };
+  var cats = categories();
+  var catBy = {};
+  cats.forEach(function (c) { catBy[c.code] = c; });
+  var models = readRows(getSheet(SHEETS.MODELS));
+  var modelBy = {};
+  models.forEach(function (m) { modelBy[catalogFixKey(m.category, m.model_code)] = m; });
+  var units = readRows(getSheet(SHEETS.EQUIPMENT));
+  var unitsOf = function (key) {
+    return units.filter(function (u) { return catalogFixKey(u.category, u.model_code) === key; });
+  };
+  var txs = readRows(getSheet(SHEETS.TRANSACTIONS));
+  var defects = readRows(getSheet(SHEETS.DEFECTS));
+  var inventory = readRows(getSheet(SHEETS.INVENTORY));
+  var lines = readRows(getSheet(SHEETS.ORDER_ITEMS));
+  var counters = {};
+  readRows(getSheet(SHEETS.META)).forEach(function (r) { counters[String(r.key)] = Number(r.value) || 0; });
+  var named = function (key) { return key + " «" + String(modelBy[key].model_name || "") + "»"; };
+
+  // Категории — первыми: номер новой берётся следующий свободный, как в /category/create.
+  var maxNum = cats.reduce(function (m, c) { return Math.max(m, Number(c.num)); }, 0);
+  (plan.categories || []).forEach(function (c) {
+    var code = String(c.code || "").trim().toUpperCase();
+    var label = String(c.label || "").trim();
+    var have = catBy[code];
+    if (!label) { todo.errors.push("категория " + code + ": пустое название"); return; }
+    if (c.action === "relabel") {
+      if (!have) { todo.missing.push("категория " + code + " (назвать «" + label + "»)"); return; }
+      if (have.label !== label) todo.categories.push({ action: "relabel", code: code, label: label, was: have.label });
+    } else if (c.action === "create") {
+      if (!/^[A-Z]{3}$/.test(code)) { todo.errors.push("категория " + code + ": код — три латинские буквы"); return; }
+      if (have) {
+        if (!!have.by_qty !== !!c.by_qty) {
+          todo.errors.push("категория " + code + " уже есть, но считается " +
+            (have.by_qty ? "количеством" : "поштучно") + " — план говорит иначе");
+        }
+        return;
+      }
+      maxNum += 1;
+      if (maxNum > 99) { todo.errors.push("категория " + code + ": свободных номеров больше нет (предел 99)"); return; }
+      todo.categories.push({ action: "create", code: code, label: label, by_qty: !!c.by_qty, num: pad2(maxNum) });
+    } else {
+      todo.errors.push("категория " + code + ": непонятное действие «" + c.action + "»");
+    }
+  });
+
+  var deleted = {};
+  (plan.delete_models || []).forEach(function (k) { deleted[catalogFixPlanKey(k)] = true; });
+  var mergeTo = {};
+  (plan.merges || []).forEach(function (m) { mergeTo[catalogFixPlanKey(m.from)] = catalogFixPlanKey(m.into); });
+  var resolve = function (key) {
+    var seen = {};
+    while (mergeTo[key] && !seen[key]) { seen[key] = true; key = mergeTo[key]; }
+    return key;
+  };
+
+  // Удаление — одни правила и для модели целиком, и для вещей по одной:
+  // на руках или с неустранённым дефектом — отказ, закрытые записи журналов
+  // удаляются вместе с вещью.
+  var doomed = {};
+  var checkUnits = function (label, mine) {
+    var ids = {};
+    mine.forEach(function (u) { ids[String(u.item_id)] = true; });
+    var mineOf = function (list) { return list.filter(function (r) { return !!ids[String(r.item_id)]; }); };
+    var out = mine.filter(function (u) {
+      return Number(u.qty_out || 0) > 0 || u.status === "Rented" || String(u.current_transaction_id || "");
+    }).map(function (u) { return String(u.item_id); });
+    mineOf(txs).forEach(function (t) {
+      if (t.status === "Open" && out.indexOf(String(t.item_id)) === -1) out.push(String(t.item_id));
+    });
+    if (out.length) {
+      todo.errors.push(label + ": техника на руках (" + out.join(", ") + ") — сначала принять в приложении");
+      return null;
+    }
+    var unresolved = mineOf(defects).filter(function (d) { return d.status !== "Resolved"; });
+    if (unresolved.length) {
+      todo.errors.push(label + ": неустранённый дефект № " +
+        unresolved.map(function (d) { return d.defect_id; }).join(", ") + " — сначала закрыть в приложении");
+      return null;
+    }
+    for (var id in ids) doomed[id] = true;
+    return { ids: ids, units: mine.length, transactions: mineOf(txs).length,
+             defects: mineOf(defects).length, inventory: mineOf(inventory).length };
+  };
+
+  Object.keys(deleted).forEach(function (key) {
+    if (!modelBy[key]) { todo.missing.push(key + " (удалить)"); return; }
+    if (mergeTo[key]) { todo.errors.push(key + ": в плане и удалить, и слить — выберите одно"); return; }
+    var entry = checkUnits(named(key), unitsOf(key));
+    if (!entry) return;
+    entry.key = key;
+    entry.name = modelBy[key].model_name;
+    entry.lines = lines.filter(function (l) {
+      return l.model_code !== "" && catalogFixKey(l.category, l.model_code) === key;
+    }).length;
+    todo.deletes.push(entry);
+  });
+
+  // Вещи без модели: по номерам или по вкладке исходной таблицы, с которой их
+  // взял импорт (метка «Импорт: ВКЛАДКА#строка» в condition_notes). Модель
+  // остаётся, даже если вещей у неё не останется: это видно в отчёте.
+  var du = plan.delete_units;
+  if (du && (du.import_tab || (du.item_ids && du.item_ids.length))) {
+    var wantIds = {};
+    (du.item_ids || []).forEach(function (id) { wantIds[String(id).trim()] = true; });
+    var tab = String(du.import_tab || "").trim().toUpperCase();
+    var picked = units.filter(function (u) {
+      if (deleted[catalogFixKey(u.category, u.model_code)]) return false;
+      if (wantIds[String(u.item_id)]) return true;
+      var m = String(u.condition_notes || "").match(/Импорт:\s*([^/#]+)#\d+/);
+      return !!tab && !!m && m[1].trim().toUpperCase() === tab;
+    });
+    var have = {};
+    units.forEach(function (u) { have[String(u.item_id)] = true; });
+    Object.keys(wantIds).forEach(function (id) { if (!have[id]) todo.missing.push("вещь " + id + " (удалить)"); });
+    var label = "вещи" + (tab ? " с вкладки импорта " + tab : "") +
+      (Object.keys(wantIds).length ? " по номерам" : "");
+    var entry = picked.length ? checkUnits(label, picked) : null;
+    if (entry) {
+      entry.key = "";
+      entry.name = label;
+      entry.lines = 0;
+      entry.emptied = Object.keys(picked.reduce(function (acc, u) {
+        var k = catalogFixKey(u.category, u.model_code);
+        if (unitsOf(k).every(function (x) { return !!doomed[String(x.item_id)]; })) acc[k] = true;
+        return acc;
+      }, {}));
+      todo.deletes.push(entry);
+    } else if (!picked.length && tab) {
+      todo.missing.push("вещей с вкладки импорта " + tab + " (удалить)");
+    }
+  }
+  var unitsLeft = function (key) {
+    return unitsOf(key).filter(function (u) { return !doomed[String(u.item_id)]; });
+  };
+
+  (plan.merges || []).forEach(function (m) {
+    var from = catalogFixPlanKey(m.from);
+    var into = resolve(from);
+    if (into === from) { todo.errors.push(from + ": слияние по кругу"); return; }
+    var src = modelBy[from], dst = modelBy[into];
+    if (dst && !deleted[into]) todo.keys[from] = into;
+    if (!src) { todo.missing.push(from + " (слить в " + into + ")"); return; }
+    if (!dst) { todo.missing.push(into + " (в неё сливается " + named(from) + ")"); return; }
+    if (deleted[into]) { todo.errors.push(named(from) + ": сливается в " + into + ", а та в плане на удаление"); return; }
+    var fc = catBy[src.category], tc = catBy[dst.category];
+    if (!fc || !tc) { todo.errors.push(named(from) + " → " + into + ": категории нет в справочнике"); return; }
+    if (!!fc.by_qty !== !!tc.by_qty) {
+      todo.errors.push(named(from) + " → " + named(into) + ": у категорий разный способ учёта — " +
+        "одна считается количеством, другая поштучно");
+      return;
+    }
+    try {
+      assertModelNotOut(src.category, src.model_code);
+    } catch (e) {
+      todo.errors.push(named(from) + ": " + e.message);
+      return;
+    }
+    var count = unitsLeft(from).length;
+    if (!tc.by_qty) {
+      var counter = "unit_" + tc.num + pad2(Number(dst.model_code));
+      counters[counter] = (counters[counter] || 0) + count;
+      if (counters[counter] > 99) {
+        todo.errors.push(named(into) + ": после слияния номеров вещей не хватит (предел 99)");
+        return;
+      }
+    }
+    todo.merges.push({
+      from: from, into: into, fromCat: src.category, fromCode: pad2(Number(src.model_code)),
+      toCat: dst.category, toCode: pad2(Number(dst.model_code)),
+      name: src.model_name, intoName: dst.model_name, units: count,
+    });
+  });
+
+  // Что останется после удалений и слияний — среди этого ищем совпадения названий.
+  var gone = function (key) { return !!deleted[key] || !!mergeTo[key]; };
+  var target = function (k, what) {
+    var key = resolve(catalogFixPlanKey(k));
+    if (!modelBy[key] || deleted[key]) { todo.missing.push(catalogFixPlanKey(k) + " (" + what + ")"); return null; }
+    return key;
+  };
+  var once = function (store, key, value, what) {
+    if (store[key] !== undefined && store[key] !== value) {
+      todo.errors.push(named(key) + ": две разные " + what + " в плане — «" + store[key] + "» и «" + value + "»");
+      return false;
+    }
+    store[key] = value;
+    return true;
+  };
+
+  // Название — через MODEL_ALIASES и с той же проверкой соседей, что в
+  // /item/update для всей модели: иначе переименованием свелись бы две модели.
+  var renameTo = {}, typedTo = {};
+  (plan.renames || []).forEach(function (r) {
+    var key = target(r.key, "переименовать в «" + r.to + "»");
+    if (!key) return;
+    var name = canonicalModelName(r.to);
+    if (!name) { todo.errors.push(named(key) + ": пустое название"); return; }
+    if (once(renameTo, key, name, "названия")) typedTo[key] = String(r.to).trim();
+  });
+  Object.keys(renameTo).forEach(function (key) {
+    var m = modelBy[key];
+    var name = renameTo[key];
+    if (normalizeModelName(typedTo[key]) !== normalizeModelName(name)) {
+      todo.notes.push(key + ": «" + typedTo[key] + "» по списку синонимов (MODEL_ALIASES) — это «" +
+        name + "», так и записывается");
+    }
+    var needle = normalizeModelName(name);
+    var clash = models.filter(function (r) {
+      var k = catalogFixKey(r.category, r.model_code);
+      if (k === key || r.category !== m.category || gone(k)) return false;
+      var theirs = renameTo[k] !== undefined ? renameTo[k] : canonicalModelName(r.model_name);
+      return normalizeModelName(theirs) === needle;
+    })[0];
+    if (clash) {
+      var other = catalogFixKey(clash.category, clash.model_code);
+      todo.errors.push(named(key) + ": «" + name + "» — в этой категории уже есть " + named(other) +
+        ". Две модели с одним названием — это две нумерации одной вещи.");
+      return;
+    }
+    var group = units.filter(function (u) {
+      var k = catalogFixKey(u.category, u.model_code);
+      return !deleted[k] && !doomed[String(u.item_id)] && resolve(k) === key && String(u.name || "") !== name;
+    }).length;
+    if (String(m.model_name || "") !== name || group) {
+      todo.renames.push({ key: key, was: m.model_name, to: name, units: group });
+    }
+  });
+
+  // Цена и раздел — те же проверки, что в /models/price и /models/sections.
+  var priceTo = {};
+  (plan.prices || []).forEach(function (p) {
+    var key = target(p.key, "цена");
+    if (!key) return;
+    var raw = String(p.price === undefined || p.price === null ? "" : p.price).trim();
+    var price = raw === "" ? "" : Number(raw.replace(/\s/g, "").replace(",", "."));
+    if (price !== "" && (!isFinite(price) || price < 0)) {
+      todo.errors.push(named(key) + ": цена «" + raw + "» — нужно неотрицательное число или пусто");
+      return;
+    }
+    if (once(priceTo, key, price, "цены") && price === 0) {
+      todo.notes.push(key + ": цена 0 — в акте это «ничего не стоит», а не прочерк; " +
+        "если цена просто неизвестна, оставьте пусто");
+    }
+  });
+  Object.keys(priceTo).forEach(function (key) {
+    var was = modelBy[key].price;
+    was = was === undefined || was === null || was === "" ? "" : Number(was);
+    if (was !== priceTo[key]) todo.prices.push({ key: key, was: was, price: priceTo[key] });
+  });
+
+  var sectionTo = {};
+  (plan.sections || []).forEach(function (s) {
+    var key = target(s.key, "раздел");
+    if (!key) return;
+    var clean;
+    try { clean = checkSection(s.section); } catch (e) { todo.errors.push(named(key) + ": " + e.message); return; }
+    once(sectionTo, key, clean, "разметки");
+  });
+  Object.keys(sectionTo).forEach(function (key) {
+    var was = normalizeSection(modelBy[key].section);
+    if (was !== sectionTo[key]) todo.sections.push({ key: key, was: was, section: sectionTo[key] });
+  });
+
+  var sum = function (list, field) { return list.reduce(function (n, x) { return n + x[field]; }, 0); };
+  todo.counts = {
+    categories: todo.categories.length,
+    deleted_models: todo.deletes.filter(function (d) { return d.key; }).length,
+    deleted_units: sum(todo.deletes, "units"),
+    deleted_journal: sum(todo.deletes, "transactions") + sum(todo.deletes, "defects") + sum(todo.deletes, "inventory"),
+    merges: todo.merges.length,
+    moved_units: sum(todo.merges, "units"),
+    renamed_models: todo.renames.filter(function (r) { return String(r.was || "") !== r.to; }).length,
+    renamed_units: sum(todo.renames, "units"),
+    prices: todo.prices.length,
+    sections: todo.sections.length,
+  };
+  return todo;
+}
+
+// Запись по плану, без замка и без проверок — их сделал catalogFixTodo.
+function catalogFixApply(todo) {
+  var counts = { categories: 0, deleted_models: 0, deleted_units: 0, deleted_journal: 0, merges: 0,
+                 moved_units: 0, renamed_models: 0, renamed_units: 0, prices: 0, sections: 0 };
+  var items = {};
+  var keyOf = function (r) { return catalogFixKey(r.category, r.model_code); };
+
+  var catSheet = getSheet(SHEETS.CATEGORIES);
+  todo.categories.forEach(function (c) {
+    if (c.action === "create") createCategory(c.code, c.label, c.by_qty);
+    else updateRow(catSheet, findRowByValue(catSheet, "code", c.code).__row, { label: c.label });
+    counts.categories += 1;
+  });
+
+  if (todo.deletes.length) {
+    var ids = {}, keys = {};
+    todo.deletes.forEach(function (d) {
+      if (d.key) keys[d.key] = true;
+      for (var id in d.ids) ids[id] = true;
+    });
+    var mine = function (r) { return !!ids[String(r.item_id)]; };
+    // Сначала журналы, потом вещи и модель: оборвись запуск посередине —
+    // останется вещь без истории, а не история без вещи.
+    counts.deleted_journal += trimSheetRows(getSheet(SHEETS.INVENTORY), mine);
+    counts.deleted_journal += trimSheetRows(getSheet(SHEETS.DEFECTS), mine);
+    counts.deleted_journal += trimSheetRows(getSheet(SHEETS.TRANSACTIONS), mine);
+    var linesSheet = getSheet(SHEETS.ORDER_ITEMS);
+    readRows(linesSheet).forEach(function (l) {
+      if (l.model_code !== "" && keys[keyOf(l)]) updateRow(linesSheet, l.__row, { model_code: "", category: "" });
+    });
+    counts.deleted_units = trimSheetRows(getSheet(SHEETS.EQUIPMENT), function (r) {
+      return !!keys[keyOf(r)] || mine(r);
+    });
+    counts.deleted_models = trimSheetRows(getSheet(SHEETS.MODELS), function (r) { return !!keys[keyOf(r)]; });
+  }
+
+  todo.merges.forEach(function (m) {
+    var done = mergeModel(m.fromCat, m.fromCode, m.toCat, m.toCode);
+    counts.merges += 1;
+    counts.moved_units += done.moved;
+    done.renames.forEach(function (x) {
+      for (var old in items) if (items[old] === x.old) items[old] = x.fresh;
+      items[x.old] = x.fresh;
+    });
+  });
+
+  var modelsSheet = getSheet(SHEETS.MODELS);
+  ensureColumns(modelsSheet, ["section", "price"]);
+  var pick = function (list, field) {
+    var map = {};
+    list.forEach(function (x) { map[x.key] = x[field]; });
+    return function (r) { return map[keyOf(r)]; };
+  };
+  counts.renamed_models = catalogFixColumn(modelsSheet, "model_name", pick(todo.renames, "to"));
+  counts.renamed_units = catalogFixColumn(getSheet(SHEETS.EQUIPMENT), "name", pick(todo.renames, "to"));
+  counts.prices = catalogFixColumn(modelsSheet, "price", pick(todo.prices, "price"));
+  counts.sections = catalogFixColumn(modelsSheet, "section", pick(todo.sections, "section"));
+  return { counts: counts, items: items };
+}
+
+// Колонку — одной записью, как remapItemIds: по строке на модель это сотня
+// обращений к листу. value(row) — новое значение или undefined, «не трогать».
+function catalogFixColumn(sheet, column, value) {
+  var rows = readRows(sheet);
+  var col = sheetHeaders(sheet).indexOf(column) + 1;
+  if (!rows.length || col < 1) return 0;
+  var range = sheet.getRange(2, col, rows.length, 1);
+  var values = range.getValues();
+  var changed = 0;
+  rows.forEach(function (r, i) {
+    var v = value(r);
+    if (v === undefined || String(values[i][0]) === String(v)) return;
+    values[i][0] = v;
+    changed += 1;
+  });
+  if (changed) range.setValues(values);
+  return changed;
+}
+
+function catalogFixHeadline(todo, counts) {
+  return "Правка каталога: категорий " + counts.categories +
+    ", удалено моделей " + counts.deleted_models + " (вещей " + counts.deleted_units +
+    ", записей журналов " + counts.deleted_journal + ")" +
+    ", слито моделей " + counts.merges + " (вещей " + counts.moved_units + ")" +
+    ", переименовано моделей " + counts.renamed_models + " (вещей " + counts.renamed_units + ")" +
+    ", цен " + counts.prices + ", разделов " + counts.sections +
+    (todo.missing.length ? "; нет в таблице: " + todo.missing.length : "") +
+    (todo.errors.length ? "; ОТКАЗОВ: " + todo.errors.length : "") + ".";
+}
+
+function catalogFixReport(todo, counts, title) {
+  var out = [title + ". " + catalogFixHeadline(todo, counts)];
+  var section = function (name, list, line) {
+    if (!list.length) return;
+    out.push(name + " — " + list.length + ":");
+    list.slice(0, CLEANUP_SHOW).forEach(function (x) { out.push("  " + line(x)); });
+    if (list.length > CLEANUP_SHOW) out.push("  …и ещё " + (list.length - CLEANUP_SHOW));
+  };
+  // Отказы — все до единого: каждый надо исправить, прежде чем запускать.
+  if (todo.errors.length) {
+    out.push("Отказы — пока они есть, не меняется ничего:");
+    todo.errors.forEach(function (e) { out.push("  " + e); });
+  }
+  section("Категории", todo.categories, function (c) {
+    return c.action === "create"
+      ? "новая " + c.code + " «" + c.label + "», номер " + c.num + ", " + (c.by_qty ? "количеством" : "поштучно")
+      : c.code + ": «" + c.was + "» → «" + c.label + "»";
+  });
+  section("Удалить", todo.deletes, function (d) {
+    return (d.key ? d.key + " «" + d.name + "»" : d.name) + ": вещей " + d.units + " (" +
+      Object.keys(d.ids).join(", ") + "), выдач " + d.transactions + ", дефектов " + d.defects +
+      ", сверок " + d.inventory + (d.lines ? ", строк заказов без кода модели " + d.lines : "") +
+      (d.emptied && d.emptied.length ? "; без вещей останутся модели " + d.emptied.join(", ") : "");
+  });
+  section("Слить модели", todo.merges, function (m) {
+    return m.from + " «" + m.name + "» → " + m.into + " «" + m.intoName + "»: вещей " + m.units;
+  });
+  section("Переименовать", todo.renames, function (r) {
+    return r.key + ": «" + r.was + "» → «" + r.to + "», вещей " + r.units;
+  });
+  section("Цены", todo.prices, function (p) {
+    return p.key + ": " + (p.was === "" ? "—" : p.was) + " → " + (p.price === "" ? "—" : p.price);
+  });
+  section("Разделы", todo.sections, function (s) {
+    return s.key + ": " + (s.was || "—") + " → " + (s.section || "—");
+  });
+  todo.notes.forEach(function (n) { out.push("Заметка: " + n); });
+  if (todo.missing.length) {
+    out.push("Нет в таблице, пропущено — " + todo.missing.length + ":");
+    todo.missing.forEach(function (m) { out.push("  " + m); });
+  }
+  return out.join("\n");
+}
+
 function importTrim(v) {
   return v === null || v === undefined ? "" : String(v).trim();
 }
@@ -2212,23 +2913,90 @@ function moveModel(from, to, code) {
   // findOrCreateModel заодно СЛИВАЕТ дубли: если такая модель в целевой
   // категории уже есть, вернётся её код, и второй записи не появится.
   var target = findOrCreateModel(to, source.model_name);
+  var done = mergeModel(from, code, to, target.model_code);
+
+  return {
+    ok: true,
+    model_name: source.model_name,
+    from: from,
+    to: to,
+    model_code: pad2(Number(target.model_code)),
+    merged: merged,
+    moved: done.moved,
+    journal_rows: done.journal_rows,
+    order_lines: done.order_lines,
+    renames: done.renames,
+  };
+}
+
+// Слить модель в другую — в той же категории или в чужой. Строка целевой
+// модели уже должна быть; исходная после слияния удаляется. Без прав и без
+// замка, как moveModel: её зовут moveModel и catalogFix под своим замком.
+//
+// Поштучные вещи получают номера целевой модели (номер — это её код), у полки
+// количество складывается в целевую строку: две строки одной полки показали бы
+// на сайте две позиции. Номер вещи — ссылка из журналов выдач, дефектов и
+// сверок, код модели — ссылка из состава заказов; переписываем и то и другое,
+// иначе у вещи отвяжется история, а строка заказа укажет на пустое место.
+function mergeModel(fromCat, fromCode, toCat, toCode) {
+  fromCode = pad2(Number(fromCode));
+  toCode = pad2(Number(toCode));
+  if (fromCat === toCat && fromCode === toCode) throw apiError(400, "Модель нельзя слить саму с собой");
+
+  var fromC = null, toC = null;
+  categories().forEach(function (c) {
+    if (c.code === fromCat) fromC = c;
+    if (c.code === toCat) toC = c;
+  });
+  if (!fromC) throw apiError(404, "Категория, из которой переносим, не найдена");
+  if (!toC) throw apiError(404, "Категория, в которую переносим, не найдена");
+  if (isTruthyCell(fromC.by_qty) !== isTruthyCell(toC.by_qty)) {
+    throw apiError(409, "У категорий разный способ учёта: одна считается " +
+      "количеством, другая — поштучно. Перенос превратил бы поштучные записи " +
+      "в количество или наоборот, и разобрать это обратно было бы нечем.");
+  }
+
+  var modelsSheet = getSheet(SHEETS.MODELS);
+  var source = null, target = null;
+  readRows(modelsSheet).forEach(function (r) {
+    var c = pad2(Number(r.model_code));
+    if (r.category === fromCat && c === fromCode) source = r;
+    if (r.category === toCat && c === toCode) target = r;
+  });
+  if (!source) throw apiError(404, "Модель не найдена в этой категории");
+  if (!target) throw apiError(404, "Модели, в которую сливаем, нет: " + toCat + "·" + toCode);
+  assertModelNotOut(fromCat, fromCode);
 
   var eqSheet = getSheet(SHEETS.EQUIPMENT);
-  var items = readRows(eqSheet).filter(function (r) {
-    return r.category === from && pad2(Number(r.model_code)) === pad2(Number(code));
-  });
+  var all = readRows(eqSheet);
+  var ofModel = function (cat, c) {
+    return all.filter(function (r) { return r.category === cat && pad2(Number(r.model_code)) === c; });
+  };
+  var items = ofModel(fromCat, fromCode);
+  var shelf = isTruthyCell(toC.by_qty) ? ofModel(toCat, toCode)[0] || null : null;
 
   var renames = [];
+  var drop = [];
   items.forEach(function (item) {
-    var unit = nextUnitNumber(to, target.model_code);
-    var newId = buildItemId(to, target.model_code, unit);
+    if (shelf) {
+      shelf.qty = itemQty(shelf) + itemQty(item);
+      shelf.qty_out = Number(shelf.qty_out || 0) + Number(item.qty_out || 0);
+      updateRow(eqSheet, shelf.__row, { qty: shelf.qty, qty_out: shelf.qty_out });
+      renames.push({ old: String(item.item_id), fresh: String(shelf.item_id) });
+      drop.push(item.__row);
+      return;
+    }
+    var newId = buildItemId(toCat, toCode, nextUnitNumber(toCat, toCode));
     renames.push({ old: String(item.item_id), fresh: newId });
     updateRow(eqSheet, item.__row, {
-      item_id: newId,
-      category: to,
-      model_code: pad2(Number(target.model_code)),
+      item_id: newId, category: toCat, model_code: toCode, name: target.model_name,
     });
+    if (isTruthyCell(toC.by_qty)) {
+      item.item_id = newId;
+      shelf = item;
+    }
   });
+  drop.sort(function (a, b) { return b - a; }).forEach(function (row) { eqSheet.deleteRow(row); });
 
   // Ссылки в журналах — колонкой целиком: updateRow читает и пишет диапазон
   // на каждую строку, и на сорока позициях это сотня обращений к листу.
@@ -2239,18 +3007,24 @@ function moveModel(from, to, code) {
     touched += remapItemIds(getSheet(name), map);
   });
 
-  // Строка модели переехала или слилась — старой в справочнике быть не должно.
+  var linesSheet = getSheet(SHEETS.ORDER_ITEMS);
+  var lines = 0;
+  readRows(linesSheet).forEach(function (r) {
+    if (r.category !== fromCat || r.model_code === "" || pad2(Number(r.model_code)) !== fromCode) return;
+    updateRow(linesSheet, r.__row, { category: toCat, model_code: toCode });
+    lines += 1;
+  });
+
   modelsSheet.deleteRow(source.__row);
 
   return {
-    ok: true,
+    from: fromCat + "-" + fromCode,
+    to: toCat + "-" + toCode,
     model_name: source.model_name,
-    from: from,
-    to: to,
-    model_code: pad2(Number(target.model_code)),
-    merged: merged,
-    moved: renames.length,
+    into_name: target.model_name,
+    moved: items.length,
     journal_rows: touched,
+    order_lines: lines,
     renames: renames,
   };
 }
@@ -4755,31 +5529,35 @@ function handleCategoryCreate(payload, token) {
   requireAdmin(token);
   var code = String(payload.code || "").trim().toUpperCase();
   var label = String(payload.label || "").trim();
-  if (!/^[A-Z]{3}$/.test(code)) throw apiError(400, "Код категории — три латинские буквы, например BAT");
-  if (!label) throw apiError(400, "Укажите название категории");
-
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
-    var existing = categories();
-    if (existing.some(function (c) { return c.code === code; })) {
-      throw apiError(409, "Категория с таким кодом уже есть");
-    }
-    // Номер выдаём сами, следующий свободный: заданный руками номер рано или
-    // поздно совпал бы с чужим, а это два предмета с одинаковым номером.
-    var maxNum = existing.reduce(function (m, c) { return Math.max(m, Number(c.num)); }, 0);
-    if (maxNum >= 99) throw apiError(409, "Свободных номеров категорий больше нет (предел 99)");
-    var num = pad2(maxNum + 1);
-
-    appendRow(getSheet(SHEETS.CATEGORIES), {
-      code: code, num: num, label: label,
-      by_qty: isTruthyCell(payload.by_qty) ? "TRUE" : "FALSE",
-      created_at: new Date().toISOString(),
-    });
-    return { code: code, num: num, label: label, by_qty: isTruthyCell(payload.by_qty) };
+    return createCategory(code, label, isTruthyCell(payload.by_qty));
   } finally {
     lock.releaseLock();
   }
+}
+
+// Сама запись, без прав и замка: её зовут /category/create и catalogFix.
+function createCategory(code, label, byQty) {
+  if (!/^[A-Z]{3}$/.test(code)) throw apiError(400, "Код категории — три латинские буквы, например BAT");
+  if (!label) throw apiError(400, "Укажите название категории");
+  var existing = categories();
+  if (existing.some(function (c) { return c.code === code; })) {
+    throw apiError(409, "Категория с таким кодом уже есть");
+  }
+  // Номер выдаём сами, следующий свободный: заданный руками номер рано или
+  // поздно совпал бы с чужим, а это два предмета с одинаковым номером.
+  var maxNum = existing.reduce(function (m, c) { return Math.max(m, Number(c.num)); }, 0);
+  if (maxNum >= 99) throw apiError(409, "Свободных номеров категорий больше нет (предел 99)");
+  var num = pad2(maxNum + 1);
+
+  appendRow(getSheet(SHEETS.CATEGORIES), {
+    code: code, num: num, label: label,
+    by_qty: byQty ? "TRUE" : "FALSE",
+    created_at: new Date().toISOString(),
+  });
+  return { code: code, num: num, label: label, by_qty: !!byQty };
 }
 
 function handleCategoryUpdate(payload, token) {
@@ -5401,6 +6179,23 @@ function normalizeModelName(name) {
 // Слева — как называть в каталоге, справа — что считать тем же самым.
 var MODEL_ALIASES = [
   { name: "Sony ILCE-7M4", aliases: ["Sony A7 IV", "Sony A7IV", "Sony Alpha 7 IV", "Sony A7 4"] },
+  // Слиты по решению владельца 6 октября 2026 (CATALOG_FIX): без этих строк
+  // следующий импорт снова завёл бы слитые модели отдельно. Те, что отличаются
+  // от выжившей только написанием, здесь не нужны — их сводит normalizeModelName.
+  { name: "Sony A7R III", aliases: ["Sony ILCE-7RM3A"] },
+  { name: "Tilta Nucleus-m Kit IV", aliases: ["Tilta Nucleus-M WLC-T03 (комплект с 2 моторами)"] },
+  { name: "Samyang 24mm F1.5", aliases: ["Samyang 24mm"] },
+  { name: "Samyang 35mm", aliases: ["Samyang 35mm F1.4"] },
+  { name: "Samyang 50mm F1.4", aliases: ["Samyang 50mm"] },
+  { name: "Samyang 85mm F1.5", aliases: ["Samyang 85mm"] },
+  { name: "Samyang 135mm F2.2", aliases: ["Samyang 135mm"] },
+  { name: "Zenit 8mm F3.5", aliases: ["Zenit 8mm"] },
+  { name: "Zenit 16mm F2.8", aliases: ["Zenit MC Zenitar-C 16mm"] },
+  { name: "Zenit 50mm F1.2", aliases: ["Zenit 50mm"] },
+  { name: "Zenit 58mm F1.9", aliases: ["Zenit 58mm"] },
+  { name: "Zenit 60mm F2.8", aliases: ["Zenit 60mm"] },
+  { name: "Zenit 85mm F2.2", aliases: ["Zenit Selena 85mm F2.2"] },
+  { name: "Zenit 85mm F1.5", aliases: ["Zenit Helios-40-2-C 85mm F1.2"] },
 ];
 
 var MODEL_ALIAS_INDEX = null;
