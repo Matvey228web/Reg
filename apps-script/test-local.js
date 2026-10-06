@@ -50,7 +50,25 @@ class FakeSheet {
         for (let i = 0; i < numRows; i++) {
           const r = sheet.data[row - 1 + i] || [];
           const line = [];
-          for (let j = 0; j < numCols; j++) line.push(r[col - 1 + j] !== undefined ? r[col - 1 + j] : '');
+          // Как в Sheets: значение формулы — её результат, а не текст. Формулы
+          // в тестах дают пусто (IMAGE от пустой ссылки), текст отдаёт getFormulas.
+          for (let j = 0; j < numCols; j++) {
+            const v = r[col - 1 + j];
+            line.push(v === undefined || (typeof v === 'string' && v.charAt(0) === '=') ? '' : v);
+          }
+          out.push(line);
+        }
+        return out;
+      },
+      getFormulas() {
+        const out = [];
+        for (let i = 0; i < numRows; i++) {
+          const r = sheet.data[row - 1 + i] || [];
+          const line = [];
+          for (let j = 0; j < numCols; j++) {
+            const v = r[col - 1 + j];
+            line.push(typeof v === 'string' && v.charAt(0) === '=' ? v : '');
+          }
           out.push(line);
         }
         return out;
@@ -2346,6 +2364,62 @@ const secPublic = call('/public/catalog', {});
 check('публичный каталог отдаёт раздел',
   secPublic.ok === true && secPublic.data.models.every(m => 'section' in m),
   secPublic.ok ? secPublic.data.models[0] : secPublic);
+
+console.log('\n== фото модели: колонка photo и превью ==');
+const phSheet = getSheet(SHEETS.MODELS);
+const phRow = readRows(phSheet).filter(r => pad2(Number(r.model_code)) === secCode && r.category === 'CAM')[0];
+const phCol = () => sheetHeaders(phSheet).indexOf('photo') + 1;
+check('photo есть в схеме Models', SCHEMA.Models.indexOf('photo') !== -1);
+phSheet.getRange(phRow.__row, phCol(), 1, 1).setValues([['  https://example.com/a.jpg  ']]);
+const phModel = () => call('/public/catalog', {}).data.models
+  .filter(m => m.category === 'CAM' && m.model_code === secCode)[0];
+check('публичный каталог отдаёт photo обрезанным', phModel() && phModel().photo === 'https://example.com/a.jpg', phModel());
+check('у модели без ссылки photo пустой', call('/public/catalog', {}).data.models.every(m => typeof m.photo === 'string'));
+check('/models/list отдаёт photo',
+  call('/models/list', { category: 'CAM' }, secToken).data.filter(m => m.model_code === secCode)[0].photo === 'https://example.com/a.jpg');
+['http://example.com/a.jpg', 'ftp://x/a.jpg', 'javascript:alert(1)', 'просто текст', 'https://a b/c.jpg'].forEach((bad) => {
+  phSheet.getRange(phRow.__row, phCol(), 1, 1).setValues([[bad]]);
+  check('не-https отброшено: ' + bad, phModel().photo === '', phModel());
+});
+phSheet.getRange(phRow.__row, phCol(), 1, 1).setValues([['https://example.com/a.jpg']]);
+
+// Старый лист: колонки photo нет вовсе.
+{
+  const ph = phCol() - 1;
+  phSheet.data.forEach(r => r.splice(ph, 1));
+  check('старый лист без photo читается', phModel().photo === '', phModel());
+  const msg = setupPhotoPreview();
+  check('photo создана на старом листе', phCol() > 0 && sheetHeaders(phSheet).indexOf('photo_preview') > 0, sheetHeaders(phSheet));
+  check('отчёт по-русски', /Превью фото/.test(msg), msg);
+  phSheet.getRange(phRow.__row, phCol(), 1, 1).setValues([['https://example.com/a.jpg']]);
+}
+const phSnap = () => JSON.stringify(phSheet.data.map(r => r.filter((c, i) => sheetHeaders(phSheet)[i] !== 'photo_preview')));
+setupPhotoPreview();
+const phPrevCol = sheetHeaders(phSheet).indexOf('photo_preview') + 1;
+const phFormula = () => phSheet.getRange(phRow.__row, phPrevCol, 1, 1).getFormulas()[0][0];
+const phLetter = columnLetter(phCol());
+check('формула превью в строке модели',
+  phFormula() === '=IF(' + phLetter + phRow.__row + '="","",IMAGE(' + phLetter + phRow.__row + ',1))', phFormula());
+const phBefore = JSON.stringify(phSheet.data), phOther = phSnap();
+const phMsg = setupPhotoPreview();
+check('setupPhotoPreview идемпотентна', JSON.stringify(phSheet.data) === phBefore && /формул записано 0/.test(phMsg), phMsg);
+check('остальные колонки не тронуты', phSnap() === phOther);
+check('photo_preview не попадает в ответы',
+  call('/models/list', { category: 'CAM' }, secToken).data.every(m => !('photo_preview' in m)) &&
+  call('/public/catalog', {}).data.models.every(m => !('photo_preview' in m)));
+// Записи в Models с лишними колонками работают, формула переживает updateRow.
+check('разметка при колонках превью', call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'CINE' }] }, secToken).data.changed === 1);
+check('цена при колонках превью', call('/models/price', { category: 'CAM', model_code: secCode, price: 1234 }, secToken).ok === true);
+check('формула превью пережила updateRow', phFormula().indexOf('IMAGE(') > 0, phFormula());
+check('photo пережила updateRow', phModel().photo === 'https://example.com/a.jpg', phModel());
+const phNew = call('/item/create', { category: 'CAM', model_name: 'Фото Новая Модель' }, secToken);
+check('новая модель создаётся при колонках превью', phNew.ok === true, phNew);
+check('у новой строки превью пусто до повторного запуска',
+  phSheet.getRange(phSheet.getLastRow(), phPrevCol, 1, 1).getFormulas()[0][0] === '');
+setupPhotoPreview();
+check('повторный запуск добавляет превью новой строке',
+  phSheet.getRange(phSheet.getLastRow(), phPrevCol, 1, 1).getFormulas()[0][0].indexOf('IMAGE(') > 0);
+phSheet.getRange(phRow.__row, phCol(), 1, 1).setValues([['']]);
 
 console.log('\n== заявка с сайта ==');
 const siteAdmin = call('/auth/login', { login: 'Matvey', pin: '432143' }).data.token;

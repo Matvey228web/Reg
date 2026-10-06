@@ -110,7 +110,12 @@ var SCHEMA = {
   // больше её нет — ни в исходной таблице колледжа, ни в заявках с сайта.
   // Пусто — акт ставит прочерк, а не ноль: ноль в таком документе означает
   // «вещь ничего не стоит», а это неправда.
-  Models: ["category", "model_code", "model_name", "created_at", "section", "price"],
+  // photo: ссылка https на снимок модели (пакшот производителя или
+  // публичный Google Drive). Решение владельца, 6 октября 2026: фото ведут
+  // руками в таблице. `node site/build-catalog.js` скачивает его и приводит
+  // к 800x800. Колонка photo_preview с =IMAGE() в SCHEMA не входит: это
+  // формула-превью, её ставит setupPhotoPreview(), а данными она не является.
+  Models: ["category", "model_code", "model_name", "created_at", "section", "price", "photo"],
   // Синонимы колонок исходной таблицы, через запятую. Проверяются по порядку,
   // первый совпавший выигрывает. Особые записи: colN — колонка по счёту
   // (col0 — первая), ВКЛАДКА:colN — то же, но только на этой вкладке.
@@ -1282,19 +1287,18 @@ function cleanupReport(plan, title) {
 // пять минут.
 
 var CATALOG_FIX = {
-  categories: [
-    // Поштучно, как грип в живой таблице: штативы переезжают оттуда, а перенос
-    // между поштучной и «количеством» запрещён (moveModel). У гимбалов и
-    // слайдеров тоже свои номера и QR.
-    { action: "create", code: "STB", label: "Стабилизация", by_qty: false },
+  // Третий план (6 октября 2026): дубли, замеченные владельцем на витрине, и
+  // названия, которые остались от импорта. Первые два плана применены.
+  // FX-3A — та же камера, что FX3 (владелец вычеркнул её на скриншоте), оба
+  // Samyang 24-70 — один объектив.
+  merges: [
+    { from: "CAM-08", into: "CAM-05" },
+    { from: "LEN-01", into: "LEN-33" },
   ],
-  // Тестовая запись: на складе такой камеры нет.
-  delete_models: ["CAM-16"],
-  moves: [
-    { from: "OTH-05", to: "MON" },
-    { from: "OTH-06", to: "MON" },
-    { from: "GRP-01", to: "STB" },
-    { from: "GRP-03", to: "STB" },
+  renames: [
+    { key: "AUD-02", to: "Tascam Portacapture X6" },
+    { key: "LGT-15", to: "Godox F200Bi" },
+    { key: "LGT-07", to: "Godox Lantern 65" },
   ],
 };
 
@@ -1757,7 +1761,7 @@ function catalogFixApply(todo) {
   });
 
   var modelsSheet = getSheet(SHEETS.MODELS);
-  ensureColumns(modelsSheet, ["section", "price"]);
+  ensureColumns(modelsSheet, ["section", "price", "photo"]);
   var pick = function (list, field) {
     var map = {};
     list.forEach(function (x) { map[x.key] = x[field]; });
@@ -2634,6 +2638,65 @@ function ensureColumns(sheet, names) {
   return missing.length;
 }
 
+// Ссылка на фото модели из таблицы: только https, остальное — пусто.
+// http, file:, javascript: и случайный текст в ячейке на сайт не уходят:
+// адрес скачивает сборка каталога, и принимать надо только то, что она
+// сможет безопасно взять.
+function cleanPhotoUrl(value) {
+  var s = String(value === undefined || value === null ? "" : value).trim();
+  return /^https:\/\/[^\s]+$/i.test(s) ? s : "";
+}
+
+function columnLetter(n) {
+  var s = "";
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; }
+  return s;
+}
+
+/**
+ * Колонки «photo» (ссылка) и «photo_preview» (=IMAGE) на листе Models.
+ * Запускается из редактора; повторный запуск безопасен. Новым строкам Models
+ * превью не ставится само — после добавления моделей запустить заново.
+ *
+ * photo_preview не данные: readRows её отдаёт, но ни один обработчик её не
+ * читает, а updateRow переписывает формулы их же текстом.
+ */
+function setupPhotoPreview() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  var message;
+  try {
+    var sheet = getSheet(SHEETS.MODELS);
+    var added = ensureColumns(sheet, ["photo", "photo_preview"]);
+    var head = sheetHeaders(sheet);
+    var photoCol = columnLetter(head.indexOf("photo") + 1);
+    var prevIdx = head.indexOf("photo_preview") + 1;
+    var last = sheet.getLastRow();
+    var written = 0;
+    if (last >= 2) {
+      var range = sheet.getRange(2, prevIdx, last - 1, 1);
+      var current = range.getFormulas ? range.getFormulas() : range.getValues();
+      var formulas = [];
+      for (var i = 0; i < last - 1; i++) {
+        var cell = photoCol + (i + 2);
+        // Запятые, а не точки с запятой: setValues/setFormula разбирают формулу
+        // в американской записи при любой локали таблицы.
+        var f = '=IF(' + cell + '="","",IMAGE(' + cell + ',1))';
+        if (current[i][0] !== f) written += 1;
+        formulas.push([f]);
+      }
+      if (written) range.setValues(formulas);
+    }
+    message = "Превью фото: колонок добавлено " + added + ", формул записано " + written +
+      " (строк в Models: " + Math.max(last - 1, 0) + "). Новые модели — запустить функцию заново.";
+  } finally {
+    lock.releaseLock();
+  }
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
 // Разметка моделей по разделам витрины, пачкой.
 //
 // Пачкой, а не по одной: 85 моделей по запросу — это 85 раз по 5–8 секунд,
@@ -2657,7 +2720,7 @@ function handleModelsSections(payload, token) {
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
     var sheet = getSheet(SHEETS.MODELS);
-    ensureColumns(sheet, ["section"]);
+    ensureColumns(sheet, ["section", "photo"]);
     var rows = readRows(sheet);
     var byKey = {};
     rows.forEach(function (r) {
@@ -2696,7 +2759,7 @@ function handleModelsPrice(payload, token) {
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
     var sheet = getSheet(SHEETS.MODELS);
-    ensureColumns(sheet, ["price"]);
+    ensureColumns(sheet, ["price", "photo"]);
     var row = null;
     readRows(sheet).forEach(function (r) {
       if (r.category === category && pad2(Number(r.model_code)) === code) row = r;
@@ -2724,7 +2787,8 @@ function handleModelsList(payload, token) {
              // Цена для акта. Пустая строка, а не ноль: «не задана» и «ничего
              // не стоит» — разные вещи, и в акте они выглядят по-разному.
              price: r.price === "" || r.price === null || r.price === undefined
-               ? "" : Number(r.price) };
+               ? "" : Number(r.price),
+             photo: cleanPhotoUrl(r.photo) };
   }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
 }
 
@@ -5161,11 +5225,12 @@ function handlePublicCatalog(payload) {
 
   // Название берём из справочника моделей: в Equipment оно повторяется у каждой
   // единицы и могло разъехаться, а Models — единственное место, где оно одно.
-  var names = {}, sections = {};
+  var names = {}, sections = {}, photos = {};
   readRows(getSheet(SHEETS.MODELS)).forEach(function (m) {
     var key = m.category + "|" + pad2(Number(m.model_code));
     names[key] = m.model_name;
     sections[key] = normalizeSection(m.section);
+    photos[key] = cleanPhotoUrl(m.photo);
   });
   var labels = {};
   categories().forEach(function (c) { labels[c.code] = c.label; });
@@ -5181,6 +5246,7 @@ function handlePublicCatalog(payload) {
       model_code: parts[1],
       model_name: names[key] || a.model_name || "",
       section: sections[key] || "",
+      photo: photos[key] || "",
       total: a.total,
       free: a.free,
     });
@@ -5769,8 +5835,13 @@ function updateRow(sheet, rowIndex, patchObject) {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var range = sheet.getRange(rowIndex, 1, 1, headers.length);
   var values = range.getValues()[0];
+  // getValues отдаёт результат формулы, а не её текст: запись обратно
+  // затёрла бы формулу значением (так пропало бы превью photo_preview).
+  // Нетронутые формульные ячейки пишем их же текстом.
+  var formulas = range.getFormulas ? range.getFormulas()[0] : [];
   for (var i = 0; i < headers.length; i++) {
     if (patchObject[headers[i]] !== undefined) values[i] = patchObject[headers[i]];
+    else if (typeof formulas[i] === "string" && formulas[i].charAt(0) === "=") values[i] = formulas[i];
   }
   range.setValues([values]);
 }
@@ -6106,6 +6177,8 @@ var MODEL_ALIASES = [
   { name: "Zenit 60mm F2.8", aliases: ["Zenit 60mm"] },
   { name: "Zenit 85mm F2.2", aliases: ["Zenit Selena 85mm F2.2"] },
   { name: "Zenit 85mm F1.5", aliases: ["Zenit Helios-40-2-C 85mm F1.2"] },
+  { name: "Sony FX3", aliases: ["Sony ILME FX-3A", "Sony ILME FX-3"] },
+  { name: "Samyang AF 24-70mm F/2.8", aliases: ["Samyang 24-70 2.8", "Samyang 24-70mm"] },
 ];
 
 var MODEL_ALIAS_INDEX = null;

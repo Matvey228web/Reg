@@ -1031,7 +1031,7 @@ const MockAPI = {
         MockStore.requireToken(token);
         let list = MockStore.models;
         if (body && body.category && body.category !== "all") list = list.filter((m) => m.category === body.category);
-        return list.map((m) => ({ section: "", ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
+        return list.map((m) => ({ section: "", photo: "", ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
       }
 
       // Разметка моделей по разделам витрины. Настоящая версия —

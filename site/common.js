@@ -100,7 +100,10 @@ var Site = (function () {
   function photo(m) {
     var have = (catalog && catalog.photos) || [];
     var k = key(m);
-    return have.indexOf(k) === -1 ? "" : "photos/" + k + ".jpg";
+    if (have.indexOf(k) === -1) return "";
+    // /photos/* кэшируется на 7 дней под одним именем: без ?v= заменённый
+    // в таблице снимок неделю показывался бы старым.
+    return "photos/" + k + ".jpg" + (m.photo_v ? "?v=" + m.photo_v : "");
   }
 
   // --- Значки ---
