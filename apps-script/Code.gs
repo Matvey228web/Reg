@@ -841,8 +841,13 @@ var BACKUP_FAILED = "Копия таблицы не сделана: ";
 // отменять подрезку журнала, и наоборот. Наружу не бросаем — иначе Google
 // шлёт владельцу письмо об ошибке триггера, а разбирать его некому.
 function dailyMaintenance() {
-  try { dailyBackup(); } catch (e) {
+  var backup = "";
+  try { backup = dailyBackup(); } catch (e) {
     logEvent("backup", "dailyMaintenance", "exception", e && e.message ? e.message : String(e));
+  }
+  // Без сегодняшней копии архив не трогаем: cleanupRun сделает её сам.
+  try { trimArchive(backup); } catch (e) {
+    logEvent("maintenance", "trimArchive", "exception", e && e.message ? e.message : String(e));
   }
   try { trimLogs(); } catch (e) {
     logEvent("maintenance", "trimLogs", "exception", e && e.message ? e.message : String(e));
@@ -934,8 +939,8 @@ function setupTriggers() {
 
   var message = "Триггеры: снято старых " + removed + ", поставлен ежедневный dailyMaintenance " +
     "около " + MAINTENANCE_HOUR + ":00 (" + Session.getScriptTimeZone() + "): копия таблицы в папку «" +
-    BACKUP_FOLDER_NAME + "» (хранится " + BACKUP_KEEP + ") и подрезка Logs старше " +
-    LOGS_KEEP_DAYS + " дней.";
+    BACKUP_FOLDER_NAME + "» (хранится " + BACKUP_KEEP + "), подрезка Logs старше " +
+    LOGS_KEEP_DAYS + " дней и уборка архива заказов старше archive_keep_days.";
   Logger.log(message);
   try { SpreadsheetApp.getActiveSpreadsheet().toast(message, "Mifs Rent", 15); } catch (ignored) {}
   return message;
@@ -989,10 +994,17 @@ function cleanupTestDataPreview() {
  * получилась копия — не удаляется ничего.
  */
 function cleanupTestData() {
-  var backup = dailyBackup();
+  return cleanupRun(function () { return cleanupTestPlan(); }, "cleanupTestData");
+}
+
+// Общий ход уборки: копия, план заново под замком, удаление по листам, отчёт.
+// backup — уже сделанная сегодня копия (ночное обслуживание делает её первым
+// шагом, вторая подряд ни к чему).
+function cleanupRun(makePlan, where, backup) {
+  backup = backup || dailyBackup();
   if (String(backup).indexOf(BACKUP_FAILED) === 0) {
     var refuse = "Уборка отменена, ничего не удалено: " + backup;
-    logEvent("cleanup", "cleanupTestData", "backup_failed", refuse);
+    logEvent("cleanup", where, "backup_failed", refuse);
     Logger.log(refuse);
     try { SpreadsheetApp.getActiveSpreadsheet().toast(refuse, "Mifs Rent", 15); } catch (ignored) {}
     return refuse;
@@ -1003,7 +1015,7 @@ function cleanupTestData() {
   var plan, removed;
   try {
     // План заново под замком: между просмотром и запуском могла пройти выдача.
-    plan = cleanupTestPlan();
+    plan = makePlan();
     var ids = function (list, col) {
       var set = {};
       list.forEach(function (r) { set[String(r[col])] = true; });
@@ -1028,7 +1040,7 @@ function cleanupTestData() {
     lock.releaseLock();
   }
 
-  logEvent("cleanup", "cleanupTestData", "done", cleanupHeadline(plan), {
+  logEvent("cleanup", where, "done", cleanupHeadline(plan), {
     removed: removed,
     refused: plan.refused.map(function (x) { return x.order_id; }),
     acts: plan.acts,
@@ -1037,6 +1049,52 @@ function cleanupTestData() {
   Logger.log(message);
   try { SpreadsheetApp.getActiveSpreadsheet().toast(cleanupHeadline(plan), "Mifs Rent", 15); } catch (ignored) {}
   return message;
+}
+
+// --- Уборка архива заказов ---
+//
+// Решение владельца (6 октября 2026): пока все заказы тестовые, архив не
+// копится — заказ удаляется через archive_keep_days дней после переноса в
+// архив (ночью, в dailyMaintenance). 0 — хранить вечно, как было задумано
+// для настоящих заказов (см. handleOrderArchive). Удаление — тем же ходом,
+// что уборка тестовых строк: копия таблицы, заказ со всеми позициями, выдачами
+// и дефектами, отказ по технике на руках. Ученики и техника не трогаются.
+
+function archivedPlan(days) {
+  var edge = Date.now() - days * 86400000;
+  return cleanupTestPlan(function (o) {
+    if (!o.archived_at) return false;
+    var at = new Date(o.archived_at).getTime();
+    return !isNaN(at) && at <= edge;
+  });
+}
+
+/**
+ * Показывает, что удалит cleanupArchive(), — весь архив, без срока.
+ */
+function cleanupArchivePreview() {
+  var plan = archivedPlan(0);
+  var message = cleanupReport(plan, "Просмотр: будет удалено");
+  Logger.log(message);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(cleanupHeadline(plan), "Mifs Rent", 15); } catch (ignored) {}
+  return message;
+}
+
+/**
+ * Удаляет все заказы из архива. Запускать руками из редактора.
+ */
+function cleanupArchive() {
+  return cleanupRun(function () { return archivedPlan(0); }, "cleanupArchive");
+}
+
+// Ночная часть: только то, что пролежало в архиве дольше срока. Пустой план —
+// без копии, замка и строки в Logs, иначе журнал каждую ночь писал бы «ноль».
+function trimArchive(backup) {
+  var days = Number(getSettings().archive_keep_days) || 0;
+  if (days <= 0) return "";
+  var plan = archivedPlan(days);
+  if (!plan.orders.length && !plan.refused.length) return "";
+  return cleanupRun(function () { return archivedPlan(days); }, "trimArchive", backup);
 }
 
 // Имя помечено как тестовое: первое слово «тест»/«test» (за ним не буква —
@@ -1054,7 +1112,9 @@ function isTestCode(value) {
 }
 
 // Что удалить и что оставить. Только читает таблицу.
-function cleanupTestPlan() {
+// pickOrder — свой отбор заказов (уборка архива); тогда ученики и сотрудники
+// не трогаются: их уборка — только по тестовым именам.
+function cleanupTestPlan(pickOrder) {
   var orders = readRows(getSheet(SHEETS.ORDERS));
   var items = readRows(getSheet(SHEETS.ORDER_ITEMS));
   var txs = readRows(getSheet(SHEETS.TRANSACTIONS));
@@ -1063,11 +1123,12 @@ function cleanupTestPlan() {
   var staff = readRows(getSheet(SHEETS.STAFF));
 
   var plan = { orders: [], items: [], transactions: [], defects: [], students: [], staff: [],
-               refused: [], keptStudents: [], keptStaff: [], acts: [] };
+               refused: [], keptStudents: [], keptStaff: [], acts: [],
+               what: pickOrder ? "Заказы из архива" : "Тестовые строки" };
 
   var deletedOrder = {};
   orders.forEach(function (o) {
-    var test = isTestName(o.student_name) || isTestName(o.guardian_name) ||
+    var test = pickOrder ? pickOrder(o) : isTestName(o.student_name) || isTestName(o.guardian_name) ||
       isTestCode(o.order_no) || isTestCode(o.request_code);
     if (!test) return;
     var id = String(o.order_id);
@@ -1098,6 +1159,7 @@ function cleanupTestPlan() {
     if (o.act_url) plan.acts.push(String(o.act_url));
   });
   plan.items = items.filter(function (i) { return !!deletedOrder[String(i.order_id)]; });
+  if (pickOrder) return plan;
 
   students.forEach(function (s) {
     if (!isTestName(s.full_name)) return;
@@ -1137,7 +1199,7 @@ function cleanupTestPlan() {
 }
 
 function cleanupHeadline(plan) {
-  return "Тестовые строки: заказов " + plan.orders.length + ", позиций " + plan.items.length +
+  return plan.what + ": заказов " + plan.orders.length + ", позиций " + plan.items.length +
     ", выдач " + plan.transactions.length + ", дефектов " + plan.defects.length +
     ", учеников " + plan.students.length + ", сотрудников " + plan.staff.length +
     (plan.refused.length ? "; не тронуто заказов: " + plan.refused.length : "") + ".";
@@ -5213,6 +5275,14 @@ var SETTINGS_SPEC = {
   // Сколько заявок с сайта принимаем в час. Опознать посетителя нечем: Apps
   // Script не сообщает его адрес, поэтому предел общий на всех. Мусор он не
   // остановит, но не даст завалить таблицу за одну ночь.
+  // Сколько дней заказ лежит в архиве до удаления (trimArchive). 2 — пока все
+  // заказы тестовые (решение владельца, 6 октября 2026); 0 — не удалять.
+  archive_keep_days: {
+    def: 2,
+    text: false,
+    check: function (v) { return v >= 0 && v <= 3650; },
+    hint: "сколько дней заказ лежит в архиве до удаления; 0 — хранить всегда",
+  },
   public_orders_per_hour: {
     def: 20,
     text: false,
@@ -6222,9 +6292,9 @@ function handleOrderIssue(payload, token) {
   return { order_id: Number(orderId), line_no: lineNo, issued: issued, left: rest };
 }
 
-// Архив заказа. Не удаление: заказ — запись о договорённости, и стирать её
-// нельзя даже когда она явно лишняя (проверка связи, дубль, опечатка).
-// Мало ли что: через полгода понадобится показать, что именно было.
+// Архив заказа. Сам по себе не удаление: заказ — запись о договорённости.
+// Но архив чистится через archive_keep_days дней (trimArchive) — пока все
+// заказы тестовые, так решил владелец; 0 в настройке возвращает «хранить всегда».
 //
 // Возврат из архива — тем же эндпоинтом с back: true.
 function handleOrderArchive(payload, token) {

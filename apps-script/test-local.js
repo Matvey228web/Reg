@@ -3796,6 +3796,47 @@ check('повторный запуск ничего не удаляет',
   again.transactions.length === 0 && again.students.length === 0 && again.staff.length === 0, r);
 updateRow(sh('Staff'), findRowByValue(sh('Staff'), 'staff_id', owner.staff_id).__row, { full_name: ownerName });
 
+console.log('\n== уборка архива заказов ==');
+const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
+appendRow(sh('Orders'), { order_id: 9501, order_no: '9501', student_id: 9002, student_name: 'Архив Старый',
+                          created_at: '2026-09-01', archived_at: ago(3) });
+appendRow(sh('Orders'), { order_id: 9502, order_no: '9502', student_id: 9002, student_name: 'Архив Свежий',
+                          created_at: '2026-09-01', archived_at: ago(1) });
+appendRow(sh('Orders'), { order_id: 9503, order_no: '9503', student_id: 9002, student_name: 'Не в архиве',
+                          created_at: '2026-09-01' });
+appendRow(sh('Orders'), { order_id: 9504, order_no: '9504', student_id: 9002, student_name: 'Архив На руках',
+                          created_at: '2026-09-01', archived_at: ago(5) });
+appendRow(sh('OrderItems'), { order_id: 9501, line_no: 1, raw_name: 'Позиция 9501', qty: 1 });
+appendRow(sh('Transactions'), { transaction_id: 9601, item_id: '010101', order_id: 9501, status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9602, item_id: '010102', order_id: 9504, status: 'Open', checked_out_at: '2026-09-03' });
+
+check('срок архива по умолчанию — 2 дня', getSettings().archive_keep_days === 2, getSettings().archive_keep_days);
+const archPreview = cleanupArchivePreview();
+check('просмотр архива: весь архив, без неархивных, заказ на руках отказан',
+  /9501/.test(archPreview) && /9502/.test(archPreview) && !/9503/.test(archPreview) &&
+  archivedPlan(0).refused.some(x => x.order_id === '9504'), archPreview);
+
+const archStudents = rowsOf('Students').length;
+r = trimArchive();
+check('ночная уборка: удалён заказ старше 2 дней с позициями и выдачей',
+  !hasRow('Orders', 'order_id', 9501) && !hasRow('OrderItems', 'order_id', 9501) &&
+  !hasRow('Transactions', 'transaction_id', 9601), r);
+check('ночная уборка: свежий архив, неархивный и заказ на руках на месте',
+  hasRow('Orders', 'order_id', 9502) && hasRow('Orders', 'order_id', 9503) && hasRow('Orders', 'order_id', 9504));
+check('уборка архива не трогает учеников', rowsOf('Students').length === archStudents);
+
+call('/settings/set', { settings: { archive_keep_days: 0 } }, logToken);
+logBefore = logRows().length;
+check('срок 0 — ночью архив не трогается', trimArchive() === '' && hasRow('Orders', 'order_id', 9502) &&
+  logRows().length === logBefore);
+check('срок вне пределов отклонён',
+  call('/settings/set', { settings: { archive_keep_days: -1 } }, logToken).ok === false);
+
+r = cleanupArchive();
+check('ручная уборка удаляет весь архив, кроме заказа на руках',
+  !hasRow('Orders', 'order_id', 9502) && hasRow('Orders', 'order_id', 9504) && hasRow('Orders', 'order_id', 9503), r);
+call('/settings/set', { settings: { archive_keep_days: 2 } }, logToken);
+
 console.log('\n== объявления склада ==');
 // Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.
 const annStaff = secStaffLogin.ok ? secStaffLogin.data.token : 'нет-токена';
