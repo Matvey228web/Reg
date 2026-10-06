@@ -213,13 +213,19 @@ async function build(live, opts) {
     return out;
   });
 
+  // Весь справочник Categories, в том числе категории без вещей (владелец,
+  // 6 октября 2026). Бэкенд без поля categories (старая выкладка) — по моделям.
   const categories = [];
   const seen = new Set();
-  models.forEach((m) => {
-    if (seen.has(m.category)) return;
-    seen.add(m.category);
-    categories.push({ code: m.category, label: m.category_label });
-  });
+  const add = (code, label) => {
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    categories.push({ code, label: label || code });
+  };
+  if (Array.isArray(live.categories) && live.categories.length) {
+    live.categories.forEach((c) => add(c.code, c.label));
+  }
+  models.forEach((m) => add(m.category, m.category_label));
   categories.sort((a, b) => a.label.localeCompare(b.label, "ru"));
 
   const photosDir = opts.photosDir;

@@ -302,7 +302,7 @@ var Site = (function () {
   // ссылка (или файла нет) — photo_live. Пустой или битый ответ игнорируем.
   var SEP = " · ";
 
-  function merge(live) {
+  function merge(live, liveCats) {
     var snap = catalog.byKey;
     var models = live.map(function (m) {
       var name = String(m.model_name || "").replace(/\s+/g, " ").trim();
@@ -328,29 +328,33 @@ var Site = (function () {
       }
       return out;
     });
+    // Весь справочник категорий, и пустые тоже (владелец, 6 октября 2026);
+    // бэкенд без поля categories — по моделям, как раньше. Копия правила из build-catalog.js.
     var cats = [], seen = {};
-    models.forEach(function (m) {
-      if (seen[m.category]) return;
-      seen[m.category] = true;
-      cats.push({ code: m.category, label: m.category_label });
-    });
+    var addCat = function (code, label) {
+      if (!code || seen[code]) return;
+      seen[code] = true;
+      cats.push({ code: code, label: label || code });
+    };
+    (Array.isArray(liveCats) ? liveCats : []).forEach(function (c) { addCat(c.code, c.label); });
+    models.forEach(function (m) { addCat(m.category, m.category_label); });
     cats.sort(function (a, b) { return a.label.localeCompare(b.label, "ru"); });
     return { models: models, categories: cats };
   }
 
-  function sign(models) {
+  function sign(models, cats) {
     return models.map(function (m) {
       return [key(m), m.model_name, m.category_label, m.section, m.photo_live || "", m.photo_v || ""].join("|");
-    }).sort().join("\n");
+    }).sort().join("\n") + "\n#" + (cats || []).map(function (c) { return c.code + "|" + c.label; }).join(",");
   }
 
   function goLive() {
     liveBase().then(function (data) {
       var list = data.models;
       if (!Array.isArray(list) || !list.length) return;
-      var next = merge(list);
+      var next = merge(list, data.categories);
       pruneCart(next.models);
-      if (sign(next.models) === sign(catalog.models)) return;
+      if (sign(next.models, next.categories) === sign(catalog.models, catalog.categories)) return;
       // Тот же объект: страницы держат на него ссылки.
       catalog.models = next.models;
       catalog.categories = next.categories;

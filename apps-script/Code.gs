@@ -531,8 +531,10 @@ function importInventory() {
     var modelSheet = getSheet(SHEETS.MODELS);
     var modelIndex = {};        // категория|нормализованное имя -> код модели
     var modelMax = {};          // категория -> максимальный занятый код
+    var modelTitle = {};        // категория|код -> название модели (6 октября 2026: имя вещи — имя её модели)
     var newModels = [];
     readRows(modelSheet).forEach(function (r) {
+      modelTitle[r.category + "|" + pad2(Number(r.model_code))] = String(r.model_name || "");
       modelIndex[r.category + "|" + normalizeModelName(r.model_name)] = Number(r.model_code);
       modelMax[r.category] = Math.max(modelMax[r.category] || 0, Number(r.model_code));
     });
@@ -615,7 +617,8 @@ function importInventory() {
         ].filter(function (x) { return x; }).join(" / ");
 
         var record = {
-          item_id: itemId, name: name, category: category, model_code: pad2(modelCode),
+          item_id: itemId, name: modelTitle[category + "|" + pad2(modelCode)] || name,
+          category: category, model_code: pad2(modelCode),
           serial_number: serial, inventory_number: inventory, status: st.status,
           condition_notes: notes, created_at: now, current_transaction_id: "",
         };
@@ -1287,19 +1290,10 @@ function cleanupReport(plan, title) {
 // пять минут.
 
 var CATALOG_FIX = {
-  // Третий план (6 октября 2026): дубли, замеченные владельцем на витрине, и
-  // названия, которые остались от импорта. Первые два плана применены.
-  // FX-3A — та же камера, что FX3 (владелец вычеркнул её на скриншоте), оба
-  // Samyang 24-70 — один объектив.
-  merges: [
-    { from: "CAM-08", into: "CAM-05" },
-    { from: "LEN-01", into: "LEN-33" },
-  ],
-  renames: [
-    { key: "AUD-02", to: "Tascam Portacapture X6" },
-    { key: "LGT-15", to: "Godox F200Bi" },
-    { key: "LGT-07", to: "Godox Lantern 65" },
-  ],
+  // Четвёртый план (6 октября 2026): в каталоге приложения вещь называлась
+  // по Equipment.name («Sony Burano 8k»), на сайте — по модели («Sony Burano»).
+  // Решение владельца: имя вещи — имя её модели. Первые три плана применены.
+  sync_unit_names: true,
 };
 
 /**
@@ -1375,7 +1369,7 @@ function catalogFixPlanKey(key) {
 // Что сделать и что не выйдет. Только читает таблицу.
 function catalogFixTodo(plan) {
   var todo = { categories: [], deletes: [], merges: [], moves: [], renames: [], prices: [], sections: [],
-               missing: [], errors: [], notes: [], check: [], keys: {} };
+               syncs: [], syncModels: [], sync: !!plan.sync_unit_names, missing: [], errors: [], notes: [], check: [], keys: {} };
   var cats = categories();
   var catBy = {};
   cats.forEach(function (c) { catBy[c.code] = c; });
@@ -1654,6 +1648,25 @@ function catalogFixTodo(plan) {
     }
   });
 
+  // Имя вещи — имя её модели (владелец, 6 октября 2026). Смотрим на таблицу как
+  // она есть сейчас, до слияний и переименований этого же плана: их apply
+  // делает раньше, а sync в apply читает Models заново.
+  if (plan.sync_unit_names) {
+    var perModel = {};
+    units.forEach(function (u) {
+      if (doomed[String(u.item_id)]) return;
+      var key = catalogFixKey(u.category, u.model_code);
+      var m = u.model_code === "" ? null : modelBy[key];
+      if (!m) { todo.missing.push(String(u.item_id) + " (модели " + key + " нет — имя вещи не тронуто)"); return; }
+      var name = String(m.model_name || "");
+      if (!name || String(u.name || "") === name) return;
+      var g = perModel[key] || (perModel[key] = { key: key, to: name, units: 0 });
+      g.units += 1;
+      todo.syncs.push({ item_id: String(u.item_id), was: String(u.name || ""), to: name });
+    });
+    todo.syncModels = Object.keys(perModel).map(function (k) { return perModel[k]; });
+  }
+
   // Цена и раздел — те же проверки, что в /models/price и /models/sections.
   var priceTo = {};
   (plan.prices || []).forEach(function (p) {
@@ -1702,6 +1715,7 @@ function catalogFixTodo(plan) {
     renamed_units: sum(todo.renames, "units"),
     prices: todo.prices.length,
     sections: todo.sections.length,
+    synced_units: todo.syncs.length,
   };
   return todo;
 }
@@ -1709,7 +1723,8 @@ function catalogFixTodo(plan) {
 // Запись по плану, без замка и без проверок — их сделал catalogFixTodo.
 function catalogFixApply(todo) {
   var counts = { categories: 0, deleted_models: 0, deleted_units: 0, deleted_journal: 0, merges: 0,
-                 moved_units: 0, moves: 0, renamed_models: 0, renamed_units: 0, prices: 0, sections: 0 };
+                 moved_units: 0, moves: 0, renamed_models: 0, renamed_units: 0, prices: 0, sections: 0,
+                 synced_units: 0 };
   var items = {};
   var keyOf = function (r) { return catalogFixKey(r.category, r.model_code); };
 
@@ -1771,6 +1786,14 @@ function catalogFixApply(todo) {
   counts.renamed_units = catalogFixColumn(getSheet(SHEETS.EQUIPMENT), "name", pick(todo.renames, "to"));
   counts.prices = catalogFixColumn(modelsSheet, "price", pick(todo.prices, "price"));
   counts.sections = catalogFixColumn(modelsSheet, "section", pick(todo.sections, "section"));
+  if (todo.sync) {
+    // Models читаем заново: слияния и переименования плана уже записаны.
+    var titleOf = {};
+    readRows(modelsSheet).forEach(function (m) { titleOf[keyOf(m)] = String(m.model_name || ""); });
+    counts.synced_units = catalogFixColumn(getSheet(SHEETS.EQUIPMENT), "name", function (r) {
+      return r.model_code === "" || !titleOf[keyOf(r)] ? undefined : titleOf[keyOf(r)];
+    });
+  }
   return { counts: counts, items: items };
 }
 
@@ -1801,6 +1824,7 @@ function catalogFixHeadline(todo, counts) {
     " (вещей " + counts.moved_units + ")" +
     ", переименовано моделей " + counts.renamed_models + " (вещей " + counts.renamed_units + ")" +
     ", цен " + counts.prices + ", разделов " + counts.sections +
+    (todo.sync ? ", имён вещей приведено к имени модели " + counts.synced_units : "") +
     (todo.missing.length ? "; нет в таблице: " + todo.missing.length : "") +
     (todo.check.length ? "; проверить на складе: " + todo.check.length : "") +
     (todo.errors.length ? "; ОТКАЗОВ: " + todo.errors.length : "") + ".";
@@ -1849,6 +1873,12 @@ function catalogFixReport(todo, counts, title) {
   });
   section("Переименовать", todo.renames, function (r) {
     return r.key + ": «" + r.was + "» → «" + r.to + "», вещей " + r.units;
+  });
+  section("Имена вещей — по моделям", todo.syncModels, function (g) {
+    return g.key + " «" + g.to + "»: вещей " + g.units;
+  });
+  section("Имена вещей — примеры", todo.syncs, function (s) {
+    return s.item_id + ": " + s.was + " → " + s.to;
   });
   section("Цены", todo.prices, function (p) {
     return p.key + ": " + (p.was === "" ? "—" : p.was) + " → " + (p.price === "" ? "—" : p.price);
@@ -2472,7 +2502,7 @@ function handleItemUpdate(payload, token) {
     var modelRow = null;
     if (allModel && (Object.prototype.hasOwnProperty.call(next, "name") || to)) {
       readRows(modelsSheet).forEach(function (r) {
-        if (r.category === from && pad2(Number(r.model_code)) === code) modelRow = r;
+        if (code !== "" && isModelRow(r, from, code)) modelRow = r;
       });
       if (!modelRow) {
         throw apiError(409, "У вещи нет строки в справочнике моделей — править всю модель " +
@@ -2591,12 +2621,19 @@ function handleItemUpdate(payload, token) {
 // Запись названия модели: строка Models и все вещи модели. Общий путь для
 // «Применить ко всем вещам» (handleItemUpdate) и /models/rename. Вызывать под
 // замком; rows — уже прочитанный Equipment.
+// Та же нормализация, что у catalogFixKey: «cam » и «CAM», число 1 и «01» — одна
+// модель. Строгое сравнение пропускало вещи с пробелом или регистром в
+// категории, и их название после переименования модели оставалось старым.
+function isModelRow(r, category, code) {
+  return r.model_code !== "" && catalogFixKey(r.category, r.model_code) === catalogFixKey(category, code);
+}
+
 function writeModelName(modelsSheet, modelRow, equipSheet, rows, category, code, name) {
   var modelRenamed = String(modelRow.model_name || "") !== name;
   if (modelRenamed) updateRow(modelsSheet, modelRow.__row, { model_name: name });
   var units = 0;
   rows.forEach(function (r) {
-    if (r.category !== category || pad2(Number(r.model_code)) !== code) return;
+    if (!isModelRow(r, category, code)) return;
     if (String(r.name || "") === name) return;
     updateRow(equipSheet, r.__row, { name: name });
     units += 1;
@@ -2631,7 +2668,7 @@ function handleModelsRename(payload, token) {
     var models = readRows(modelsSheet);
     var modelRow = null;
     models.forEach(function (r) {
-      if (r.category === category && pad2(Number(r.model_code)) === code) modelRow = r;
+      if (isModelRow(r, category, code)) modelRow = r;
     });
     if (!modelRow) throw apiError(404, "Такой модели нет: " + category + "·" + code);
     var needle = normalizeModelName(canonicalModelName(name));
@@ -5421,11 +5458,15 @@ function handlePublicCatalog(payload) {
     if (x.category_label !== y.category_label) return x.category_label < y.category_label ? -1 : 1;
     return String(x.model_name).localeCompare(String(y.model_name), "ru");
   });
+  // Все категории справочника, и пустые тоже (владелец, 6 октября 2026: в меню
+  // сайта должны быть все). Из models их не вывести — там только то, что есть на складе.
+  var cats = categories().map(function (c) { return { code: c.code, label: c.label }; });
+  cats.sort(function (x, y) { return String(x.label).localeCompare(String(y.label), "ru"); });
   // Принимает ли склад заявки. Сайту это нужно заранее: показывать кнопку,
   // которая заведомо откажет, хуже, чем сразу предложить скопировать текст.
   // Наружу уходит только «да/нет» — ничего лишнего.
   return {
-    from: from, to: to, models: models,
+    from: from, to: to, models: models, categories: cats,
     orders_open: Number(getSettings().public_orders) === 1 ? 1 : 0,
   };
 }

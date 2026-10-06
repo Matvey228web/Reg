@@ -1719,6 +1719,14 @@ check('модели отданы', pub.ok && pub.data.models.length > 0, pub.ok 
 const pubJson = JSON.stringify(pub.data);
 check('в ответе нет инвентарных и заводских номеров',
       !/serial_number|inventory_number|item_id/.test(pubJson), pubJson.substring(0, 200));
+check('в ответе все категории справочника, и пустые тоже, без лишних полей',
+  pub.ok && Array.isArray(pub.data.categories) && pub.data.categories.length === categories().length &&
+  categories().every(c => pub.data.categories.some(x => x.code === c.code && x.label === c.label)) &&
+  pub.data.categories.every(c => Object.keys(c).sort().join() === 'code,label') &&
+  pub.data.categories.some(c => !pub.data.models.some(m => m.category === c.code)),
+  pub.ok && pub.data.categories);
+check('категории отсортированы по названию',
+  pub.ok && pub.data.categories.every((c, i, a) => !i || String(a[i - 1].label).localeCompare(String(c.label), 'ru') <= 0));
 const pubSky = pub.ok && pub.data.models.filter(m => m.model_name === 'Arri SkyPanel S60')[0];
 check('у модели видно всего и свободно',
       !!pubSky && pubSky.total === 2 && pubSky.free === 2, pubSky);
@@ -4170,6 +4178,64 @@ check('повторный запуск ничего не меняет и соо�
   kfAgain.ok === true && Object.keys(kfAgain.counts).every(k => kfAgain.counts[k] === 0) &&
   kfEquip() === kfEquipBefore && kfModels() === kfModelsBefore, kfAgain.counts);
 check('повтор отдаёт ту же карту ключей', JSON.stringify(kfAgain.keys) === JSON.stringify(r.keys), kfAgain.keys);
+
+console.log('-- имена вещей по модели (sync_unit_names) --');
+{
+  const sy = kfModel('CAM', 'КФ Синк', 4);
+  const syRow = (id) => rowsOf('Equipment').filter(u => String(u.item_id) === id)[0];
+  const syPatch = (id, patch) => updateRow(sh('Equipment'), syRow(id).__row, patch);
+  syPatch(sy.ids[0], { name: 'КФ Синк 8k', serial_number: 'SN-SY-0', condition_notes: 'царапина' });
+  // Номер модели числом, категория строчными с пробелом: так вещь могла попасть в таблицу руками.
+  syPatch(sy.ids[1], { name: 'КФ Старое', model_code: Number(sy.code) });
+  syPatch(sy.ids[2], { name: 'КФ Ещё старое', category: ' cam ' });
+  appendRow(sh('Equipment'), { item_id: 'CAM97-99', name: 'КФ Сирота', category: 'CAM', model_code: 97, status: 'Available', qty: 1, qty_out: 0 });
+  appendRow(sh('OrderItems'), { order_id: 9951, line_no: 1, raw_name: 'КФ Синк 8k', model_code: sy.code, category: 'CAM', qty: 1 });
+  const syPlan = { sync_unit_names: true };
+  const syEquip = () => JSON.stringify(dumpSheet('Equipment'));
+  const syModels = () => JSON.stringify(dumpSheet('Models'));
+  const syLines = () => JSON.stringify(dumpSheet('OrderItems'));
+  const syWithout = (col) => JSON.stringify(rowsOf('Equipment').map(u => Object.assign({}, u, { [col]: '' })));
+
+  const before = syEquip(), modelsBefore = syModels(), linesBefore = syLines(), withoutBefore = syWithout('name');
+  global.__driveFail = 'Диск недоступен';
+  r = catalogFixPlan(syPlan);
+  global.__driveFail = null;
+  check('sync: без копии отмена и ничего не записано', r.ok === false && syEquip() === before, r.message);
+
+  const syTodo = catalogFixTodo(syPlan);
+  check('sync: просмотр ничего не меняет и называет вещи с именем не по модели',
+    syEquip() === before && syTodo.errors.length === 0 &&
+    [sy.ids[0], sy.ids[1], sy.ids[2]].every(id => syTodo.syncs.some(s => s.item_id === id)) &&
+    syTodo.syncModels.some(g => g.key === sy.key && g.units === 3), syTodo.syncs);
+  check('sync: вещь без модели названа в отчёте, но не тронута',
+    syTodo.missing.some(m => m.indexOf('CAM97-99') !== -1) && !syTodo.syncs.some(s => s.item_id === 'CAM97-99'), syTodo.missing);
+  check('sync: в отчёте «было → стало»', catalogFixReport(syTodo, syTodo.counts, 'Просмотр').indexOf(sy.ids[0] + ': КФ Синк 8k → КФ Синк') !== -1);
+
+  r = catalogFixPlan(syPlan, 'копия есть');
+  check('sync: запуск прошёл', r.ok === true && r.counts.synced_units >= 3, r.message);
+  check('sync: имена вещей — имя модели, включая число в model_code и « cam » в категории',
+    [sy.ids[0], sy.ids[1], sy.ids[2]].every(id => syRow(id).name === 'КФ Синк'), rowsOf('Equipment').filter(u => /КФ Синк|КФ Старое|КФ Ещё/.test(u.name)).map(u => u.name));
+  check('sync: вещь без модели осталась как была', syRow('CAM97-99').name === 'КФ Сирота');
+  check('sync: другие колонки, Models и OrderItems.raw_name не тронуты',
+    syWithout('name') === withoutBefore && syModels() === modelsBefore && syLines() === linesBefore);
+  check('sync: заводской номер и заметка на месте',
+    syRow(sy.ids[0]).serial_number === 'SN-SY-0' && syRow(sy.ids[0]).condition_notes === 'царапина');
+
+  const afterRun = syEquip();
+  r = catalogFixPlan(syPlan, 'копия есть');
+  check('sync: повторный запуск — нули', r.ok === true && Object.keys(r.counts).every(k => r.counts[k] === 0) && syEquip() === afterRun, r.counts);
+
+  // Переименование модели обязано дойти до вещей с кривой категорией — та же причина, что у sync.
+  const adm = logToken;
+  syPatch(sy.ids[3], { name: 'КФ Старое', category: ' cam ' });
+  const rn = call('/models/rename', { category: 'CAM', model_code: sy.code, model_name: 'КФ Синк Новый' }, adm);
+  check('/models/rename: вещи с « cam » и числом в model_code переименованы тоже',
+    rn.ok && sy.ids.every(id => syRow(id).name === 'КФ Синк Новый'), sy.ids.map(id => syRow(id).name));
+  syPatch(sy.ids[2], { name: 'КФ Старое', category: ' cam ' });
+  const up = call('/item/update', { item_id: sy.ids[0], all_model: true, name: 'КФ Синк Третий' }, adm);
+  check('/item/update all_model: так же',
+    up.ok && sy.ids.every(id => syRow(id).name === 'КФ Синк Третий'), up.ok ? sy.ids.map(id => syRow(id).name) : up);
+}
 
 console.log('-- дубли с повторной вкладки КИНО --');
 // Свои вещи с меткой КИНО; метки КИНО у вещей из импорта выше на время
