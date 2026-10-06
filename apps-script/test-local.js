@@ -4000,17 +4000,40 @@ check('повторный запуск ничего не меняет и соо�
   kfEquip() === kfEquipBefore && kfModels() === kfModelsBefore, kfAgain.counts);
 check('повтор отдаёт ту же карту ключей', JSON.stringify(kfAgain.keys) === JSON.stringify(r.keys), kfAgain.keys);
 
-console.log('-- вещи по вкладке импорта --');
-const kfDup = kfModel('LEN', 'КФ Дубль', 2);
-updateRow(sh('Equipment'), findRowByValue(sh('Equipment'), 'item_id', kfDup.ids[0]).__row,
-  { condition_notes: 'Хранение: шкаф / Импорт: КФ-ДУБЛЬ#12' });
-updateRow(sh('Equipment'), findRowByValue(sh('Equipment'), 'item_id', kfDup.ids[1]).__row,
-  { condition_notes: 'Импорт: КАМЕРЫ#3' });
-r = catalogFixPlan({ delete_units: { import_tab: 'кф-дубль' } }, 'копия есть');
-check('удалена только вещь со своей вкладки импорта, модель осталась',
-  r.ok === true && r.counts.deleted_units === 1 && r.counts.deleted_models === 0 &&
-  !kfEq().some(u => String(u.item_id) === kfDup.ids[0]) && kfEq().some(u => String(u.item_id) === kfDup.ids[1]) &&
-  !!kfModelRow(kfDup.key), r.message);
+console.log('-- дубли с повторной вкладки КИНО --');
+// Свои вещи с меткой КИНО; метки КИНО у вещей из импорта выше на время
+// проверки снимаем — среди них есть выданная, и она дала бы отказ. Лист
+// Equipment потом возвращаем как был.
+const kfEqSnapshot = sh('Equipment').data.map(r => r.slice());
+rowsOf('Equipment').forEach(u => {
+  if (/Импорт:\s*КИНО#/.test(String(u.condition_notes || ''))) updateRow(sh('Equipment'), u.__row, { condition_notes: '' });
+});
+const kfKino = (name, serial, tab) => {
+  const m = kfModel('LEN', name, 1);
+  updateRow(sh('Equipment'), findRowByValue(sh('Equipment'), 'item_id', m.ids[0]).__row,
+    { serial_number: serial, condition_notes: 'Комплект: крышки / Импорт: ' + tab + '#' + (7 + m.ids.length) });
+  return m.ids[0];
+};
+const kinoEmpty = kfKino('КФ Кино Пусто', '', 'КИНО');
+const kinoDup = kfKino('КФ Кино Дубль', 'SN-77001', 'КИНО');
+const kinoTwin = kfKino('КФ Кино Дубль', 'SN-77001', 'КАМЕРЫ');
+const kinoOwn = kfKino('КФ Кино Свой', 'SN-77002', 'КИНО');
+const kinoCopy = kfKino('КФ Кино Копия', '', 'КИНО (копия)');
+appendRow(sh('Transactions'), { transaction_id: 9908, item_id: kinoDup, status: 'Closed', checked_out_at: '2026-09-03' });
+r = catalogFixPlan({ delete_units: { import_tab: 'КИНО' } }, 'копия есть');
+const kinoHas = (id) => rowsOf('Equipment').some(u => String(u.item_id) === id);
+check('вещь КИНО без заводского номера удалена', r.ok === true && !kinoHas(kinoEmpty), r.message);
+check('вещь КИНО с номером, который есть на другой вкладке, удалена, а та — нет',
+  !kinoHas(kinoDup) && kinoHas(kinoTwin));
+check('закрытая выдача удалённой вещи удалена',
+  !rowsOf('Transactions').some(t => String(t.transaction_id) === '9908'));
+check('вещь КИНО со своим номером оставлена и названа «проверить на складе»',
+  kinoHas(kinoOwn) && /проверить на складе/.test(r.message) && r.message.indexOf(kinoOwn) !== -1, r.message);
+check('«КИНО (копия)» не тронута', kinoHas(kinoCopy));
+check('отчёт считает по моделям', r.counts.deleted_units === 2 && /по моделям: LEN-\d\d — 1/.test(r.message), r.message);
+r = catalogFixPlan({ delete_units: { import_tab: 'КИНО' } }, 'копия есть');
+check('повтор: удалять больше нечего', r.ok === true && r.counts.deleted_units === 0 && kinoHas(kinoOwn), r.counts);
+sh('Equipment').data = kfEqSnapshot;
 
 console.log('\n== объявления склада ==');
 // Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.

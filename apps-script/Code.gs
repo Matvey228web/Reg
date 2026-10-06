@@ -1288,11 +1288,9 @@ var CATALOG_FIX = {
   // LGT-12 и LGT-14 — не модели, а строки-заголовки разделов, попавшие в
   // импорт: слияние прибавило бы по лишней штуке к LGT-13 и LGT-15.
   delete_models: ["GRP-02", "GRP-04", "LEN-36", "LGT-12", "LGT-14"],
-  // Вещи по одной, с теми же отказами, что у модели: { import_tab: "КИНО" } —
-  // всё, что импорт взял с этой вкладки исходной таблицы, или
-  // { item_ids: ["010203", …] }. Пока не включено: ждёт подтверждения
-  // владельца (дубли с повторной вкладки КИНО).
-  // delete_units: { import_tab: "КИНО" },
+  // Дубли с повторно импортированной вкладки КИНО — правило в catalogFixTodo.
+  // Вещи по номерам — { item_ids: ["010203", …] }. Отказы те же, что у модели.
+  delete_units: { import_tab: "КИНО" },
   merges: [
     { from: "CAM-06", into: "CAM-14" },
     { from: "CAM-15", into: "CAM-07" },
@@ -1375,7 +1373,6 @@ var CATALOG_FIX = {
     { key: "CAM-01", price: 2485000 },
     { key: "CAM-07", price: 238912 },
     { key: "CAM-05", price: 289829 },
-    { key: "MON-02", price: 0 },
     { key: "MON-01", price: 294930 },
     { key: "MON-03", price: 141600 },
     { key: "RIG-01", price: 100350 },
@@ -1394,9 +1391,6 @@ var CATALOG_FIX = {
     { key: "LEN-29", price: 45000 },
     { key: "LEN-16", price: 41000 },
     { key: "LEN-18", price: 23000 },
-    { key: "LEN-33", price: 0 },
-    { key: "LEN-35", price: 0 },
-    { key: "LEN-34", price: 0 },
     { key: "LEN-21", price: 16600 },
     { key: "LEN-25", price: 33528 },
     { key: "LEN-26", price: 31926 },
@@ -1404,16 +1398,9 @@ var CATALOG_FIX = {
     { key: "LEN-39", price: 19155 },
     { key: "LEN-41", price: 26822 },
     { key: "LEN-37", price: 16207 },
-    { key: "LGT-08", price: 0 },
     { key: "LGT-10", price: 56800 },
     { key: "LGT-11", price: 123800 },
     { key: "LGT-13", price: 155000 },
-    { key: "LGT-04", price: 0 },
-    { key: "LGT-06", price: 0 },
-    { key: "LGT-02", price: 0 },
-    { key: "LGT-03", price: 0 },
-    { key: "LGT-01", price: 0 },
-    { key: "LGT-09", price: 0 },
   ],
   sections: [
     { key: "GRP-03", section: "CINE" },
@@ -1544,7 +1531,7 @@ function catalogFixPlanKey(key) {
 // Что сделать и что не выйдет. Только читает таблицу.
 function catalogFixTodo(plan) {
   var todo = { categories: [], deletes: [], merges: [], renames: [], prices: [], sections: [],
-               missing: [], errors: [], notes: [], keys: {} };
+               missing: [], errors: [], notes: [], check: [], keys: {} };
   var cats = categories();
   var catBy = {};
   cats.forEach(function (c) { catBy[c.code] = c; });
@@ -1642,19 +1629,38 @@ function catalogFixTodo(plan) {
     todo.deletes.push(entry);
   });
 
-  // Вещи без модели: по номерам или по вкладке исходной таблицы, с которой их
-  // взял импорт (метка «Импорт: ВКЛАДКА#строка» в condition_notes). Модель
-  // остаётся, даже если вещей у неё не останется: это видно в отчёте.
+  // Вещи без модели: по номерам или дубли с вкладки исходной таблицы. Вкладку
+  // КИНО импорт взял второй раз (решение владельца 6 октября 2026): вещь с неё
+  // удаляется, если заводского номера нет или тот же номер у вещи с другой
+  // вкладки. С собственным номером — остаётся: это может быть настоящая вещь
+  // (у трёх десятков Sony A7 IV номера свои), её проверяют на складе.
+  // Вкладка — ровно эта: «КИНО (копия)» не она. Метку «Импорт: ВКЛАДКА#строка»
+  // ищем в condition_notes где угодно, как importInventory: импорт ставит её
+  // последней, после комплектации и примечаний.
   var du = plan.delete_units;
   if (du && (du.import_tab || (du.item_ids && du.item_ids.length))) {
+    var importTab = function (u) {
+      var m = String(u.condition_notes || "").match(/Импорт:\s*([^/#]+)#\d+/);
+      return m ? m[1].trim().toUpperCase() : "";
+    };
     var wantIds = {};
     (du.item_ids || []).forEach(function (id) { wantIds[String(id).trim()] = true; });
     var tab = String(du.import_tab || "").trim().toUpperCase();
+    var elsewhere = {};
+    units.forEach(function (u) {
+      var t = importTab(u);
+      var serial = importCleanSerial(u.serial_number);
+      if (t && t !== tab && serial) elsewhere[serial] = true;
+    });
+    todo.check = [];
     var picked = units.filter(function (u) {
       if (deleted[catalogFixKey(u.category, u.model_code)]) return false;
       if (wantIds[String(u.item_id)]) return true;
-      var m = String(u.condition_notes || "").match(/Импорт:\s*([^/#]+)#\d+/);
-      return !!tab && !!m && m[1].trim().toUpperCase() === tab;
+      if (!tab || importTab(u) !== tab) return false;
+      if (String(u.serial_number === undefined || u.serial_number === null ? "" : u.serial_number).trim() === "") return true;
+      if (elsewhere[importCleanSerial(u.serial_number)]) return true;
+      todo.check.push(u);
+      return false;
     });
     var have = {};
     units.forEach(function (u) { have[String(u.item_id)] = true; });
@@ -1666,11 +1672,14 @@ function catalogFixTodo(plan) {
       entry.key = "";
       entry.name = label;
       entry.lines = 0;
-      entry.emptied = Object.keys(picked.reduce(function (acc, u) {
+      entry.perModel = {};
+      picked.forEach(function (u) {
         var k = catalogFixKey(u.category, u.model_code);
-        if (unitsOf(k).every(function (x) { return !!doomed[String(x.item_id)]; })) acc[k] = true;
-        return acc;
-      }, {}));
+        entry.perModel[k] = (entry.perModel[k] || 0) + 1;
+      });
+      entry.emptied = Object.keys(entry.perModel).filter(function (k) {
+        return unitsOf(k).every(function (x) { return !!doomed[String(x.item_id)]; });
+      });
       todo.deletes.push(entry);
     } else if (!picked.length && tab) {
       todo.missing.push("вещей с вкладки импорта " + tab + " (удалить)");
@@ -1911,6 +1920,7 @@ function catalogFixHeadline(todo, counts) {
     ", переименовано моделей " + counts.renamed_models + " (вещей " + counts.renamed_units + ")" +
     ", цен " + counts.prices + ", разделов " + counts.sections +
     (todo.missing.length ? "; нет в таблице: " + todo.missing.length : "") +
+    (todo.check.length ? "; проверить на складе: " + todo.check.length : "") +
     (todo.errors.length ? "; ОТКАЗОВ: " + todo.errors.length : "") + ".";
 }
 
@@ -1936,8 +1946,19 @@ function catalogFixReport(todo, counts, title) {
     return (d.key ? d.key + " «" + d.name + "»" : d.name) + ": вещей " + d.units + " (" +
       Object.keys(d.ids).join(", ") + "), выдач " + d.transactions + ", дефектов " + d.defects +
       ", сверок " + d.inventory + (d.lines ? ", строк заказов без кода модели " + d.lines : "") +
+      (d.perModel ? "; по моделям: " + Object.keys(d.perModel).map(function (k) {
+        return k + " — " + d.perModel[k];
+      }).join(", ") : "") +
       (d.emptied && d.emptied.length ? "; без вещей останутся модели " + d.emptied.join(", ") : "");
   });
+  // Целиком, без CLEANUP_SHOW: это список для обхода склада.
+  if (todo.check.length) {
+    out.push("Оставлены, проверить на складе (свой заводской номер) — " + todo.check.length + ":");
+    todo.check.forEach(function (u) {
+      out.push("  " + u.item_id + " «" + u.name + "», " + catalogFixKey(u.category, u.model_code) +
+        ", заводской " + u.serial_number);
+    });
+  }
   section("Слить модели", todo.merges, function (m) {
     return m.from + " «" + m.name + "» → " + m.into + " «" + m.intoName + "»: вещей " + m.units;
   });
