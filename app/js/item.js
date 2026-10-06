@@ -480,52 +480,65 @@ const ItemScreen = (() => {
       const form = document.getElementById("item-defect-form");
       form.style.display = form.style.display === "none" ? "block" : "none";
     });
+    // Оптимистично, как resolveDefect в repair.js: дефект на карточке сразу,
+    // запись в фоне. Откажет таблица — карточка и строка каталога как были,
+    // описание возвращается в поле, причина под формой.
     document.getElementById("item-defect-submit").addEventListener("click", async () => {
       const description = document.getElementById("item-defect-desc").value.trim();
       if (!description) { showBoxError("item-defect-error", "Опишите дефект"); return; }
-      const restore = busyButton(document.getElementById("item-defect-submit"));
       showBoxError("item-defect-error", "");
+      const severity = document.getElementById("item-defect-severity").value;
+      const rowBefore = (Cache.items("equipment") || [])
+        .find((r) => String(r.item_id) === String(item.item_id)) || null;
+      const historyBefore = history;
+      const changes = ItemState.afterDefect(item, severity);
+      Cache.patch("equipment", "item_id", item.item_id, changes);
+      const defect = {
+        defect_id: "", item_id: item.item_id, severity, description,
+        status: "Open", reported_at: new Date().toISOString(),
+      };
+      const next = { ...item, ...changes };
+      if (item.open_defects) next.open_defects = item.open_defects.concat([defect]);
+      if (history) history = { ...history, defects: (history.defects || []).concat([defect]) };
+      TG.hapticSuccess();
+      render(next);
+      showStatusLine("item-defect-status", "Дефект сохранён" +
+        (changes.status === "In Repair" ? " — вещь снята с выдачи" : ""));
       try {
-        const severity = document.getElementById("item-defect-severity").value;
         const res = await apiPost("/defect/report", {
           item_id: item.item_id,
           description,
           severity,
         });
-        TG.hapticSuccess();
-        // Статус предмета бэкенд вернул в ответе — правим одну строку каталога
-        // и карточку, а не сбрасываем весь каталог и не перечитываем предмет.
-        const changes = ItemState.afterDefect(item, severity, res && res.status);
-        Cache.patch("equipment", "item_id", item.item_id, changes);
-        const defect = {
-          defect_id: res && res.defect_id, item_id: item.item_id, severity, description,
-          status: "Open", reported_at: new Date().toISOString(),
-        };
-        const next = { ...item, ...changes };
-        if (item.open_defects) next.open_defects = item.open_defects.concat([defect]);
-        if (history) {
-          history = { ...history, defects: (history.defects || []).concat([defect]) };
-        } else {
-          // История ещё в пути и может прийти без этого дефекта — просим заново.
+        // Статус предмета бэкенд вернул в ответе — правим одну строку каталога,
+        // а не сбрасываем весь каталог и не перечитываем предмет.
+        if (res && res.status) {
+          Cache.patch("equipment", "item_id", item.item_id, ItemState.afterDefect(item, severity, res.status));
+        }
+        if (!historyBefore) {
+          // История ещё была в пути и может прийти без этого дефекта — просим заново.
           loadHistory(++historySeq);
         }
         // Доска «Ремонт»: дописываем дефект в её кэш, не трогая возраст, —
         // и помечаем устаревшим, чтобы она перечитала себя молча (названия,
         // кто заявил — это знает только сервер).
         const board = Cache.items("defects");
-        if (board && defect.defect_id) {
-          Cache.replace("defects", board.concat([{ ...defect,
+        if (board && res && res.defect_id) {
+          Cache.replace("defects", board.concat([{ ...defect, defect_id: res.defect_id,
             reported_by_name: (Auth.getSession() || {}).full_name || "" }]));
         }
         Cache.stale("defects");
-        render(next);
-        showStatusLine("item-defect-status", "Дефект сохранён" +
-          (changes.status === "In Repair" ? " — вещь снята с выдачи" : ""));
       } catch (err) {
         TG.hapticError();
-        showBoxError("item-defect-error", err.message);
-      } finally {
-        restore();
+        if (rowBefore) Cache.patch("equipment", "item_id", item.item_id, rowBefore);
+        history = historyBefore;
+        if (String(currentItemId) === String(item.item_id)) {
+          render(item);
+          document.getElementById("item-defect-form").style.display = "block";
+          document.getElementById("item-defect-desc").value = description;
+          document.getElementById("item-defect-severity").value = severity;
+          showBoxError("item-defect-error", "Дефект не сохранился: " + err.message);
+        }
       }
     });
 
