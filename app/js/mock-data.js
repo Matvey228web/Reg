@@ -1815,6 +1815,7 @@ const MockAPI = {
         if (body.action === "trim") {
           return { message: "Подрезка отменена: журнал ни разу не выгружался." };
         }
+        if (body.action === "ids") return { problems: [], counts: {}, total: 0 };
         const e = new Error("Неизвестное действие обслуживания"); e.status = 400; throw e;
       }
 

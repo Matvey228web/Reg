@@ -1335,6 +1335,110 @@ check('живая сессия склада: неизвестное действ
 check('администратор: пустое действие — 400',
   call('/maintenance', {}, token).status === 400);
 
+console.log('\n== номера: счётчик, дубли, отчёт ==');
+{
+  const eqSheet = getSheet(SHEETS.EQUIPMENT);
+  const metaOf = (key) => readRows(getSheet(SHEETS.META)).filter(m => String(m.key) === key)[0];
+  // Чистая таблица: отчёт пуст (дальше портим её по одному виду за раз).
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('отчёт по номерам: чистые данные — пустой список',
+    r.ok === true && r.data.total === 0 && r.data.problems.length === 0, r);
+
+  const n1 = call('/item/create', { category: 'CAM', model_name: 'Номера Тест', serial_number: 'NUM-A' }, token).data.item_id;
+  const n2 = call('/item/create', { category: 'CAM', model_name: 'Номера Тест', serial_number: 'NUM-B' }, token).data.item_id;
+  const nPrefix = n1.slice(0, 4);
+  check('номера идут подряд', Number(n2.slice(4)) === Number(n1.slice(4)) + 1, [n1, n2]);
+
+  // Счётчик потерялся (стёрт вручную): новый номер не должен совпасть с занятым.
+  updateRow(getSheet(SHEETS.META), metaOf('unit_' + nPrefix).__row, { value: 0 });
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('отчёт: счётчик ниже существующего номера',
+    r.data.counts.counter_behind === 1 && r.data.problems[0].kind === 'counter_behind', r.data);
+  const n3 = call('/item/create', { category: 'CAM', model_name: 'Номера Тест' }, token).data.item_id;
+  check('счётчик отстал — новый номер пропускает занятые',
+    Number(n3.slice(4)) === Number(n2.slice(4)) + 1 && n3 !== n1 && n3 !== n2, [n1, n2, n3]);
+  check('счётчик догнан', Number(metaOf('unit_' + nPrefix).value) === Number(n3.slice(4)));
+
+  // Серийник: повтор — 409, номер при отказе не сжигается.
+  const counterBefore = Number(metaOf('unit_' + nPrefix).value);
+  r = call('/item/create', { category: 'CAM', model_name: 'Номера Тест', serial_number: ' num-a ' }, token);
+  check('создание с чужим серийником — 409', r.status === 409 && /заводской/.test(r.error), r);
+  check('при отказе по серийнику счётчик не сдвинулся',
+    Number(metaOf('unit_' + nPrefix).value) === counterBefore);
+
+  // Занятый номер: подсовываем счётчик, который выдал бы n1, — запись отклонена.
+  const realNext = global.nextUnitNumber;
+  global.nextUnitNumber = () => Number(n1.slice(4));
+  const rowsBefore = eqSheet.getLastRow();
+  r = call('/item/create', { category: 'CAM', model_name: 'Номера Тест' }, token);
+  global.nextUnitNumber = realNext;
+  check('создание с уже занятым item_id — 409', r.status === 409 && /занят/.test(r.error), r);
+  check('занятый номер не записан', eqSheet.getLastRow() === rowsBefore);
+
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('после правок отчёт снова чист', r.data.total === 0, r.data);
+
+  // Испорченные данные: по одному каждого вида.
+  const hdr = sheetHeaders(eqSheet);
+  const col = (name) => hdr.indexOf(name) + 1;
+  const rowOf = (id) => readRows(eqSheet).filter(x => itemIdDigits(x.item_id) === id)[0].__row;
+  const rA = rowOf(n1), rB = rowOf(n2);
+  // 1. дубль номера: у второй вещи номер первой
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([[n1]]);
+  // 2. дубль серийника у третьей вещи
+  eqSheet.getRange(rowOf(n3), col('serial_number'), 1, 1).setValues([['NUM-A']]);
+  r = call('/maintenance', { action: 'ids' }, token);
+  const kinds = r.data.problems.map(p => p.kind).sort();
+  check('отчёт: дубль номера находит обе строки',
+    r.data.problems.some(p => p.kind === 'duplicate_id' && p.item_id === n1 &&
+      p.rows.length === 2 && p.rows.indexOf(rA) >= 0 && p.rows.indexOf(rB) >= 0 &&
+      p.detail.indexOf('Дубль номера ' + n1 + ': строки ') === 0), r.data);
+  check('отчёт: дубль серийника', r.data.counts.duplicate_serial === 1, r.data);
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([[n2]]);
+  eqSheet.getRange(rowOf(n3), col('serial_number'), 1, 1).setValues([['']]);
+
+  // 3. потерянный ведущий ноль: число вместо строки
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([[Number(n2)]]);
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('отчёт: номер числом (потерян ноль)',
+    r.data.problems.some(p => p.kind === 'bad_id' && p.row === rB && /ведущий ноль/.test(p.detail)), r.data);
+  check('отчёт: число — это тот же номер, дублем и расхождением префикса не считается',
+    !r.data.counts.duplicate_id && !r.data.counts.prefix_mismatch, r.data);
+  // 4. не шесть цифр
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([['AB12']]);
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('отчёт: номер не из шести цифр',
+    r.data.problems.some(p => p.kind === 'bad_id' && p.row === rB && /не шесть цифр/.test(p.detail)), r.data);
+  // 5. префикс не по категории и модели
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([['990101']]);
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('отчёт: префикс не совпадает с категорией и моделью',
+    r.data.problems.some(p => p.kind === 'prefix_mismatch' && p.item_id === '990101' && p.row === rB), r.data);
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([[n2]]);
+
+  r = call('/maintenance', { action: 'ids' }, token);
+  check('исправили руками — отчёт чист', r.data.total === 0, r.data);
+
+  // Ночной прогон молчит, пока всё в порядке, и пишет одну строку, когда нет.
+  // Копию и подрезку глушим: этот прогон проверяет только сверку номеров.
+  const realSteps = [global.dailyBackup, global.trimArchive, global.trimLogs];
+  global.dailyBackup = () => ''; global.trimArchive = () => ''; global.trimLogs = () => '';
+  dailyMaintenance();
+  check('ночью при чистых номерах в Logs ничего не пишется',
+    readRows(getSheet(SHEETS.LOGS)).filter(l => l.endpoint === 'itemNumbers').length === 0);
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([[n1]]);
+  dailyMaintenance();
+  const nightLogs = readRows(getSheet(SHEETS.LOGS)).filter(l => l.endpoint === 'itemNumbers');
+  check('ночью при дубле в Logs одна сводная строка', nightLogs.length === 1, nightLogs);
+  eqSheet.getRange(rB, col('item_id'), 1, 1).setValues([[n2]]);
+  [global.dailyBackup, global.trimArchive, global.trimLogs] = realSteps;
+
+  check('сотрудник склада номера не сверяет — 401',
+    call('/maintenance', { action: 'ids' }, ivanToken).status === 401);
+  check('живая сессия склада: сверка номеров — 403',
+    call('/maintenance', { action: 'ids' }, maintToken).status === 403);
+}
+
 console.log('\n== настройки: память в пределах запроса ==');
 {
   const realReadRows = global.readRows, realGetSettings = global.getSettings;

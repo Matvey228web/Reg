@@ -391,6 +391,9 @@ const SettingsScreen = (() => {
         <div id="settings-maintenance-result"></div>
         <button class="btn btn--secondary" id="settings-archive">Выгрузить журнал в файл</button>
         <button class="btn btn--secondary" id="settings-trim" style="margin-top:8px;">Подрезать таблицу</button>
+        <button class="btn btn--secondary" id="settings-ids" style="margin-top:8px;">Проверить номера</button>
+        <p class="hint">Только смотрит, ничего не меняет: дубли номеров и серийников, номера без ведущего нуля,
+          расхождение с категорией и моделью.</p>
         ${data.maintenance && data.maintenance.schema_outdated === false ? "" : `
         <button class="btn btn--secondary" id="settings-setup" style="margin-top:8px;">Создать недостающие вкладки</button>
         <p class="hint">Таблица отстаёт от обновления склада: нажмите один раз — появятся новые вкладки
@@ -893,7 +896,15 @@ const SettingsScreen = (() => {
     out.innerHTML = skeleton(1);
     try {
       const res = await apiPost("/maintenance", { action });
-      out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(res.message)}</div></div>`;
+      if (action === "ids") {
+        // Бэкенд отдаёт готовые фразы в detail; пустой список — не ошибка.
+        out.innerHTML = !res.problems || !res.problems.length
+          ? `<div class="card"><div class="card-sub">Номера в порядке</div></div>`
+          : `<div class="card"><div class="card-sub"><b>Найдено: ${res.problems.length}</b></div>` +
+            res.problems.map((p) => `<div class="card-sub">${escapeHtml(p.detail)}</div>`).join("") + `</div>`;
+      } else {
+        out.innerHTML = `<div class="card"><div class="card-sub">${escapeHtml(res.message)}</div></div>`;
+      }
       TG.hapticSuccess();
       // Таблица догнала схему — кнопка больше не нужна; итог остаётся на экране.
       if (action === "setup" && data && data.maintenance) {
@@ -964,6 +975,8 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => maintenance("archive", "settings-archive"));
     document.getElementById("settings-trim")
       .addEventListener("click", () => maintenance("trim", "settings-trim"));
+    document.getElementById("settings-ids")
+      .addEventListener("click", () => maintenance("ids", "settings-ids"));
     // Кнопки нет, когда таблица догнала схему (schema_outdated в /settings/get).
     const setupBtn = document.getElementById("settings-setup");
     if (setupBtn) setupBtn.addEventListener("click", () => maintenance("setup", "settings-setup"));
