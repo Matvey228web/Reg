@@ -1960,6 +1960,19 @@ check('в целевой категории моделей не прибавил
   readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length === mvLenBefore,
   readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'LEN').length);
 
+console.log('-- строки заказов идут за моделью --');
+// Состав заказа ссылается на модель кодом: без переписи строка заказа после
+// переноса указала бы на пустое место (или на чужую модель с тем же кодом).
+mv = call('/item/create', { category: 'CAM', model_name: 'Строка Тест', serial_number: 'L1' }, mvToken);
+const mvLineCode = mv.ok ? mv.data.item_id.slice(2, 4) : null;
+appendRow(getSheet(SHEETS.ORDER_ITEMS), { order_id: 900901, line_no: 1, raw_name: 'Строка Тест',
+                                          model_code: mvLineCode, category: 'CAM', qty: 1 });
+mv = call('/model/move', { category: 'CAM', model_code: mvLineCode, to_category: 'LEN' }, mvToken);
+const mvLine = readRows(getSheet(SHEETS.ORDER_ITEMS)).filter(l => String(l.order_id) === '900901')[0];
+check('перенос переписал строку заказа на новую категорию и код',
+  mv.ok === true && mv.data.order_lines === 1 && mvLine.category === 'LEN' &&
+  String(mvLine.model_code) === mv.data.model_code, [mv.data, mvLine]);
+
 console.log('\n== карточку предмета без входа не прочитать ==');
 // Адрес веб-приложения не секрет, а номера напечатаны на этикетках: без
 // проверки токена кто угодно перебрал бы 010101, 010102… и вычитал склад.
@@ -2286,6 +2299,16 @@ check('регистр не важен', sec.ok === true, sec);
 check('повтор той же разметки ничего не меняет',
   call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'PHOTO' }] },
        secToken).data.changed === 0, 'ожидали changed=0');
+
+sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: secCode, section: '#кино #Фото' }],
+}, secToken);
+check('хэштеги #кино #фото понимаются как CINE,PHOTO', sec.ok === true &&
+  call('/models/list', { category: 'CAM' }, secToken).data
+    .filter(m => m.model_code === secCode)[0].section === 'CINE,PHOTO', sec);
+check('хэштег в таблице руками читается так же', normalizeSection('#фото') === 'PHOTO' &&
+  normalizeSection('кино; #ФОТО') === 'CINE,PHOTO');
+call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'PHOTO' }] }, secToken);
 
 sec = call('/models/sections', {
   models: [{ category: 'CAM', model_code: secCode, section: 'ЗВУК' }],
@@ -3795,6 +3818,232 @@ check('повторный запуск ничего не удаляет',
   sizes() === sizesAfter && again.orders.length === 0 && again.items.length === 0 &&
   again.transactions.length === 0 && again.students.length === 0 && again.staff.length === 0, r);
 updateRow(sh('Staff'), findRowByValue(sh('Staff'), 'staff_id', owner.staff_id).__row, { full_name: ownerName });
+
+console.log('\n== уборка архива заказов ==');
+const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
+appendRow(sh('Orders'), { order_id: 9501, order_no: '9501', student_id: 9002, student_name: 'Архив Старый',
+                          created_at: '2026-09-01', archived_at: ago(3) });
+appendRow(sh('Orders'), { order_id: 9502, order_no: '9502', student_id: 9002, student_name: 'Архив Свежий',
+                          created_at: '2026-09-01', archived_at: ago(1) });
+appendRow(sh('Orders'), { order_id: 9503, order_no: '9503', student_id: 9002, student_name: 'Не в архиве',
+                          created_at: '2026-09-01' });
+appendRow(sh('Orders'), { order_id: 9504, order_no: '9504', student_id: 9002, student_name: 'Архив На руках',
+                          created_at: '2026-09-01', archived_at: ago(5) });
+appendRow(sh('OrderItems'), { order_id: 9501, line_no: 1, raw_name: 'Позиция 9501', qty: 1 });
+appendRow(sh('Transactions'), { transaction_id: 9601, item_id: '010101', order_id: 9501, status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Transactions'), { transaction_id: 9602, item_id: '010102', order_id: 9504, status: 'Open', checked_out_at: '2026-09-03' });
+
+check('срок архива по умолчанию — 2 дня', getSettings().archive_keep_days === 2, getSettings().archive_keep_days);
+const archPreview = cleanupArchivePreview();
+check('просмотр архива: весь архив, без неархивных, заказ на руках отказан',
+  /9501/.test(archPreview) && /9502/.test(archPreview) && !/9503/.test(archPreview) &&
+  archivedPlan(0).refused.some(x => x.order_id === '9504'), archPreview);
+
+const archStudents = rowsOf('Students').length;
+r = trimArchive();
+check('ночная уборка: удалён заказ старше 2 дней с позициями и выдачей',
+  !hasRow('Orders', 'order_id', 9501) && !hasRow('OrderItems', 'order_id', 9501) &&
+  !hasRow('Transactions', 'transaction_id', 9601), r);
+check('ночная уборка: свежий архив, неархивный и заказ на руках на месте',
+  hasRow('Orders', 'order_id', 9502) && hasRow('Orders', 'order_id', 9503) && hasRow('Orders', 'order_id', 9504));
+check('уборка архива не трогает учеников', rowsOf('Students').length === archStudents);
+
+call('/settings/set', { settings: { archive_keep_days: 0 } }, logToken);
+logBefore = logRows().length;
+check('срок 0 — ночью архив не трогается', trimArchive() === '' && hasRow('Orders', 'order_id', 9502) &&
+  logRows().length === logBefore);
+check('срок вне пределов отклонён',
+  call('/settings/set', { settings: { archive_keep_days: -1 } }, logToken).ok === false);
+
+r = cleanupArchive();
+check('ручная уборка удаляет весь архив, кроме заказа на руках',
+  !hasRow('Orders', 'order_id', 9502) && hasRow('Orders', 'order_id', 9504) && hasRow('Orders', 'order_id', 9503), r);
+call('/settings/set', { settings: { archive_keep_days: 2 } }, logToken);
+
+console.log('\n== разовая правка каталога ==');
+// Маленький план на своих моделях «КФ …», а не весь CATALOG_FIX: проверяется
+// ход (слияния, удаления, названия, цены, разделы, повтор), а не данные.
+const kfModel = (cat, name, n, extra) => {
+  const m = findOrCreateModel(cat, name);
+  const ids = [];
+  for (let i = 0; i < n; i++) {
+    const id = buildItemId(cat, m.model_code, nextUnitNumber(cat, m.model_code));
+    appendRow(sh('Equipment'), Object.assign({ item_id: id, name: name, category: cat,
+      model_code: pad2(m.model_code), status: 'Available', qty: 1, qty_out: 0 }, extra || {}));
+    ids.push(id);
+  }
+  return { key: catalogFixKey(cat, m.model_code), code: pad2(m.model_code), ids: ids };
+};
+const kfA = kfModel('CAM', 'КФ Камера А', 2);
+const kfB = kfModel('CAM', 'КФ Камера Б', 1);
+const kfSide = kfModel('CAM', 'КФ Сосед', 1);
+const kfMon = kfModel('OTH', 'КФ Монитор', 2);
+const kfMonPro = kfModel('MON', 'КФ Монитор Про', 1);
+const kfBag = kfModel('GRP', 'КФ Мешок', 1, { qty: 5 });
+const kfBagBig = kfModel('GRP', 'КФ Мешок большой', 1, { qty: 3 });
+const kfDel = kfModel('LEN', 'КФ Удаляемая', 2);
+const kfOut = kfModel('CAM', 'КФ Выданная', 1, { status: 'Rented', current_transaction_id: 9901 });
+
+appendRow(sh('Transactions'), { transaction_id: 9902, item_id: kfA.ids[0], status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Defects'), { defect_id: 9903, item_id: kfA.ids[0], status: 'Resolved', description: 'КФ царапина' });
+appendRow(sh('Inventory'), { inventory_id: 9904, kind: 'missing', item_id: kfA.ids[0] });
+appendRow(sh('Transactions'), { transaction_id: 9905, item_id: kfDel.ids[0], status: 'Closed', checked_out_at: '2026-09-03' });
+appendRow(sh('Inventory'), { inventory_id: 9906, kind: 'missing', item_id: kfDel.ids[1] });
+appendRow(sh('Transactions'), { transaction_id: 9901, item_id: kfOut.ids[0], status: 'Open', checked_out_at: '2026-09-03' });
+appendRow(sh('OrderItems'), { order_id: 9907, line_no: 1, raw_name: 'КФ Камера А', model_code: kfA.code, category: 'CAM', qty: 1 });
+appendRow(sh('OrderItems'), { order_id: 9907, line_no: 2, raw_name: 'КФ Удаляемая', model_code: kfDel.code, category: 'LEN', qty: 1 });
+
+const kfCatMax = Math.max.apply(null, categories().map(c => Number(c.num)));
+const kfPlan = {
+  categories: [
+    { action: 'relabel', code: 'MED', label: 'Карты КФ' },
+    { action: 'create', code: 'KFA', label: 'КФ поштучно', by_qty: false },
+    { action: 'create', code: 'KFB', label: 'КФ количеством', by_qty: true },
+    { action: 'relabel', code: 'KFZ', label: 'нет такой' },
+  ],
+  delete_models: [kfDel.key, 'LEN-98'],
+  merges: [{ from: kfA.key, into: kfB.key }, { from: kfMon.key, into: kfMonPro.key },
+           { from: kfBag.key, into: kfBagBig.key }],
+  // Ключи — до слияний: цена и раздел, названные по kfA, уходят kfB.
+  renames: [{ key: kfB.key, to: 'КФ Камера Бета' }],
+  prices: [{ key: kfA.key, price: 1500 }, { key: kfMonPro.key, price: 700 }],
+  sections: [{ key: kfA.key, section: 'photo' }, { key: 'CAM-97', section: 'CINE' }],
+};
+const kfEquip = () => JSON.stringify(dumpSheet('Equipment'));
+const kfModels = () => JSON.stringify(dumpSheet('Models'));
+
+console.log('-- отказы: ничего не записано --');
+let kfEquipBefore = kfEquip(), kfModelsBefore = kfModels();
+r = catalogFixPlan(Object.assign({}, kfPlan, { merges: kfPlan.merges.concat([{ from: kfOut.key, into: kfSide.key }]) }), 'копия есть');
+check('выданная вещь у сливаемой модели — отказ всего запуска',
+  r.ok === false && /КФ Выданная/.test(r.message) && /На руках 1 вещь/.test(r.message), r.message);
+check('после отказа каталог и справочник не тронуты',
+  kfEquip() === kfEquipBefore && kfModels() === kfModelsBefore && !categories().some(c => c.code === 'KFA'));
+r = catalogFixPlan(Object.assign({}, kfPlan, { delete_models: [kfOut.key] }), 'копия есть');
+check('удаление модели с вещью на руках — отказ',
+  r.ok === false && /на руках/.test(r.message) && kfEquip() === kfEquipBefore, r.message);
+r = catalogFixPlan(Object.assign({}, kfPlan, { renames: [{ key: kfB.key, to: 'КФ Сосед' }] }), 'копия есть');
+check('переименование в соседнюю модель — отказ', r.ok === false && /КФ Сосед/.test(r.message) &&
+  kfModels() === kfModelsBefore, r.message);
+check('отказ записан в Logs',
+  logRows().slice(-1).some(l => l.kind === 'catalog_fix' && l.reason === 'refused'));
+r = catalogFixPlan(Object.assign({}, kfPlan, { delete_units: { item_ids: [kfOut.ids[0]] } }), 'копия есть');
+check('вещь на руках не удалить и поштучно', r.ok === false && /на руках/.test(r.message), r.message);
+
+logBefore = logRows().length;
+global.__driveFail = 'Диск недоступен';
+r = catalogFixPlan(kfPlan);
+global.__driveFail = null;
+check('без копии правка отменена', r.ok === false && /отменена/.test(r.message) &&
+  kfEquip() === kfEquipBefore && kfModels() === kfModelsBefore, r.message);
+check('отказ без копии записан в Logs',
+  logRows().slice(logBefore).some(l => l.kind === 'catalog_fix' && l.reason === 'backup_failed'));
+
+console.log('-- просмотр --');
+const kfTodo = catalogFixTodo(kfPlan);
+check('просмотр ничего не меняет и не находит отказов',
+  kfTodo.errors.length === 0 && kfEquip() === kfEquipBefore && kfModels() === kfModelsBefore, kfTodo.errors);
+check('просмотр называет пропущенные ключи',
+  ['LEN-98', 'CAM-97', 'KFZ'].every(k => kfTodo.missing.some(m => m.indexOf(k) !== -1)), kfTodo.missing);
+
+console.log('-- запуск --');
+const kfCopies = backupFiles.length;
+logBefore = logRows().length;
+r = catalogFixPlan(kfPlan);
+check('правка прошла и перед ней сделана копия', r.ok === true && backupFiles.length === kfCopies + 1, r.message);
+const kfEq = () => rowsOf('Equipment');
+const kfOf = (key) => kfEq().filter(u => catalogFixKey(u.category, u.model_code) === key);
+const kfModelRow = (key) => rowsOf('Models').filter(m => catalogFixKey(m.category, m.model_code) === key)[0];
+
+const kfCats = categories();
+const kfA2 = kfCats.filter(c => c.code === 'KFA')[0], kfB2 = kfCats.filter(c => c.code === 'KFB')[0];
+check('категории заведены со следующими свободными номерами и способом учёта',
+  kfA2 && kfB2 && Number(kfA2.num) === kfCatMax + 1 && Number(kfB2.num) === kfCatMax + 2 &&
+  !kfA2.by_qty && kfB2.by_qty, [kfA2, kfB2, kfCatMax]);
+check('категория MED переименована', kfCats.filter(c => c.code === 'MED')[0].label === 'Карты КФ');
+
+check('слияние в категории: вещи под номерами целевой модели, исходной модели нет',
+  kfOf(kfB.key).length === 3 && !kfOf(kfA.key).length && !kfModelRow(kfA.key) &&
+  kfOf(kfB.key).every(u => String(u.item_id).slice(0, 4) === kfB.ids[0].slice(0, 4)), kfOf(kfB.key).map(u => u.item_id));
+check('слияние между категориями: вещи в MON с номерами MON',
+  kfOf(kfMonPro.key).length === 3 && !kfOf(kfMon.key).length && !kfModelRow(kfMon.key) &&
+  kfOf(kfMonPro.key).every(u => u.category === 'MON' && String(u.item_id).slice(0, 2) === categoryNum('MON')));
+const kfShelf = kfOf(kfBagBig.key);
+check('полка: количество сложено в одну строку, исходной строки нет',
+  kfShelf.length === 1 && Number(kfShelf[0].qty) === 8 && !kfOf(kfBag.key).length && !kfModelRow(kfBag.key), kfShelf);
+check('карта номеров: полка указывает на целевую строку',
+  r.items[kfBag.ids[0]] === String(kfShelf[0].item_id), r.items);
+
+const kfNewA = r.items[kfA.ids[0]];
+check('журналы переписаны на новый номер',
+  kfNewA && rowsOf('Transactions').some(t => String(t.transaction_id) === '9902' && String(t.item_id) === kfNewA) &&
+  rowsOf('Defects').some(d => String(d.defect_id) === '9903' && String(d.item_id) === kfNewA) &&
+  rowsOf('Inventory').some(i => String(i.inventory_id) === '9904' && String(i.item_id) === kfNewA), kfNewA);
+const kfLine = (n) => rowsOf('OrderItems').filter(l => String(l.order_id) === '9907' && Number(l.line_no) === n)[0];
+check('строка заказа переписана на выжившую модель',
+  kfLine(1).category === 'CAM' && pad2(Number(kfLine(1).model_code)) === kfB.code, kfLine(1));
+
+check('удаление: модели и вещей нет, закрытые записи журналов удалены',
+  !kfModelRow(kfDel.key) && !kfOf(kfDel.key).length &&
+  !rowsOf('Transactions').some(t => String(t.transaction_id) === '9905') &&
+  !rowsOf('Inventory').some(i => String(i.inventory_id) === '9906'));
+check('строка заказа удалённой модели осталась без кода', kfLine(2) && kfLine(2).model_code === '', kfLine(2));
+check('/public/catalog удалённую модель не показывает',
+  !call('/public/catalog', {}).data.models.some(m => m.model_name === 'КФ Удаляемая'));
+
+check('переименование: модель и все её вещи, включая слитые',
+  kfModelRow(kfB.key).model_name === 'КФ Камера Бета' && kfOf(kfB.key).every(u => u.name === 'КФ Камера Бета'));
+check('цены записаны (по ключу до слияния — выжившей модели)',
+  Number(kfModelRow(kfB.key).price) === 1500 && Number(kfModelRow(kfMonPro.key).price) === 700);
+check('раздел записан приведённым', kfModelRow(kfB.key).section === 'PHOTO', kfModelRow(kfB.key).section);
+check('карта ключей — по слияниям',
+  r.keys[kfA.key] === kfB.key && r.keys[kfMon.key] === kfMonPro.key && r.keys[kfBag.key] === kfBagBig.key, r.keys);
+const kfLog = logRows().slice(logBefore).filter(l => l.kind === 'catalog_fix');
+check('в Logs одна строка со счётчиками и картой ключей',
+  kfLog.length === 1 && kfLog[0].reason === 'done' && kfLog[0].context.indexOf(kfA.key) !== -1, kfLog);
+
+console.log('-- повтор --');
+kfEquipBefore = kfEquip(); kfModelsBefore = kfModels();
+const kfAgain = catalogFixPlan(kfPlan, 'копия есть');
+check('повторный запуск ничего не меняет и сообщает нули',
+  kfAgain.ok === true && Object.keys(kfAgain.counts).every(k => kfAgain.counts[k] === 0) &&
+  kfEquip() === kfEquipBefore && kfModels() === kfModelsBefore, kfAgain.counts);
+check('повтор отдаёт ту же карту ключей', JSON.stringify(kfAgain.keys) === JSON.stringify(r.keys), kfAgain.keys);
+
+console.log('-- дубли с повторной вкладки КИНО --');
+// Свои вещи с меткой КИНО; метки КИНО у вещей из импорта выше на время
+// проверки снимаем — среди них есть выданная, и она дала бы отказ. Лист
+// Equipment потом возвращаем как был.
+const kfEqSnapshot = sh('Equipment').data.map(r => r.slice());
+rowsOf('Equipment').forEach(u => {
+  if (/Импорт:\s*КИНО#/.test(String(u.condition_notes || ''))) updateRow(sh('Equipment'), u.__row, { condition_notes: '' });
+});
+const kfKino = (name, serial, tab) => {
+  const m = kfModel('LEN', name, 1);
+  updateRow(sh('Equipment'), findRowByValue(sh('Equipment'), 'item_id', m.ids[0]).__row,
+    { serial_number: serial, condition_notes: 'Комплект: крышки / Импорт: ' + tab + '#' + (7 + m.ids.length) });
+  return m.ids[0];
+};
+const kinoEmpty = kfKino('КФ Кино Пусто', '', 'КИНО');
+const kinoDup = kfKino('КФ Кино Дубль', 'SN-77001', 'КИНО');
+const kinoTwin = kfKino('КФ Кино Дубль', 'SN-77001', 'КАМЕРЫ');
+const kinoOwn = kfKino('КФ Кино Свой', 'SN-77002', 'КИНО');
+const kinoCopy = kfKino('КФ Кино Копия', '', 'КИНО (копия)');
+appendRow(sh('Transactions'), { transaction_id: 9908, item_id: kinoDup, status: 'Closed', checked_out_at: '2026-09-03' });
+r = catalogFixPlan({ delete_units: { import_tab: 'КИНО' } }, 'копия есть');
+const kinoHas = (id) => rowsOf('Equipment').some(u => String(u.item_id) === id);
+check('вещь КИНО без заводского номера удалена', r.ok === true && !kinoHas(kinoEmpty), r.message);
+check('вещь КИНО с номером, который есть на другой вкладке, удалена, а та — нет',
+  !kinoHas(kinoDup) && kinoHas(kinoTwin));
+check('закрытая выдача удалённой вещи удалена',
+  !rowsOf('Transactions').some(t => String(t.transaction_id) === '9908'));
+check('вещь КИНО со своим номером оставлена и названа «проверить на складе»',
+  kinoHas(kinoOwn) && /проверить на складе/.test(r.message) && r.message.indexOf(kinoOwn) !== -1, r.message);
+check('«КИНО (копия)» не тронута', kinoHas(kinoCopy));
+check('отчёт считает по моделям', r.counts.deleted_units === 2 && /по моделям: LEN-\d\d — 1/.test(r.message), r.message);
+r = catalogFixPlan({ delete_units: { import_tab: 'КИНО' } }, 'копия есть');
+check('повтор: удалять больше нечего', r.ok === true && r.counts.deleted_units === 0 && kinoHas(kinoOwn), r.counts);
+sh('Equipment').data = kfEqSnapshot;
 
 console.log('\n== объявления склада ==');
 // Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.

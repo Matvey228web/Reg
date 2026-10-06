@@ -1,0 +1,652 @@
+{
+ "opens_at": "2026-10-15T12:00:00+03:00",
+ "categories": [
+  {
+   "code": "CAM",
+   "label": "Камера"
+  },
+  {
+   "code": "STB",
+   "label": "Стабилизация"
+  },
+  {
+   "code": "LGT",
+   "label": "Свет"
+  },
+  {
+   "code": "AUD",
+   "label": "Звук"
+  },
+  {
+   "code": "MON",
+   "label": "Мониторы"
+  },
+  {
+   "code": "RIG",
+   "label": "Обвес"
+  },
+  {
+   "code": "GRP",
+   "label": "Грип"
+  },
+  {
+   "code": "SET",
+   "label": "Площадка"
+  },
+  {
+   "code": "STD",
+   "label": "Студийное"
+  },
+  {
+   "code": "TRN",
+   "label": "Транспорт"
+  }
+ ],
+ "items": [
+  {
+   "key": "MY-01",
+   "category": "LGT",
+   "name": "Aputure B7C",
+   "note": "Комплект: Коробка,лампа,мешочек",
+   "offers": [
+    {
+     "tg": "asapmirmadeit",
+     "qty": 1,
+     "price": 300,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-02",
+   "category": "GRP",
+   "name": "Matthellini Clamp",
+   "offers": [
+    {
+     "tg": "asapmirmadeit",
+     "qty": 1,
+     "price": 130,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-03",
+   "category": "RIG",
+   "name": "Magic Arm SmallRig",
+   "offers": [
+    {
+     "tg": "asapmirmadeit",
+     "qty": 2,
+     "price": 100,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-04",
+   "category": "RIG",
+   "name": "SDI",
+   "offers": [
+    {
+     "tg": "asapmirmadeit",
+     "qty": 6,
+     "price": 130,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-05",
+   "category": "RIG",
+   "name": "Cheeseplate",
+   "offers": [
+    {
+     "tg": "asapmirmadeit",
+     "qty": 3,
+     "price": 70,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-06",
+   "category": "RIG",
+   "name": "D-tap Splitter ZDCine",
+   "offers": [
+    {
+     "tg": "asapmirmadeit",
+     "qty": 1,
+     "price": 100,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-07",
+   "category": "RIG",
+   "name": "Рюкзак разгрузка V Pleyt",
+   "offers": [
+    {
+     "tg": "The_Sk1dyyy",
+     "qty": 1,
+     "price": 1500,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-08",
+   "category": "TRN",
+   "name": "Segway Mini",
+   "mark": "Скидка MIFS",
+   "offers": [
+    {
+     "tg": "The_Sk1dyyy",
+     "qty": 1,
+     "price": 3000,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-09",
+   "category": "MON",
+   "name": "iPad Video Assist",
+   "note": "Система видео захвата на базе iPad Pro с картой видео захвата, video assist и cinemon\nТреггерит любую камеру, есть хищник, кеинг зеленки в реал тайм и кучу всего другого",
+   "offers": [
+    {
+     "tg": "The_Sk1dyyy",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-10",
+   "category": "LGT",
+   "name": "Godox MA5R с Magsafe",
+   "note": "Комплект: Прибор, силиконовый диффузор и провод type c",
+   "offers": [
+    {
+     "tg": "alexey_bernatsky",
+     "qty": 1,
+     "price": 250,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-11",
+   "category": "STB",
+   "name": "Ronin RSC 2",
+   "offers": [
+    {
+     "tg": "clx_crew",
+     "qty": 1,
+     "price": 1300,
+     "note": null
+    },
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-12",
+   "category": "AUD",
+   "name": "Zoom H5",
+   "offers": [
+    {
+     "tg": "clx_crew",
+     "qty": 1,
+     "price": 800,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-13",
+   "category": "STD",
+   "name": "Дым машина",
+   "note": "ГЛИЦЕРИН СРЕДНЕЙ ПЛОТНОСТИ",
+   "offers": [
+    {
+     "tg": "clx_crew",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-14",
+   "category": "RIG",
+   "name": "Magic Arm SmallRig Mini",
+   "offers": [
+    {
+     "tg": "clx_crew",
+     "qty": 2,
+     "price": 150,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-15",
+   "category": "SET",
+   "name": "Рации",
+   "offers": [
+    {
+     "tg": "clx_crew",
+     "qty": 3,
+     "price": null,
+     "note": "(Baofeng bf-777s 2 шт и Kenwood TK-F6 (совместимы на одной частоте)"
+    },
+    {
+     "tg": "gusevpalich",
+     "qty": 2,
+     "price": 400,
+     "note": "(Baofeng с USB C)"
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-16",
+   "category": "LGT",
+   "name": "Стробоскоп",
+   "note": "Стробоскопы 4 шт\n!У двоих отсутствует пластиковая крышка на лампу!",
+   "offers": [
+    {
+     "tg": "clx_crew",
+     "qty": 4,
+     "price": 400,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-17",
+   "category": "CAM",
+   "name": "BMPCC 4K",
+   "note": "Клетка Tilta как на фото",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-18",
+   "category": "SET",
+   "name": "Интеркомы",
+   "note": "Комплект: 7 ушей обычные, 1 pro, заряка на 8 аккумов, кабель питания на D-TAP и на сеть, лейблы на уши, сменые амбишуры",
+   "offers": [
+    {
+     "tg": "The_Sk1dyyy",
+     "qty": 8,
+     "price": null,
+     "note": "1 набор из 8шт"
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-19",
+   "category": "STB",
+   "name": "Cinesaddle",
+   "offers": [
+    {
+     "tg": "Asaparttt",
+     "qty": 1,
+     "price": 500,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-20",
+   "category": "RIG",
+   "name": "Фильтр ProMist 1 YoPyCine 5,65",
+   "offers": [
+    {
+     "tg": "Asaparttt",
+     "qty": 1,
+     "price": 600,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-21",
+   "category": "STB",
+   "name": "DJI RS4 Pro",
+   "offers": [
+    {
+     "tg": "Daanee4kaa",
+     "qty": 1,
+     "price": 1800,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-22",
+   "category": "RIG",
+   "name": "Adapter K&F FD-E",
+   "note": "Комплект: кейс",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 200,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-23",
+   "category": "RIG",
+   "name": "Adapter K&F M42-E",
+   "note": "Комплект: кейс",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 200,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-24",
+   "category": "RIG",
+   "name": "Клетка SmallRig 2238",
+   "note": "Совместима с Sony A7R III/A7 III/A7 II/A7R II/A7S II\nНа быстросъеме arca\nКомплект: клетка, площадка, болт 1/4",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 700,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-25",
+   "category": "SET",
+   "name": "RoboCup",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 250,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-26",
+   "category": "RIG",
+   "name": "Magic Arm SmallRig 11”",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 200,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-27",
+   "category": "RIG",
+   "name": "Clamp SmallRig",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 50,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-28",
+   "category": "STB",
+   "name": "Карбоновый Manfrotto 190CX3",
+   "note": "Для легких камер \nКомплект: ноги, голова, площадка с болтом\nНет резинки на одной ноге",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 300,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-29",
+   "category": "RIG",
+   "name": "D-tap сплиттер",
+   "note": "Имеет дуалок",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 150,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-30",
+   "category": "RIG",
+   "name": "Страховка для LMB",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 150,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-31",
+   "category": "SET",
+   "name": "Клинья для Dolly",
+   "note": "Состояние: у некоторых немного отколот нос",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 20,
+     "price": 350,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-32",
+   "category": "RIG",
+   "name": "Дождевик",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 150,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-33",
+   "category": "SET",
+   "name": "Рюкзак Kata",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 150,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-34",
+   "category": "RIG",
+   "name": "Страховка 1м",
+   "note": "Комплект: один карабин, за доплату (Две сигареты либо 50₽) могу закинуть второй альпинистский пецл",
+   "offers": [
+    {
+     "tg": "gusevpalich",
+     "qty": 1,
+     "price": 150,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-35",
+   "category": "CAM",
+   "name": "Canon 6D Mark II",
+   "note": "Комплект: Зарядка и 3 аккумулятора LP-E6N",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-36",
+   "category": "RIG",
+   "name": "CPL 77",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-37",
+   "category": "RIG",
+   "name": "ND 77",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-38",
+   "category": "RIG",
+   "name": "Viltrox EF-MFT",
+   "note": "!Не позволяет фокусироваться в бесконечность (Частая проблема у них)!",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-39",
+   "category": "SET",
+   "name": "Ткань чёрная",
+   "note": "!Позже уточню размеры!\nТолько ткань",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-40",
+   "category": "SET",
+   "name": "Ткань зелёная",
+   "note": "!Позже уточню размеры!\nТолько ткань",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  },
+  {
+   "key": "MY-41",
+   "category": "CAM",
+   "name": "Экшен-камера Xiaomi Yi",
+   "offers": [
+    {
+     "tg": "forest_rec",
+     "qty": 1,
+     "price": null,
+     "note": null
+    }
+   ],
+   "photo": true
+  }
+ ]
+}
