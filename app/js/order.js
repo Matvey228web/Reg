@@ -302,9 +302,9 @@ const OrderScreen = (() => {
     return `
       <div class="section" id="order-receive-section">
         <div class="section-title">На руках сейчас</div>
+        ${receiveError ? `<div class="error-box">${escapeHtml(receiveError)}</div>` : ""}
         ${open.length ? `
         <div id="order-open-list">${open.map((g) => openRowHtml(g, true)).join("")}</div>
-        ${receiveError ? `<div class="error-box">${escapeHtml(receiveError)}</div>` : ""}
         <button class="btn" id="order-checkin-all" ${anyBusy ? "disabled" : ""}>${checkinAllBusy
           ? `Принимаем ${open.length} ${plural(open.length, "позицию", "позиции", "позиций")}…`
           : `Принять всё (${open.length})`}</button>
@@ -552,6 +552,10 @@ const OrderScreen = (() => {
   // scan.js: тот же запрос /transaction/checkin и те же поля. Раньше кнопка
   // уводила на «Скан», а там — ещё один поиск предмета (6–9 секунд) и та же
   // форма: «отсканируй ещё раз» то, что и так известно по заказу.
+  //
+  // Оптимистично, как confirmRemove в announcements.js: строка уходит из «На
+  // руках» сразу, запрос идёт в фоне — таблица отвечает 6–9 секунд, и ждать
+  // их над каждой позицией склад не должен. Откажет — см. undoReturn.
   async function checkinLine(group) {
     const id = String(group.item_id);
     if (checkingIn.has(id) || checkinAllBusy) return;
@@ -572,8 +576,13 @@ const OrderScreen = (() => {
     delete lineErrors[key];
     receiveError = "";
     lineNotes = {};   // «Выдано: …» у строк состава после возврата уже неправда
+    const before = { card, draft: drafts[id] };
     checkingIn.add(id);
     opSeq += 1;
+    const seq = opSeq;
+    card = returnedLocally(card, id, qty);
+    delete drafts[id];
+    TG.hapticSuccess();
     render(card);
     try {
       const res = await apiPost("/transaction/checkin", {
@@ -584,22 +593,32 @@ const OrderScreen = (() => {
         defect_severity: severity,
         notes: "",
       });
-      TG.hapticSuccess();
       if (hasDefect) markStale("defects");     // в ремонте появилась запись
       markStale("orders");                     // заказ мог закрыться возвратом
       Cache.patch("equipment", "item_id", id,
         (row) => ItemState.afterCheckin(row, qty, severity, res && res.qty_out));
       loadItemsMap();
-      delete drafts[id];
-      card = returnedLocally(card, id, qty);
     } catch (err) {
-      TG.hapticError();
-      lineErrors[key] = err.message;
+      undoReturn(seq, before, [{ id, draft: before.draft }],
+        "Не принято: " + itemName(id) + ": " + err.message);
     } finally {
       checkingIn.delete(id);
     }
     render(card);
     reconcile();
+  }
+
+  // Таблица отказала уже после того, как строка ушла из «На руках». Если с
+  // тех пор ничего не начинали — возвращаем карточку как была; если начали
+  // (второй приём, пока шёл первый) — прежняя копия затёрла бы и их, поэтому
+  // правду берём из таблицы (reconcile после операции перечитает карточку).
+  function undoReturn(seq, before, lines, message) {
+    TG.hapticError();
+    if (seq === opSeq) card = before.card;
+    lines.forEach(({ id, draft }) => { if (draft) drafts[id] = draft; });
+    receiving = true;
+    receiveError = message;
+    if (seq !== opSeq) reloadPending = true;
   }
 
   // Возврат из архива. Убирать в архив с карточки больше нельзя (кнопку сняли
@@ -632,9 +651,16 @@ const OrderScreen = (() => {
     if (checkinAllBusy || checkingIn.size || !groups.length) return;
     checkinAllBusy = true;
     opSeq += 1;
+    const seq = opSeq;
+    const before = { card };
     receiveError = "";
     lineNotes = {};
     groups.forEach((g) => delete lineErrors["in:" + g.item_id]);
+    // Оптимистично, как checkinLine: всё уходит из «На руках» сразу.
+    groups.forEach((g) => { card = returnedLocally(card, g.item_id, g.qty); });
+    const drafted = groups.map((g) => ({ id: String(g.item_id), draft: drafts[String(g.item_id)] }));
+    drafted.forEach(({ id }) => delete drafts[id]);
+    TG.hapticSuccess();
     render(card);
     const failed = [];
     let done = 0;
@@ -651,8 +677,6 @@ const OrderScreen = (() => {
           // Принятое известно — правим строку каталога, а не сбрасываем весь.
           Cache.patch("equipment", "item_id", r.item_id,
             (row) => ItemState.afterCheckin(row, qty, null, r.qty_out));
-          card = returnedLocally(card, r.item_id, qty);
-          delete drafts[String(r.item_id)];
           done += 1;
         } else {
           lineErrors["in:" + r.item_id] = r.error;
@@ -667,16 +691,17 @@ const OrderScreen = (() => {
     markStale("orders");
     loadItemsMap();
     if (failed.length) {
-      TG.hapticError();
-      receiveError = (done ? `Принято ${done}, не принято: ` : "Не принято: ") + failed.join("; ");
+      // Частичный отказ: что принято, а что нет, знает только таблица — после
+      // отката карточку перечитываем целиком (reconcile ниже).
+      undoReturn(done ? -1 : seq, before, drafted,
+        (done ? `Принято ${done}, не принято: ` : "Не принято: ") + failed.join("; "));
     } else {
-      TG.hapticSuccess();
       receiving = false;
-      TG.showAlert("Принято " + done + " " + plural(done, "позиция", "позиции", "позиций"));
     }
     render(card);
     reconcile();
   }
+
 
   function onShow(params) {
     if (params && params.orderId !== undefined && String(params.orderId) !== String(currentOrderId)) {
