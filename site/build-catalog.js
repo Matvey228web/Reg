@@ -9,8 +9,19 @@
 //
 //   node site/build-catalog.js            — собрать site/catalog.json
 //   node site/build-catalog.js --print    — показать, ничего не записывая
+//
+// Фото из колонки «Фото» таблицы Models (решение владельца, 6 октября 2026):
+// ссылка https скачивается и приводится к 800x800 через site/photos.py
+// (нужны python3 и Pillow). Качаем, только если файла ещё нет или ссылка в
+// таблице сменилась с прошлой сборки. Моделям без ссылки ничего не меняется:
+// источник — папка site/photos, и убранная из таблицы ссылка файл не удаляет.
 
 const fs = require("fs");
+const os = require("os");
+const dns = require("dns").promises;
+const net = require("net");
+const crypto = require("crypto");
+const { spawnSync } = require("child_process");
 const path = require("path");
 
 const REPO = path.resolve(__dirname, "..");
@@ -54,8 +65,126 @@ async function ask(endpoint, payload) {
   return data.data;
 }
 
-(async () => {
-  const live = await ask("/public/catalog", {});
+// --- Фото по ссылке из таблицы ---
+
+const PHOTO_TIMEOUT_MS = 30000;
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
+const PHOTO_MAX_REDIRECTS = 5;
+// Только то, что умеет site/photos.py.
+const PHOTO_EXT = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+const isHttps = (v) => {
+  try { return new URL(String(v)).protocol === "https:"; } catch { return false; }
+};
+
+// Ссылка «поделиться» с Google Drive отдаёт страницу, а не картинку: берём
+// прямую выдачу файла по тому же id.
+function directUrl(url) {
+  const u = new URL(url);
+  if (u.hostname === "drive.google.com") {
+    const id = (u.pathname.match(/\/file\/d\/([\w-]+)/) || [])[1] || u.searchParams.get("id");
+    if (id) return "https://drive.google.com/uc?export=download&id=" + id;
+  }
+  return url;
+}
+
+function privateIp(ip) {
+  if (net.isIPv6(ip)) {
+    const low = ip.toLowerCase();
+    const mapped = low.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return privateIp(mapped[1]);
+    return low === "::" || low === "::1" || /^f[cd]/.test(low) || /^fe[89ab]/.test(low);
+  }
+  const [a, b] = ip.split(".").map(Number);
+  return a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
+
+// Ссылку вводит человек в таблице, а скачивает его машина: во внутреннюю
+// сеть и на localhost ходить нельзя. DNS проверяем сами — имя может вести на
+// частный адрес. Цена: между проверкой и запросом имя могут подменить, для
+// ручной сборки на ноутбуке это принимаем.
+async function checkHost(host, allowLocal) {
+  if (allowLocal) return;
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
+    throw new Error("адрес ведёт во внутреннюю сеть: " + host);
+  }
+  const addrs = net.isIP(h) ? [{ address: h }] : await dns.lookup(h, { all: true });
+  if (!addrs.length || addrs.some((a) => privateIp(a.address))) {
+    throw new Error("адрес ведёт во внутреннюю сеть: " + host);
+  }
+}
+
+async function fetchImage(url, opts) {
+  const signal = AbortSignal.timeout(PHOTO_TIMEOUT_MS);
+  let cur = directUrl(url);
+  for (let hop = 0; ; hop++) {
+    const u = new URL(cur);
+    if (u.protocol !== "https:" && !(opts.allowLocal && u.protocol === "http:")) {
+      throw new Error("только https: " + cur);
+    }
+    await checkHost(u.hostname, opts.allowLocal);
+    const res = await fetch(cur, { redirect: "manual", signal, headers: { "User-Agent": "Mozilla/5.0" } });
+    const where = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && where) {
+      if (hop >= PHOTO_MAX_REDIRECTS) throw new Error("больше " + PHOTO_MAX_REDIRECTS + " перенаправлений");
+      cur = new URL(where, cur).href;
+      continue;
+    }
+    if (!res.ok) throw new Error("ответ " + res.status);
+    const type = String(res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!type.startsWith("image/")) throw new Error("это не картинка (" + (type || "тип не указан") + ")");
+    if (!PHOTO_EXT[type]) throw new Error("формат " + type + " не поддерживается, нужен JPEG, PNG или WebP");
+    if (Number(res.headers.get("content-length")) > PHOTO_MAX_BYTES) throw new Error("файл больше 8 МБ");
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of res.body) {
+      size += chunk.length;
+      if (size > PHOTO_MAX_BYTES) throw new Error("файл больше 8 МБ");
+      chunks.push(chunk);
+    }
+    return { buf: Buffer.concat(chunks), ext: PHOTO_EXT[type] };
+  }
+}
+
+function needPillow() {
+  const r = spawnSync("python3", ["-c", "import PIL"], { encoding: "utf8" });
+  if (r.error || r.status !== 0) {
+    throw new Error("Для фото из таблицы нужны python3 и Pillow. Поставьте: " +
+      "python3 -m pip install Pillow (и python3, если его нет), затем повторите сборку.");
+  }
+}
+
+// Один файл — один вызов photos.py: битая картинка не должна унести остальные.
+async function downloadPhotos(todo, opts) {
+  const done = new Set();
+  if (!todo.length) return done;
+  needPillow();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mifs-photos-"));
+  try {
+    for (const { key, url } of todo) {
+      try {
+        const { buf, ext } = await fetchImage(url, opts);
+        const file = path.join(tmp, key + "." + ext);
+        fs.writeFileSync(file, buf);
+        const r = spawnSync("python3", [opts.photosPy, file], { encoding: "utf8" });
+        if (r.status !== 0) throw new Error("photos.py: " + String(r.stderr || r.stdout).trim().split("\n").pop());
+        if (!fs.existsSync(path.join(opts.photosDir, key + ".jpg"))) throw new Error("photos.py не создал файл");
+        done.add(key);
+        console.log("  фото " + key + ": скачано и приведено к 800x800");
+      } catch (err) {
+        console.error("  фото " + key + ": пропущено (" + err.message + "), прежний файл остаётся");
+      }
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  return done;
+}
+
+async function build(live, opts) {
   // Пробелы и переносы внутри названия схлопываем: в таблице такие названия
   // есть, а строка заявки «N. Название: 0 (кол-во x 0)» разбирается построчно —
   // перенос разрывает её надвое, и позиция молча пропадает из заявки.
@@ -75,6 +204,7 @@ async function ask(endpoint, payload) {
       section: m.section || "",
       total: m.total,
     };
+    if (isHttps(m.photo)) out.photo_src = String(m.photo).trim();
     const at = name.indexOf(SEP);
     if (at > 0 && at + SEP.length < name.length) {
       out.group = name.slice(0, at);
@@ -92,11 +222,51 @@ async function ask(endpoint, payload) {
   });
   categories.sort((a, b) => a.label.localeCompare(b.label, "ru"));
 
+  const photosDir = opts.photosDir;
+
+  // Ссылки из таблицы: качаем только новое или изменившееся с прошлой сборки.
+  let prev = {};
+  try {
+    JSON.parse(fs.readFileSync(opts.out, "utf8")).models.forEach((m) => {
+      prev[m.category + "-" + m.model_code] = { src: m.photo_src, v: m.photo_v };
+    });
+  } catch { /* первой сборки или битого снимка достаточно, чтобы качать всё */ }
+  const keyOf = (m) => m.category + "-" + m.model_code;
+  const todo = models.filter((m) => m.photo_src).filter((m) => {
+    const k = keyOf(m);
+    return !fs.existsSync(path.join(photosDir, k + ".jpg")) || (prev[k] || {}).src !== m.photo_src;
+  }).map((m) => ({ key: keyOf(m), url: m.photo_src }));
+  let done = new Set();
+  if (opts.print) {
+    if (todo.length) console.log(`к скачиванию было бы: ${todo.length} (--print ничего не качает)`);
+  } else {
+    done = await downloadPhotos(todo, opts);
+    const failed = new Set(todo.filter((t) => !done.has(t.key)).map((t) => t.key));
+    models.forEach((m) => {
+      const k = keyOf(m);
+      if (!failed.has(k)) return;
+      // Не вышло — остаётся прежнее состояние, чтобы следующая сборка попробовала снова.
+      const was = prev[k] || {};
+      if (was.src) { m.photo_src = was.src; if (was.v) m.photo_v = was.v; } else delete m.photo_src;
+    });
+  }
+  // Версия снимка — по его содержимому, а не по ссылке: /photos/* кэшируется на
+  // 7 дней под одним именем, и заменённый снимок (из таблицы или файлом в
+  // папке) иначе неделю показывался бы старым — так и вышло 6 октября 2026,
+  // когда телефон владельца держал фото прежней выкладки.
+  models.forEach((m) => {
+    const file = path.join(photosDir, keyOf(m) + ".jpg");
+    if (fs.existsSync(file)) {
+      m.photo_v = crypto.createHash("sha1").update(fs.readFileSync(file)).digest("hex").slice(0, 8);
+    } else {
+      delete m.photo_v;
+    }
+  });
+
   // Какие фотографии есть на самом деле. Без этого списка витрина просила у
   // сервера картинку на каждую позицию и получала 404: восемьдесят пять
   // напрасных запросов в коридоре с плохим интернетом. Теперь <img> ставится
   // только там, где файл действительно лежит.
-  const photosDir = path.join(__dirname, "photos");
   const photos = fs.existsSync(photosDir)
     ? fs.readdirSync(photosDir)
         .filter((f) => /\.(jpg|jpeg|png|webp)$/i.test(f))
@@ -112,15 +282,30 @@ async function ask(endpoint, payload) {
   };
 
   const json = JSON.stringify(snapshot);
-  if (process.argv.includes("--print")) {
+  if (opts.print) {
     console.log(`моделей ${models.length}, категорий ${categories.length}, ` +
                 `фотографий ${photos.length}, ` +
                 `${(json.length / 1024).toFixed(1)} КБ`);
     console.log(JSON.stringify(models.slice(0, 5), null, 1));
     return;
   }
-  fs.writeFileSync(OUT, json);
+  fs.writeFileSync(opts.out, json);
   console.log(`снимок собран: моделей ${models.length}, категорий ` +
               `${categories.length}, фотографий ${photos.length}, ` +
               `${(json.length / 1024).toFixed(1)} КБ`);
-})().catch((err) => { console.error("ОШИБКА:", err.message); process.exit(1); });
+  return snapshot;
+}
+
+module.exports = { build, fetchImage, privateIp, directUrl };
+
+if (require.main === module) {
+  (async () => {
+    const live = await ask("/public/catalog", {});
+    await build(live, {
+      print: process.argv.includes("--print"),
+      out: OUT,
+      photosDir: path.join(__dirname, "photos"),
+      photosPy: path.join(__dirname, "photos.py"),
+    });
+  })().catch((err) => { console.error("ОШИБКА:", err.message); process.exit(1); });
+}

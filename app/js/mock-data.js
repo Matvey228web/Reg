@@ -1031,7 +1031,7 @@ const MockAPI = {
         MockStore.requireToken(token);
         let list = MockStore.models;
         if (body && body.category && body.category !== "all") list = list.filter((m) => m.category === body.category);
-        return list.map((m) => ({ section: "", ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
+        return list.map((m) => ({ section: "", photo: "", ...m })).sort((a, b) => a.model_name.localeCompare(b.model_name));
       }
 
       // Разметка моделей по разделам витрины. Настоящая версия —
@@ -1082,6 +1082,51 @@ const MockAPI = {
         if (!m) { const e = new Error("Такой модели нет: " + cat + "·" + code); e.status = 404; throw e; }
         m.price = price;
         return { category: cat, model_code: code, price };
+      }
+
+      // Название и фото модели — как handleModelsRename / handleModelsPhoto.
+      // Фото в демо хранится самим data URL: Диска здесь нет.
+      case "/models/rename": {
+        MockStore.requireAdmin(token);
+        const cat = String(body.category || "").toUpperCase();
+        const code = String(body.model_code || "").padStart(2, "0");
+        const raw = String(body.model_name || "");
+        const err = (msg, status) => { const e = new Error(msg); e.status = status; return e; };
+        if (/[:\r\n]/.test(raw)) throw err("В названии нельзя двоеточие и перенос строки: по двоеточию разбирается строка заказа.", 400);
+        const name = raw.replace(/\s+/g, " ").trim();
+        if (!name) throw err("Название не может быть пустым", 400);
+        if (name.length > 120) throw err("Название длиннее 120 знаков", 400);
+        const m = MockStore.models.find((x) => x.category === cat &&
+          String(x.model_code).padStart(2, "0") === code);
+        if (!m) throw err("Такой модели нет: " + cat + "·" + code, 404);
+        const needle = MockStore.normalizeModelName(name);
+        const clash = MockStore.models.find((x) => x !== m && x.category === cat &&
+          MockStore.normalizeModelName(x.model_name) === needle);
+        if (clash) throw err("В этой категории уже есть модель «" + clash.model_name + "» — это то же название.", 409);
+        m.model_name = name;
+        let units = 0;
+        MockStore.equipment.forEach((i) => {
+          if (i.category === cat && String(i.model_code).padStart(2, "0") === code && i.name !== name) {
+            i.name = name; units += 1;
+          }
+        });
+        return { category: cat, model_code: code, model_name: name, renamed_units: units };
+      }
+
+      case "/models/photo": {
+        MockStore.requireAdmin(token);
+        const cat = String(body.category || "").toUpperCase();
+        const code = String(body.model_code || "").padStart(2, "0");
+        const image = String(body.image || "");
+        if (image && !/^data:image\/(jpeg|png|webp);base64,/.test(image)) {
+          const e = new Error("Нужна картинка JPEG, PNG или WebP"); e.status = 400; throw e;
+        }
+        if (image.length > 700 * 1024 * 4 / 3) { const e = new Error("Фото больше 700 КБ"); e.status = 413; throw e; }
+        const m = MockStore.models.find((x) => x.category === cat &&
+          String(x.model_code).padStart(2, "0") === code);
+        if (!m) { const e = new Error("Такой модели нет: " + cat + "·" + code); e.status = 404; throw e; }
+        m.photo = image;
+        return { category: cat, model_code: code, photo: image };
       }
 
       // Выдача по заявке без сканирования — как handleOrderIssue в Code.gs:

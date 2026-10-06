@@ -139,6 +139,18 @@
     }
   });
 
+  // Живой каталог: перерисовываем, только если позиция ещё есть. Вариант и
+  // количество остаются; нет позиции — на экране то, что было.
+  document.addEventListener("catalog-live", function () {
+    if (!model || !$("qty")) return;
+    var next = catalog.byKey[Site.key(model)];
+    if (!next) return;
+    var n = $("qty").value;
+    show(next);
+    render();
+    $("qty").value = n;
+  });
+
   Site.loadCatalog()
     .then(function (data) {
       catalog = data;

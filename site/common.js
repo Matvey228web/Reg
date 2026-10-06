@@ -98,9 +98,14 @@ var Site = (function () {
   // (собирает site/build-catalog.js по папке site/photos): просить у сервера
   // картинку «на всякий случай» — это 404 на каждую позицию.
   function photo(m) {
+    // Ссылка из таблицы, пришедшая живым ответом: файла в снимке ещё нет.
+    if (m.photo_live) return m.photo_live;
     var have = (catalog && catalog.photos) || [];
     var k = key(m);
-    return have.indexOf(k) === -1 ? "" : "photos/" + k + ".jpg";
+    if (have.indexOf(k) === -1) return "";
+    // /photos/* кэшируется на 7 дней под одним именем: без ?v= заменённый
+    // в таблице снимок неделю показывался бы старым.
+    return "photos/" + k + ".jpg" + (m.photo_v ? "?v=" + m.photo_v : "");
   }
 
   // --- Значки ---
@@ -237,16 +242,119 @@ var Site = (function () {
 
   var catalog = null;
 
+  function index() {
+    catalog.byKey = {};
+    (catalog.models || []).forEach(function (m) { catalog.byKey[key(m)] = m; });
+  }
+
+  // Один запрос на страницу: подвал и сама страница просят каталог одновременно,
+  // и вторая загрузка подменила бы объект, на который уже ссылается первая.
+  var loading = null;
+
   function loadCatalog() {
-    if (catalog) return Promise.resolve(catalog);
-    return fetch("catalog.json")
+    if (loading) return loading;
+    loading = fetch("catalog.json")
       .then(function (res) { return res.json(); })
       .then(function (data) {
         catalog = data;
-        catalog.byKey = {};
-        (catalog.models || []).forEach(function (m) { catalog.byKey[key(m)] = m; });
+        index();
+        goLive();
         return catalog;
       });
+    loading.catch(function () { loading = null; });
+    return loading;
+  }
+
+  // Живой ответ /public/catalog без дат: модели, какие есть сейчас, и признак
+  // приёма заявок. Один запрос на страницу для двоих (обновление каталога и
+  // ordersOpen): воркер держит ответ в кэше, но второй вызов всё равно лишний.
+  // Через 10 секунд сдаёмся — снимок остаётся на экране.
+  var baseReq = null;
+
+  function liveBase() {
+    if (baseReq) return baseReq;
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, 10000) : null;
+    baseReq = fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ endpoint: "/public/catalog", payload: {} }),
+      signal: ctl ? ctl.signal : undefined,
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (timer) clearTimeout(timer);
+        if (!data || !data.ok || !data.data) throw new Error("не ответил");
+        return data.data;
+      }, function (err) {
+        if (timer) clearTimeout(timer);
+        throw err;
+      });
+    baseReq.catch(function () { baseReq = null; });
+    return baseReq;
+  }
+
+  // Переименование, смена раздела и фото в приложении должны дойти до сайта за
+  // минуты, без пересборки снимка. Снимок рисуется первым, затем его заменяет
+  // живой список. Правило группы « · » — копия из build-catalog.js, держать
+  // одинаковым. Файл снимка у фото остаётся, пока ссылка не сменилась; новая
+  // ссылка (или файла нет) — photo_live. Пустой или битый ответ игнорируем.
+  var SEP = " · ";
+
+  function merge(live) {
+    var snap = catalog.byKey;
+    var models = live.map(function (m) {
+      var name = String(m.model_name || "").replace(/\s+/g, " ").trim();
+      var out = {
+        category: m.category,
+        category_label: m.category_label,
+        model_code: m.model_code,
+        model_name: name,
+        section: m.section || "",
+        total: m.total,
+      };
+      var k = key(out);
+      var old = snap[k];
+      var url = typeof m.photo === "string" && /^https:\/\//i.test(m.photo.trim()) ? m.photo.trim() : "";
+      var local = (catalog.photos || []).indexOf(k) !== -1;
+      if (url) out.photo_src = url;
+      if (url && (!local || !old || url !== old.photo_src)) out.photo_live = url;
+      else if (old && old.photo_v) out.photo_v = old.photo_v;
+      var at = name.indexOf(SEP);
+      if (at > 0 && at + SEP.length < name.length) {
+        out.group = name.slice(0, at);
+        out.variant = name.slice(at + SEP.length);
+      }
+      return out;
+    });
+    var cats = [], seen = {};
+    models.forEach(function (m) {
+      if (seen[m.category]) return;
+      seen[m.category] = true;
+      cats.push({ code: m.category, label: m.category_label });
+    });
+    cats.sort(function (a, b) { return a.label.localeCompare(b.label, "ru"); });
+    return { models: models, categories: cats };
+  }
+
+  function sign(models) {
+    return models.map(function (m) {
+      return [key(m), m.model_name, m.category_label, m.section, m.photo_live || "", m.photo_v || ""].join("|");
+    }).sort().join("\n");
+  }
+
+  function goLive() {
+    liveBase().then(function (data) {
+      var list = data.models;
+      if (!Array.isArray(list) || !list.length) return;
+      var next = merge(list);
+      if (sign(next.models) === sign(catalog.models)) return;
+      // Тот же объект: страницы держат на него ссылки.
+      catalog.models = next.models;
+      catalog.categories = next.categories;
+      index();
+      document.dispatchEvent(new CustomEvent("catalog-live"));
+    }).catch(function () { /* остаёмся на снимке, тихо */ });
   }
 
   // Единственный живой запрос сайта, и только когда даты выбраны.
@@ -325,17 +433,10 @@ var Site = (function () {
 
   function ordersOpen() {
     if (openKnown !== null) return Promise.resolve(openKnown);
-    return fetch(BACKEND, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ endpoint: "/public/catalog", payload: {} }),
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        if (!data || !data.ok) throw new Error("не ответил");
-        openKnown = Number(data.data.orders_open) === 1;
-        return openKnown;
-      });
+    return liveBase().then(function (data) {
+      openKnown = Number(data.orders_open) === 1;
+      return openKnown;
+    });
   }
 
   // Отправка заявки складу. Ответа ждём долго — таблица отвечает 5–20 секунд,
