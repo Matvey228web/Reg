@@ -10,6 +10,7 @@ const ModelsScreen = (() => {
   let models = [];      // [{ category, model_code, model_name }]
   let counts = {};      // "CAM|01" -> сколько позиций
   let query = "";
+  let focus = null;     // { category, model_code } — пришли из карточки вещи
   let warnings = {};    // "CAM|01" -> подсказка после переименования (до ухода с экрана)
 
   const isAdmin = () => ((Auth.getSession() || {}).role === "Admin");
@@ -124,6 +125,16 @@ const ModelsScreen = (() => {
 
     box.innerHTML = html;
     bind();
+    if (focus) {
+      const m = models.filter((x) => x.category === focus.category &&
+        Number(x.model_code) === Number(focus.model_code))[0];
+      const el = m && (document.getElementById("model-name-" + key(m)) ||
+        document.getElementById("model-cat-" + key(m)));
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        focus = null;
+      }
+    }
   }
 
   function rowHtml(m, cats) {
@@ -521,8 +532,10 @@ const ModelsScreen = (() => {
     return text.length <= limit ? text : text.slice(0, limit - 1) + "…";
   }
 
-  function onShow() {
-    query = "";
+  function onShow(params = {}) {
+    // Из карточки вещи: сразу к её модели — поиск по названию и прокрутка.
+    focus = params.category ? { category: params.category, model_code: params.model_code } : null;
+    query = focus ? String(params.name || "").trim().toLowerCase() : "";
     warnings = {};
     showBoxError("models-error", "");
     load();

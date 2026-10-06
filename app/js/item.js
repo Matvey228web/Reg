@@ -1,5 +1,6 @@
 const ItemScreen = (() => {
   let currentItemId = null;
+  let shownItem = null;   // для карандаша: он живёт дольше карточки
   let ordersById = {};
   let history = null;
   let historySeq = 0;     // ответ на устаревший запрос истории не рисуем
@@ -369,11 +370,11 @@ const ItemScreen = (() => {
   }
 
   function render(item) {
+    shownItem = item;
     document.getElementById("item-title").textContent = item.name;
     const content = document.getElementById("item-content");
 
-    // Карандаш в заголовке — только администратору; форма правки открывается
-    // над карточкой, прямо под ним.
+    // Карандаш в заголовке — только администратору.
     const me = Auth.getSession() || {};
     document.getElementById("item-edit-toggle").style.display = me.role === "Admin" ? "" : "none";
 
@@ -387,6 +388,8 @@ const ItemScreen = (() => {
         ${item.serial_number ? `<div class="card-sub">Заводской №: ${escapeHtml(item.serial_number)}</div>` : ""}
         ${item.inventory_number ? `<div class="card-sub">Инвентарный №: ${escapeHtml(item.inventory_number)}</div>` : ""}
         ${item.condition_notes ? `<div class="card-sub">${escapeHtml(item.condition_notes)}</div>` : ""}
+        ${me.role === "Admin" ? `<button type="button" class="btn btn--secondary" id="item-unit-edit"
+            style="margin-top:12px">Номера и состояние этой вещи</button>` : ""}
       </div>
 
       <div class="section">
@@ -539,10 +542,21 @@ const ItemScreen = (() => {
     Router.register("item", { onShow });
     // Кнопка в заголовке живёт дольше карточки — слушатель вешаем один раз,
     // а форму ищем в момент нажатия.
+    // Карандаш ведёт к модели целиком — название, фото, цена, раздел (решение
+    // владельца 6 октября 2026): это правят чаще, и ради этого искали экран
+    // «Модели» в настройках. Номера и состояние самой вещи — кнопкой в карточке.
     document.getElementById("item-edit-toggle").addEventListener("click", () => {
+      if (!shownItem) return;
+      Router.navigate("models", {
+        category: shownItem.category, model_code: shownItem.model_code, name: shownItem.name,
+      });
+    });
+    document.getElementById("item-content").addEventListener("click", (e) => {
+      if (!e.target.closest("#item-unit-edit")) return;
       const form = document.getElementById("item-edit-form");
       if (!form) return;
       form.style.display = form.style.display === "none" ? "block" : "none";
+      if (form.style.display === "block") form.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }
 
