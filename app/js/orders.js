@@ -74,11 +74,14 @@ const OrdersScreen = (() => {
     }
     if (order.issued_open) parts.push(`на руках ${order.issued_open}`);
 
+    // Статус у каждого заказа, и «Возвращён» тоже — statusBadge, а не
+    // statusChip (решение владельца 6 октября): без бейджа строка читалась как
+    // «статус неизвестен». В каталоге, где строк сотни, норма по-прежнему молчит.
     return `
       <div class="card" data-order-id="${order.order_id}">
         <div class="card-title">
           ${orderNoHtml(order)}
-          ${statusChip(order.status)}
+          ${statusBadge(order.status)}
           ${overdue ? `<span class="badge badge--open">Просрочен</span>` : ""}
         </div>
         <div class="card-sub">${escapeHtml(order.student_name || "—")}${order.is_adult ? "" : " · с представителем"}</div>
