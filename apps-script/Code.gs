@@ -496,7 +496,8 @@ function importInventory() {
     // физически разных единиц с одинаковым названием и без серийника
     // (60 чайнаболлов, 30 октобоксов, 8 радиосистем).
     var seenSerial = {}, seenImport = {};
-    readRows(eqSheet).forEach(function (r) {
+    var eqRows = readRows(eqSheet);
+    eqRows.forEach(function (r) {
       var s = importCleanSerial(r.serial_number);
       if (s) seenSerial[s] = true;
       var m = String(r.condition_notes || "").match(/Импорт:\s*([^/]+#\d+)/);
@@ -518,6 +519,12 @@ function importInventory() {
       counters[key] = Number(r.value) || 0;
       metaRowIndex[key] = r.__row;
     });
+    // Потерянный счётчик не должен выдать уже занятый номер — как в nextUnitNumber.
+    var maxUnit = maxUnitByPrefix(eqRows);
+    for (var prefix in maxUnit) {
+      var ck = "unit_" + prefix;
+      if ((counters[ck] || 0) < maxUnit[prefix]) counters[ck] = maxUnit[prefix];
+    }
 
     // Порядок колонок берём из самого листа: новые поля дописываются в конец,
     // поэтому позиция в SCHEMA не совпадает с позицией в таблице.
@@ -859,6 +866,17 @@ function dailyMaintenance() {
   }
   try { trimLogs(); } catch (e) {
     logEvent("maintenance", "trimLogs", "exception", e && e.message ? e.message : String(e));
+  }
+  // Тихо, пока всё в порядке: «всё хорошо» каждую ночь прячет настоящие отказы.
+  try {
+    var ids = checkItemNumbers();
+    if (ids.total) {
+      logEvent("maintenance", "itemNumbers", "problems",
+        "Проверка номеров: найдено " + ids.total + " — " + JSON.stringify(ids.counts) +
+        ". Подробности — «Проверить номера» в настройках.", ids.problems.slice(0, 10));
+    }
+  } catch (e) {
+    logEvent("maintenance", "itemNumbers", "exception", e && e.message ? e.message : String(e));
   }
 }
 
@@ -3334,8 +3352,9 @@ function handleItemCreate(payload, token) {
     if (byQty && (!qty || qty < 1)) throw apiError(400, "Укажите количество — целое число от одного");
 
     var eqSheet = getSheet(SHEETS.EQUIPMENT);
+    var eqRows = readRows(eqSheet);
     if (byQty) {
-      var existing = readRows(eqSheet).filter(function (r) {
+      var existing = eqRows.filter(function (r) {
         return r.category === category && pad2(Number(r.model_code)) === pad2(model.model_code);
       })[0];
       if (existing) {
@@ -3344,14 +3363,33 @@ function handleItemCreate(payload, token) {
       }
     }
 
+    // Серийник проверяем до nextUnitNumber: отказ не должен сжигать номер.
+    var serial = String(payload.serial_number == null ? "" : payload.serial_number).trim();
+    if (serial) {
+      var taken = eqRows.filter(function (r) {
+        return String(r.serial_number || "").trim().toLowerCase() === serial.toLowerCase();
+      })[0];
+      if (taken) {
+        throw apiError(409, "Такой заводской номер уже стоит у вещи " + itemIdDigits(taken.item_id) +
+          " («" + String(taken.name || "") + "»). Два одинаковых номера — это потерянная вещь: " +
+          "по ним ищут технику, и повторный импорт считает их одной и той же.");
+      }
+    }
+
     var unit = nextUnitNumber(category, model.model_code);
     var itemId = buildItemId(category, model.model_code, unit);
+    // Страховка поверх minimum в nextUnitNumber: номер, уже занятый строкой,
+    // не пишем ни при каких обстоятельствах — этикетка должна указывать на одну вещь.
+    if (eqRows.some(function (r) { return itemIdDigits(r.item_id) === itemId; })) {
+      throw apiError(409, "Номер " + itemId + " уже занят другой вещью. Запустите «Проверить номера» " +
+        "в настройках, в разделе «Обслуживание».");
+    }
     appendRow(eqSheet, {
       item_id: itemId,
       name: model.model_name,
       category: category,
       model_code: pad2(model.model_code),
-      serial_number: payload.serial_number || "",
+      serial_number: serial,
       inventory_number: payload.inventory_number || "",
       status: "Available",
       condition_notes: payload.condition_notes || "",
@@ -5880,7 +5918,114 @@ function handleMaintenance(payload, token) {
   // Новая вкладка или колонка после выкладки: то же, что «Run» у setupSheets в
   // редакторе, но с телефона. Повторный запуск безопасен: данные не трогаются.
   if (action === "setup") return { message: setupSheets() };
+  // Только чтение: ничего не чинит. Что с найденным делать, решает человек —
+  // автоматическая перенумерация сломала бы этикетки и ссылки журналов.
+  if (action === "ids") return checkItemNumbers();
   throw apiError(400, "Неизвестное действие обслуживания");
+}
+
+// item_id как шесть цифр, если это возможно. Ячейка без текстового формата
+// хранит 010203 числом 10203: ведущий ноль съела таблица, а смысл номера тот же.
+// Не получилось привести — возвращаем строку как есть, пусть ловит проверка.
+function itemIdDigits(value) {
+  if (typeof value === "number" && value >= 0 && value <= 999999 && Math.floor(value) === value) {
+    return ("000000" + value).slice(-6);
+  }
+  var s = String(value === undefined || value === null ? "" : value).trim();
+  return /^\d{1,6}$/.test(s) ? ("000000" + s).slice(-6) : s;
+}
+
+// Наибольший ZZ среди существующих единиц по каждому XXYY: {"0102": 3}.
+function maxUnitByPrefix(rows) {
+  var max = {};
+  rows.forEach(function (r) {
+    var id = itemIdDigits(r.item_id);
+    if (!/^\d{6}$/.test(id)) return;
+    var prefix = id.slice(0, 4), unit = Number(id.slice(4));
+    if (unit > (max[prefix] || 0)) max[prefix] = unit;
+  });
+  return max;
+}
+
+// Сверка номеров перед инвентаризацией: каждый item_id должен принадлежать
+// ровно одной строке Equipment. Возвращает {problems: [{kind, item_id, row,
+// detail}], counts: {kind: n}, total}. Дубли — одной записью на номер со всеми
+// строками в detail (и rows), а не по записи на каждую строку.
+function checkItemNumbers() {
+  var rows = readRows(getSheet(SHEETS.EQUIPMENT));
+  var cats = {};
+  categories().forEach(function (c) { cats[c.code] = c.num; });
+  var problems = [];
+  var add = function (kind, itemId, row, detail, rowsList) {
+    var p = { kind: kind, item_id: itemId, row: row, detail: detail };
+    if (rowsList) p.rows = rowsList;
+    problems.push(p);
+  };
+  var list = function (nums) {
+    return nums.length === 2 ? nums[0] + " и " + nums[1] : nums.join(", ");
+  };
+
+  var byId = {}, bySerial = {};
+  rows.forEach(function (r) {
+    var raw = r.item_id;
+    var id = itemIdDigits(raw);
+    // Совсем пустая строка (хвост листа) — не вещь.
+    if (id === "" && String(r.name || "").trim() === "") return;
+
+    if (id === "") {
+      add("bad_id", "", r.__row, "У строки " + r.__row + " («" + String(r.name || "") + "») нет номера");
+    } else if (!/^\d{6}$/.test(id)) {
+      add("bad_id", String(raw), r.__row, "Номер «" + String(raw) + "» в строке " + r.__row +
+        " — не шесть цифр");
+    } else if (typeof raw === "number" || String(raw).trim() !== id) {
+      add("bad_id", id, r.__row, "Номер " + id + " в строке " + r.__row +
+        " записан как «" + String(raw) + "» — потерян ведущий ноль или лишние пробелы");
+    }
+    (byId[id] = byId[id] || []).push(r.__row);
+
+    if (/^\d{6}$/.test(id)) {
+      var num = cats[r.category];
+      var expected = (num === undefined ? "??" : num) + pad2(Number(r.model_code));
+      if (id.slice(0, 4) !== expected) {
+        add("prefix_mismatch", id, r.__row, "Номер " + id + " (строка " + r.__row + ") начинается с " +
+          id.slice(0, 4) + ", а по категории «" + String(r.category || "") + "» и модели " +
+          pad2(Number(r.model_code)) + " должно быть " + expected);
+      }
+    }
+
+    var serial = String(r.serial_number || "").trim().toLowerCase();
+    if (serial) (bySerial[serial] = bySerial[serial] || []).push(r.__row);
+  });
+
+  Object.keys(byId).forEach(function (id) {
+    if (id === "" || byId[id].length < 2) return;
+    add("duplicate_id", id, byId[id][0], "Дубль номера " + id + ": строки " + list(byId[id]), byId[id]);
+  });
+  Object.keys(bySerial).forEach(function (serial) {
+    if (bySerial[serial].length < 2) return;
+    var first = rows.filter(function (r) { return r.__row === bySerial[serial][0]; })[0];
+    add("duplicate_serial", itemIdDigits(first.item_id), first.__row,
+      "Заводской номер «" + String(first.serial_number).trim() + "» повторяется: строки " +
+      list(bySerial[serial]), bySerial[serial]);
+  });
+
+  // Отстающий счётчик сам не вредит — nextUnitNumber его догоняет, — но он
+  // значит, что номера правили руками, и стоит посмотреть, чем кончилось.
+  var counters = {};
+  readRows(getSheet(SHEETS.META)).forEach(function (m) { counters[String(m.key)] = Number(m.value) || 0; });
+  var maxUnit = maxUnitByPrefix(rows);
+  Object.keys(maxUnit).forEach(function (prefix) {
+    var have = counters["unit_" + prefix] || 0;
+    if (have >= maxUnit[prefix]) return;
+    var top = prefix + pad2(maxUnit[prefix]);
+    var holder = rows.filter(function (r) { return itemIdDigits(r.item_id) === top; })[0];
+    add("counter_behind", top, holder ? holder.__row : 0, "Счётчик unit_" + prefix + " = " + have +
+      ", а в таблице уже есть номер " + top + " (догонит при следующем добавлении вещи этой модели)");
+  });
+
+  var counts = {};
+  problems.forEach(function (p) { counts[p.kind] = (counts[p.kind] || 0) + 1; });
+  return { problems: problems, counts: counts, total: problems.length };
 }
 
 // Полное удаление сотрудника. История при этом не страдает: в журнале рядом с
@@ -6500,8 +6645,12 @@ function nextModelCode(category) {
 // списанная единица не отдаёт свой номер следующей, иначе старая этикетка
 // однажды указала бы на другую вещь.
 function nextUnitNumber(category, modelCode) {
-  var key = "unit_" + categoryNum(category) + pad2(modelCode);
-  var value = nextId(key);
+  var prefix = categoryNum(category) + pad2(modelCode);
+  var key = "unit_" + prefix;
+  // minimum — наибольший номер, уже стоящий в Equipment: счётчик в Meta мог
+  // потеряться или отстать после ручной правки, и без этого выдал бы занятый.
+  // Освободившиеся номера по-прежнему не возвращаются: максимум только растёт.
+  var value = nextId(key, maxUnitByPrefix(readRows(getSheet(SHEETS.EQUIPMENT)))[prefix] || 0);
   if (value > 99) {
     throw apiError(409, "У этой модели исчерпаны номера экземпляров (99). Заведите её как отдельную модель.");
   }
