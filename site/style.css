@@ -499,6 +499,12 @@ input:focus-visible, textarea:focus-visible {
   cursor: pointer;
 }
 .add:hover { border-color: var(--accent); color: var(--accent-text); }
+/* У группы вариантов вместо кнопки ссылка на выбор — выглядит так же. */
+a.add {
+  display: flex; align-items: center; justify-content: center;
+  text-decoration: none;
+}
+.card-variants { margin-top: 4px; color: var(--dim); font-size: 12px; }
 
 /* Заливка наплывает снизу вверх и ОСТАЁТСЯ: позиция в корзине — состояние,
    а не мигнувшее событие. Уходит только при отмене, тем же движением назад.
@@ -654,6 +660,13 @@ input:focus-visible, textarea:focus-visible {
 }
 
 .item-cat { margin: 0 0 8px; }
+.item-variant { max-width: 320px; margin-bottom: 16px; }
+.item-variant select {
+  font: inherit; font-size: 16px;   /* ниже 16 iOS увеличивает страницу при фокусе */
+  color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px; min-height: 44px; width: 100%;
+}
 .item-add { display: flex; gap: 10px; align-items: stretch; }
 .item-note { margin: 14px 0 0; color: var(--dim); font-size: 13px; }
 .item-note a { color: var(--accent-text); }

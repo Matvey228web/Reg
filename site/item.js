@@ -5,7 +5,7 @@
   "use strict";
 
   var $ = Site.$, esc = Site.escapeHtml;
-  var model = null;
+  var model = null, catalog = null;
 
   function modelKey() {
     var m = /[?&]m=([^&]+)/.exec(location.search);
@@ -42,6 +42,25 @@
     });
   })();
 
+  // Варианты одной позиции (BNC разной длины): каждый — своя модель со своим
+  // ключом, а выбор лишь переключает, какую из них положить в корзину.
+  function variantHtml() {
+    var list = Site.variants(model);
+    if (list.length < 2) return "";
+    var current = Site.key(model);
+    return '<label class="field item-variant"><span class="cap">Вариант</span>' +
+      '<select id="variant">' + list.map(function (v) {
+        var k = Site.key(v);
+        return '<option value="' + esc(k) + '"' + (k === current ? " selected" : "") + ">" +
+          esc(v.variant) + "</option>";
+      }).join("") + "</select></label>";
+  }
+
+  function show(m) {
+    model = m;
+    document.title = model.model_name + " · MifsRent";
+  }
+
   function render() {
     $("item").innerHTML =
       '<div class="item-shot"' + Site.shotAttr(model) + ">" +
@@ -55,7 +74,7 @@
         // Код позиции здесь не показываем: это складское обозначение, человеку
         // на витрине оно ничего не говорит. В адресе страницы он остаётся.
         '<p class="cap item-cat">' + esc(model.category_label) + "</p>" +
-        "<h1>" + esc(model.model_name) + "</h1>" +
+        "<h1>" + esc(model.group || model.model_name) + "</h1>" + variantHtml() +
         '<div class="item-add">' +
           '<div class="stepper">' +
             '<button type="button" id="minus" aria-label="Меньше">' + Site.icon("minus") + "</button>" +
@@ -78,6 +97,21 @@
     $("plus").addEventListener("click", function () {
       var was = qty.value;
       Site.tick(qty, Number(qty.value) + 1, was);
+    });
+
+    var pick = $("variant");
+    if (pick) pick.addEventListener("change", function () {
+      var next = catalog.byKey[pick.value];
+      if (!next) return;
+      var n = qty.value;
+      show(next);
+      try {
+        history.replaceState(null, "", location.pathname + "?m=" + encodeURIComponent(pick.value));
+      } catch (e) { /* адрес не переписался — не беда */ }
+      // Перерисовываем целиком: у варианта свой снимок и своё «в корзине уже».
+      render();
+      $("qty").value = n;
+      $("variant").focus();
     });
 
     var add = $("add");
@@ -106,14 +140,15 @@
   });
 
   Site.loadCatalog()
-    .then(function (catalog) {
+    .then(function (data) {
+      catalog = data;
       model = catalog.byKey[modelKey()];
       if (!model) {
         $("item").innerHTML = '<p class="empty">Такой позиции в каталоге нет. ' +
           '<a href="index.html">Вернуться в каталог</a></p>';
         return;
       }
-      document.title = model.model_name + " · MifsRent";
+      show(model);
       render();
     })
     .catch(function () {

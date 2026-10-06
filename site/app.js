@@ -57,6 +57,28 @@
       ' decoding="async" onerror="this.remove()" />';
   }
 
+  // Карточка группы вариантов. Положить в корзину отсюда нечего — неизвестно,
+  // какую длину, поэтому вместо «В корзину» переход к выбору. Без data-add:
+  // перерисовка по cart-refresh поставила бы сюда счётчик одного варианта.
+  function groupCell(m) {
+    var list = Site.variants(m).filter(Site.inSection);
+    var first = list[0] || m;
+    var face = list.filter(function (v) { return Site.photo(v); })[0] || first;
+    var href = "item.html?m=" + esc(Site.key(first));
+    return '<div class="cell">' +
+      '<a class="card" href="' + href + '">' +
+        '<div class="shot"' + Site.shotAttr(face) + ">" +
+          photoTag(face, ' loading="lazy"') + Site.shotIcon(face) +
+        "</div>" +
+        '<div class="card-body"><div class="card-name">' + esc(m.group) + "</div>" +
+          '<div class="card-variants">' + list.length + " " +
+            Site.plural(list.length, "вариант", "варианта", "вариантов") + "</div>" +
+        "</div>" +
+      "</a>" +
+      '<div class="card-add"><a class="add" href="' + href + '">Выбрать</a></div>' +
+    "</div>";
+  }
+
   function render() {
     if (Site.section() === "my") return renderMy();
 
@@ -67,8 +89,18 @@
       return (m.model_name + " " + m.category_label).toLowerCase().indexOf(query) !== -1;
     });
 
-    var byCat = {};
-    shown.forEach(function (m) { (byCat[m.category] = byCat[m.category] || []).push(m); });
+    // Варианты одной позиции («Кабель BNC · 3 м», «… · 10 м») — одна карточка:
+    // длину выбирают на странице позиции. Поиск по-прежнему идёт по каждому
+    // названию, поэтому карточку находит и группа, и любой её вариант.
+    var byCat = {}, seen = {};
+    shown.forEach(function (m) {
+      if (m.group) {
+        var g = m.category + "|" + m.group;
+        if (seen[g]) return;
+        seen[g] = true;
+      }
+      (byCat[m.category] = byCat[m.category] || []).push(m);
+    });
 
     var html = "";
     catalog.categories.forEach(function (c) {
@@ -76,6 +108,7 @@
       if (!list || !list.length) return;
       html += '<h2 class="group-title">' + esc(c.label) + "</h2>" +
         '<div class="grid">' + list.map(function (m) {
+          if (m.group) return groupCell(m);
           var k = esc(Site.key(m));
           // Кнопки — рядом со ссылкой, а не внутри: кнопка внутри ссылки это
           // сломанная разметка и случайные переходы вместо нажатия.
@@ -175,9 +208,14 @@
   // и ряд пришлось бы прокручивать вбок, теряя половину из виду.
   // Пустые в этом разделе показываем приглушёнными — видно, что они есть.
   function renderCatalog() {
-    var counts = {};
+    var counts = {}, seen = {};
     catalog.models.forEach(function (m) {
-      if (Site.inSection(m)) counts[m.category] = (counts[m.category] || 0) + 1;
+      if (!Site.inSection(m)) return;
+      if (m.group) {
+        if (seen[m.category + "|" + m.group]) return;
+        seen[m.category + "|" + m.group] = true;
+      }
+      counts[m.category] = (counts[m.category] || 0) + 1;
     });
     var all = [{ code: "all", label: "Всё" }].concat(catalog.categories);
 

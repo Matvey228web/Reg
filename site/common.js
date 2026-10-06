@@ -48,6 +48,23 @@ var Site = (function () {
 
   function key(m) { return m.category + "-" + m.model_code; }
 
+  // Варианты одной позиции («Кабель BNC · 3 м», «… · 10 м»; поля group и
+  // variant ставит build-catalog.js). По числу, а не по алфавиту: иначе
+  // «10 м» встаёт раньше «3 м».
+  function byVariant(a, b) {
+    var x = parseFloat(String(a.variant).replace(",", "."));
+    var y = parseFloat(String(b.variant).replace(",", "."));
+    if (!isNaN(x) && !isNaN(y) && x !== y) return x - y;
+    return String(a.variant).localeCompare(String(b.variant), "ru", { numeric: true });
+  }
+
+  function variants(m) {
+    if (!m || !m.group) return [];
+    return ((catalog && catalog.models) || []).filter(function (o) {
+      return o.category === m.category && o.group === m.group;
+    }).sort(byVariant);
+  }
+
   // Раздел витрины. Держим в адресе: ссылку можно переслать, а возврат из
   // карточки не сбрасывает выбор.
   var current = null;
@@ -492,7 +509,7 @@ var Site = (function () {
   }
 
   return {
-    $: $, escapeHtml: escapeHtml, plural: plural, key: key, photo: photo,
+    $: $, escapeHtml: escapeHtml, plural: plural, key: key, variants: variants, photo: photo,
     humanDate: humanDate, icon: icon, shotIcon: shotIcon, shotAttr: shotAttr, tick: tick,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
