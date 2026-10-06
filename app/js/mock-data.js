@@ -20,6 +20,7 @@ const mockSettings = {
   site_seasons: 1,
   public_orders: 1,
   public_orders_per_hour: 20,
+  archive_keep_days: 2,
   act_template_id: "",
   act_folder_id: "",
   notify_thread_orders: "",
@@ -57,6 +58,7 @@ const MOCK_SETTINGS_SPEC = {
   site_seasons: { min: 0, max: 1, hint: "1 — праздничные темы по календарю, 0 — выключены" },
   public_orders: { min: 0, max: 1, hint: "1 — сайт отправляет заявку сам, 0 — только копипастом" },
   public_orders_per_hour: { min: 1, max: 200, hint: "от 1 до 200" },
+  archive_keep_days: { min: 0, max: 3650, hint: "сколько дней заказ лежит в архиве до удаления; 0 — хранить всегда" },
   act_template_id: { text: true, clean: mockDriveId,
                      check: (v) => v === "" || /^[A-Za-z0-9_-]{20,}$/.test(v),
                      hint: "ссылка на документ-шаблон или пусто" },
@@ -1039,12 +1041,14 @@ const MockAPI = {
         const list = body && body.models;
         if (!list || !list.length) { const e = new Error("Нечего размечать: список пуст"); e.status = 400; throw e; }
         const allowed = ["CINE", "PHOTO"];
+        const tags = { "#КИНО": "CINE", "КИНО": "CINE", "#CINE": "CINE",
+                       "#ФОТО": "PHOTO", "ФОТО": "PHOTO", "#PHOTO": "PHOTO" };
         const wanted = list.map((row) => {
           const raw = String(row.section || "").trim();
-          const parts = raw.toUpperCase().split(/[,;\s]+/).filter(Boolean);
+          const parts = raw.toUpperCase().split(/[,;\s]+/).filter(Boolean).map((p) => tags[p] || p);
           const clean = allowed.filter((c) => parts.indexOf(c) !== -1).join(",");
           if (raw && !clean) {
-            const e = new Error("Неизвестный раздел: " + raw + ". Допустимо CINE, PHOTO или оба.");
+            const e = new Error("Неизвестный раздел: " + raw + ". Допустимо #кино, #фото или оба.");
             e.status = 400; throw e;
           }
           return { category: String(row.category || "").toUpperCase(),

@@ -60,14 +60,28 @@ async function ask(endpoint, payload) {
   // есть, а строка заявки «N. Название: 0 (кол-во x 0)» разбирается построчно —
   // перенос разрывает её надвое, и позиция молча пропадает из заявки.
   const clean = (v) => String(v || "").replace(/\s+/g, " ").trim();
-  const models = (live.models || []).map((m) => ({
-    category: m.category,
-    category_label: m.category_label,
-    model_code: m.model_code,
-    model_name: clean(m.model_name),
-    section: m.section || "",
-    total: m.total,
-  }));
+  // «Кабель BNC · 3 м» — вариант позиции «Кабель BNC»: на витрине одна
+  // карточка с выбором длины. Отдельной колонки в таблице под это нет, поэтому
+  // группа живёт в самом названии; модель и её ключ остаются своими, и
+  // наличие, корзина и разбор заявки на складе ничего о группах не знают.
+  const SEP = " · ";
+  const models = (live.models || []).map((m) => {
+    const name = clean(m.model_name);
+    const out = {
+      category: m.category,
+      category_label: m.category_label,
+      model_code: m.model_code,
+      model_name: name,
+      section: m.section || "",
+      total: m.total,
+    };
+    const at = name.indexOf(SEP);
+    if (at > 0 && at + SEP.length < name.length) {
+      out.group = name.slice(0, at);
+      out.variant = name.slice(at + SEP.length);
+    }
+    return out;
+  });
 
   const categories = [];
   const seen = new Set();

@@ -2,9 +2,8 @@
 """Единая вёрстка фотографий каталога.
 
 Берёт любые исходники — снятые в колледже или скачанные с сайта
-производителя — и приводит к одному виду: квадрат 800×800, предмет по центру
-с одинаковым полем, JPEG без лишнего веса. Свой фон снимка сохраняется: тёмной
-подложки нет, на сайте есть и светлая тема.
+производителя — и приводит к одному виду: квадрат 800×800, белый фон,
+предмет по центру с одинаковым полем, JPEG без лишнего веса.
 
     python3 site/photos.py source/                 # обработать папку
     python3 site/photos.py source/CAM-01.png       # один файл
@@ -20,7 +19,10 @@ from PIL import Image
 
 SIZE = 800
 PAD = 48                    # поле вокруг предмета
-WHITE = (255, 255, 255)     # под прозрачность: так снимают производители
+# Белый, а не фон карточки: владелец решил показывать снимки как в оригинале,
+# а почти все исходники — на белом. Тёмное поле вокруг белого кадра выглядело
+# вырезкой, вставленной в карточку.
+BG = (255, 255, 255)
 OUT = Path(__file__).parent / "photos"
 
 
@@ -28,8 +30,7 @@ def trim(img):
     """Убрать однотонные поля исходника, чтобы предмет занимал кадр целиком.
 
     Без этого фотографии с разным запасом по краям выглядят на витрине
-    разномасштабными, хотя сами предметы сопоставимы. Возвращает снимок и
-    цвет его поля — None, если поля нет (снимок в кадр целиком).
+    разномасштабными, хотя сами предметы сопоставимы.
     """
     rgb = img.convert("RGB")
     corners = [rgb.getpixel(p) for p in
@@ -37,7 +38,7 @@ def trim(img):
                 (rgb.width - 1, rgb.height - 1))]
     # Углы разного цвета — значит поля нет, и обрезать нечего.
     if max(max(c) - min(c) for c in zip(*corners)) > 12:
-        return img, None
+        return img
     bg = corners[0]
     mask = Image.new("L", rgb.size, 0)
     px, mp = rgb.load(), mask.load()
@@ -47,30 +48,23 @@ def trim(img):
             if abs(r - bg[0]) + abs(g - bg[1]) + abs(b - bg[2]) > 30:
                 mp[x, y] = 255
     box = mask.getbbox()
-    return (img.crop(box) if box else img), bg
+    return img.crop(box) if box else img
 
 
 def convert(src: Path) -> Path:
     img = Image.open(src)
-    # Прозрачность кладём на белое, иначе JPEG сделает её чёрной.
+    # Прозрачность кладём на фон карточки, иначе JPEG сделает её чёрной.
     if img.mode in ("RGBA", "LA", "P"):
         img = img.convert("RGBA")
-        plate = Image.new("RGBA", img.size, WHITE + (255,))
+        plate = Image.new("RGBA", img.size, BG + (255,))
         img = Image.alpha_composite(plate, img)
-    img, bg = trim(img.convert("RGB"))
+    img = trim(img.convert("RGB"))
 
-    if bg is None:
-        # Поля нет — снимок в кадр целиком: режем квадрат по центру. Поле
-        # вокруг такого снимка было бы рамкой чужого цвета.
-        side = min(img.width, img.height)
-        left, top = (img.width - side) // 2, (img.height - side) // 2
-        canvas = img.crop((left, top, left + side, top + side)).resize((SIZE, SIZE), Image.LANCZOS)
-    else:
-        # Поле дорисовываем цветом поля самого снимка, а не своим.
-        box = SIZE - PAD * 2
-        img.thumbnail((box, box), Image.LANCZOS)
-        canvas = Image.new("RGB", (SIZE, SIZE), bg)
-        canvas.paste(img, ((SIZE - img.width) // 2, (SIZE - img.height) // 2))
+    box = SIZE - PAD * 2
+    img.thumbnail((box, box), Image.LANCZOS)
+
+    canvas = Image.new("RGB", (SIZE, SIZE), BG)
+    canvas.paste(img, ((SIZE - img.width) // 2, (SIZE - img.height) // 2))
 
     OUT.mkdir(exist_ok=True)
     dst = OUT / (src.stem + ".jpg")

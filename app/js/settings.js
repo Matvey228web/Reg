@@ -28,6 +28,7 @@ const SettingsScreen = (() => {
     { key: "site_url", label: "Сайт проката", text: true, ph: "https://", grp: "links" },
     { key: "app_link", label: "Ссылка на приложение", text: true, ph: "https://t.me/бот/app", grp: "links" },
     { key: "api_url", label: "Адрес Worker", text: true, ph: "https://", grp: "links" },
+    { key: "archive_keep_days", label: "Архив заказов, дней", grp: "maint" },
   ];
 
   // Одна строка поля — чтобы два подраздела рисовались одним кодом.
@@ -396,6 +397,11 @@ const SettingsScreen = (() => {
           и колонки. Данные не трогает. После нажатия кнопка пропадёт до следующего такого обновления.</p>`}
         <p class="hint">Перезаливка каталога осталась в редакторе Apps Script: она слишком долгая
           для запроса по сети.</p>
+        <div id="settings-maint-error" style="margin-top:16px;"></div>
+        <div class="form-group">
+          ${FIELDS.filter((f) => f.grp === "maint").map((f) => fieldHtml(f, s, hints)).join("")}
+        </div>
+        <button class="btn" id="settings-maint-save">Сохранить</button>
       </div>
 
       ${accountHtml(false)}
@@ -942,6 +948,8 @@ const SettingsScreen = (() => {
       .addEventListener("click", () => saveFields("settings-save", "settings-fields-error"));
     document.getElementById("settings-links-save")
       .addEventListener("click", () => saveFields("settings-links-save", "settings-links-error"));
+    document.getElementById("settings-maint-save")
+      .addEventListener("click", () => saveFields("settings-maint-save", "settings-maint-error"));
     document.getElementById("settings-public-save")
       .addEventListener("click", savePublicOrders);
     const tplBtn = document.getElementById("settings-act-template");
