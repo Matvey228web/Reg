@@ -454,8 +454,10 @@ const OrderScreen = (() => {
   // не то, — но когда этикетка не читается или заказ собран заранее, упираться
   // в скан значит стоять. Предметы выбирает бэкенд: свободные, той же модели.
   //
-  // Отклик — сразу: строка встаёт в «Выдаём…» до ответа таблицы (6–9 секунд),
-  // остальные строки при этом живые, их можно выдавать параллельно.
+  // Отклик — сразу, как checkinLine: строка закрывается до ответа таблицы
+  // (6–9 секунд), номера выданных предметов подставляются, когда она ответит.
+  // Сколько выдастся на самом деле, решает бэкенд (свободных может быть
+  // меньше) — его ответ и сверка после поправят догадку.
   async function issueLine(order, lineNo) {
     if (issuing.has(lineNo)) return;
     // Сколько выдастся, знает только бэкенд: свободных может быть меньше, чем
@@ -467,15 +469,18 @@ const OrderScreen = (() => {
 
     const key = "issue:" + lineNo;
     delete lineErrors[key];
-    delete lineNotes[key];
+    lineNotes[key] = "Выдано — номера предметов подтянутся через несколько секунд.";
     issuing.add(lineNo);
     opSeq += 1;
+    const seq = opSeq;
+    const before = card;
+    if (card) card = issuedWhole(card, lineNo);
+    TG.hapticSuccess();
     if (card) render(card);
     try {
       const res = await apiPost("/order/issue", {
         order_id: Number(order.order_id), line_no: lineNo,
       });
-      TG.hapticSuccess();
       const ids = res.issued.map((i) => i.item_id).join(", ");
       lineNotes[key] = res.left
         ? `Выдано: ${ids}. Осталось по строке: ${res.left} — свободных больше нет.`
@@ -487,18 +492,31 @@ const OrderScreen = (() => {
         (row) => ItemState.afterCheckout(row, i.qty)));
       loadItemsMap();
       markStale("orders");     // в списке заказов поменялся статус
-      // Карточку правим сразу, а сверяемся с таблицей уже молча: на какую
-      // строку легла выдача, решает бэкенд (строк одной модели бывает
-      // несколько), поэтому своя догадка здесь — только до сверки.
-      if (card) card = issuedLocally(card, lineNo, res.issued);
+      // Точная картина — по ответу; если за это время началась другая
+      // операция, её правки не затираем, сверка перечитает карточку.
+      if (before && seq === opSeq) card = issuedLocally(before, lineNo, res.issued);
+      else reloadPending = true;
     } catch (err) {
       TG.hapticError();
+      delete lineNotes[key];
       lineErrors[key] = err.message;
+      if (seq === opSeq) card = before;
+      else reloadPending = true;
     } finally {
       issuing.delete(lineNo);
     }
     if (card) render(card);
     reconcile();
+  }
+
+  // Догадка до ответа: строка выдана целиком.
+  function issuedWhole(data, lineNo) {
+    return {
+      ...data,
+      order: { ...data.order, status: data.order.status === "New" ? "Issued" : data.order.status },
+      items: (data.items || []).map((line) => Number(line.line_no) === lineNo
+        ? { ...line, issued_qty: Math.max(Number(line.issued_qty || 0), Number(line.qty || 0)) } : line),
+    };
   }
 
   // Выдача без скана, какой её увидит карточка после перечитывания: строка

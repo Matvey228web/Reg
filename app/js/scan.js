@@ -75,7 +75,7 @@ const ScanScreen = (() => {
 
   // Сканер штрихкодов присылает номера быстрее, чем таблица отвечает (6–9
   // секунд): второй номер, пришедший во время поиска первого, ждать не будет,
-  // а перерисует экран под ногами у первого. Поэтому один за раз, как quickBusy.
+  // а перерисует экран под ногами у первого. Поэтому один за раз.
   let codeBusy = false;
   async function takeCode(code) {
     if (!code || codeBusy) return;
@@ -103,7 +103,7 @@ const ScanScreen = (() => {
   async function handleCode(itemId) {
     const row = lockedOrder ? cachedRow(itemId) : null;
     if (row && !ItemState.byQty(row) && row.status === "Available") {
-      await quickCheckout(row);
+      quickCheckout(row);
       return;
     }
     await lookup(itemId);
@@ -116,40 +116,72 @@ const ScanScreen = (() => {
 
   // Выдача без формы — сделано как submitCheckout, только поля берутся не из
   // формы, а из заказа: на экране их и так показывали только для чтения.
-  let quickBusy = false;
-  async function quickCheckout(row) {
-    if (quickBusy) return;
-    quickBusy = true;
-    const result = document.getElementById("scan-result");
-    showBoxError("scan-error", "");
-    result.innerHTML = `<div class="card"><div class="card-sub">Выдаём ${escapeHtml((row.name || "") + " · " + row.item_id)}…</div></div>`;
-    try {
-      const orderId = Number(lockedOrder.orderId);
-      const res = await apiPost("/transaction/checkout", {
+  // Сразу в список захода и за следующим — запрос в фоне (inBackground).
+  function quickCheckout(row) {
+    const orderId = Number(lockedOrder.orderId);
+    const rowBefore = { ...row };
+    TG.hapticSuccess();
+    Cache.patch("equipment", "item_id", row.item_id, ItemState.afterCheckout(row, 1));
+    const line = row.name || row.item_id;
+    nextInOrder(line);
+    inBackground(rowBefore, null, (row.name || row.item_id) + " (" + row.item_id + ") не выдан",
+      () => apiPost("/transaction/checkout", {
         item_id: row.item_id,
         order_id: orderId,
         qty: 1,
         expected_return_at: lockedOrder.returnDate || null,
         notes: "",
-      });
-      TG.hapticSuccess();
-      markStale("orders");     // изменился статус и состав заказа
-      Cache.patch("equipment", "item_id", row.item_id,
-        ItemState.afterCheckout(row, 1, res && res.transaction_id));
-      const offOrder = !!(res && res.order_line === "off-order");
-      nextInOrder(row.name + (offOrder ? " — сверх заявки" : ""));
-    } catch (err) {
-      // Отказ (уже выдан, в ремонте…) — строкой на экране, как ошибка поиска,
-      // без окна: заход по заказу продолжается, камера открывается снова.
-      // Под окном сканера видна только вибрация — по ней человек и поймёт,
-      // что эту позицию надо посмотреть.
+      }),
+      (res) => {
+        markStale("orders");     // изменился статус и состав заказа
+        Cache.patch("equipment", "item_id", row.item_id,
+          ItemState.afterCheckout(rowBefore, 1, res && res.transaction_id));
+        if (res && res.order_line === "off-order") renameInSession(line, line + " — сверх заявки");
+      },
+      () => dropFromSession(line));
+  }
+
+  // Запись в таблицу — в фоне: экран уже показал результат, а таблица отвечает
+  // 6–9 секунд, и ждать её над каждым предметом у стойки незачем. Сделано как
+  // confirmRemove в announcements.js: откажет — откатываем строку каталога и
+  // открытый предмет. Отказ приходит, когда человек уже у следующего
+  // предмета, поэтому причина встаёт в отдельный список над сканом: новый код
+  // его не стирает, в отличие от scan-error.
+  let failed = [];
+  function inBackground(rowBefore, itemBefore, label, request, onOk, onFail) {
+    request().then((res) => { if (onOk) onOk(res); }).catch((err) => {
       TG.hapticError();
-      result.innerHTML = `<div class="error-box">${escapeHtml(
-        (row.name || row.item_id) + " (" + row.item_id + ") не выдан: " + formError(err))}</div>`;
-      startScan(true);
-    } finally {
-      quickBusy = false;
-    }
+      if (rowBefore) Cache.patch("equipment", "item_id", rowBefore.item_id, rowBefore);
+      if (itemBefore && currentItem && String(currentItem.item_id) === String(itemBefore.item_id)) {
+        showItem(itemBefore);
+      }
+      if (onFail) onFail();
+      failed.push(label + ": " + formError(err));
+      renderFailed();
+    });
+  }
+
+  function renderFailed() {
+    const box = document.getElementById("scan-failed");
+    if (!failed.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="error-box">${failed.map(escapeHtml).join("<br>")}</div>
+      <button class="btn btn--secondary" id="scan-failed-clear" type="button">Понятно</button>`;
+    document.getElementById("scan-failed-clear").addEventListener("click", () => {
+      failed = [];
+      renderFailed();
+    });
+  }
+
+  function dropFromSession(line) {
+    const i = session.lastIndexOf(line);
+    if (i !== -1) session.splice(i, 1);
+    renderOrderBar();
+  }
+
+  function renameInSession(line, next) {
+    const i = session.lastIndexOf(line);
+    if (i !== -1) session[i] = next;
+    renderOrderBar();
   }
 
   // Позиция по заказу выдана: в список захода и сразу за следующей.
@@ -564,6 +596,7 @@ const ScanScreen = (() => {
   // Нативную было не видно в браузере, её нельзя было нажать из теста, и
   // проверялся у нас поэтому путь, которым на телефоне никто не ходит.
   // Обычная кнопка одинакова везде и видна там, где заканчивается форма.
+  let lastSubmitAt = 0;
   function confirmButton(text, onSubmit) {
     const box = document.getElementById("mode-form");
     const btn = document.createElement("button");
@@ -571,136 +604,115 @@ const ScanScreen = (() => {
     btn.id = "scan-confirm";
     btn.type = "button";
     btn.textContent = text;
-    btn.addEventListener("click", onSubmit);
+    // Отклик мгновенный, и на месте «Выдать» тут же встаёт форма «Принять» —
+    // второй тап по привычке принял бы только что выданное обратно.
+    btn.addEventListener("click", () => {
+      if (Date.now() - lastSubmitAt < 800) return;
+      lastSubmitAt = Date.now();
+      onSubmit();
+    });
     box.appendChild(btn);
   }
 
-  // Индикатор ожидания на той же кнопке: запрос к таблице идёт секунды, и без
-  // этого человек жмёт второй раз.
-  function setSubmitting(on, text) {
-    const btn = document.getElementById("scan-confirm");
-    if (!btn) return;
-    btn.disabled = on;
-    if (on) {
-      btn.dataset.label = btn.textContent;
-      btn.textContent = "Отправляем…";
-    } else {
-      btn.textContent = text || btn.dataset.label || btn.textContent;
-    }
+  // Выдача, приём и дефект — оптимистично (inBackground): результат на экране
+  // сразу, запрос в фоне. Без окон: вибрации и состояния предмета достаточно.
+  function submitCheckout() {
+    const picked = field("scan-order").value;
+    // «Без заказа» выбирается сознательно: иначе выдача без заказа случалась бы
+    // просто от того, что список не пролистали.
+    if (!picked) { TG.showAlert("Выберите заказ или «Без заказа»"); return; }
+    const orderId = picked === "none" ? null : Number(picked);
+    const qtyField = document.getElementById("scan-qty");
+    const qty = qtyField ? Number(qtyField.value) || 1 : 1;
+    const item = currentItem;
+    const rowBefore = cachedRow(item.item_id);
+    const body = {
+      item_id: item.item_id,
+      order_id: orderId,
+      qty,
+      expected_return_at: field("scan-return-date").value || null,
+      notes: field("scan-notes").value.trim(),
+    };
+    TG.hapticSuccess();
+    applyLocal(ItemState.afterCheckout(item, qty));
+    // У штучных позиций важно, сколько ушло: «Кабель XLR — 4 шт».
+    const line = item.name + (item.by_qty && qtyField ? " — " + qty + " шт" : "");
+    // Выдача по заказу — это подряд десяток позиций: сразу открываем сканер снова.
+    if (lockedOrder) nextInOrder(line);
+    else showItem(currentItem);
+    inBackground(rowBefore && { ...rowBefore }, item, item.name + " (" + item.item_id + ") не выдан",
+      () => apiPost("/transaction/checkout", body),
+      (result) => {
+        if (orderId) markStale("orders");     // изменился статус и состав заказа
+        Cache.patch("equipment", "item_id", item.item_id,
+          ItemState.afterCheckout(item, qty, result && result.transaction_id));
+        // Выдача вне состава заказа разрешена (акт пересобирается сам) —
+        // отмечаем её в списке выданного за заход, а не останавливаем человека.
+        if (lockedOrder && result && result.order_line === "off-order" && orderId) {
+          renameInSession(line, line + " — сверх заявки");
+        }
+      },
+      () => { if (lockedOrder) dropFromSession(line); });
   }
 
-  async function submitCheckout() {
-    let orderId = null;
-    try {
-      const picked = field("scan-order").value;
-      // «Без заказа» выбирается сознательно: иначе выдача без заказа случалась бы
-      // просто от того, что список не пролистали.
-      if (!picked) { TG.showAlert("Выберите заказ или «Без заказа»"); return; }
-      orderId = picked === "none" ? null : Number(picked);
-      setSubmitting(true);
-      const qtyField = document.getElementById("scan-qty");
-      const qty = qtyField ? Number(qtyField.value) || 1 : 1;
-      const result = await apiPost("/transaction/checkout", {
-        item_id: currentItem.item_id,
-        order_id: orderId,
-        qty,
-        expected_return_at: field("scan-return-date").value || null,
-        notes: field("scan-notes").value.trim(),
+  function submitCheckin() {
+    const hasDefect = field("scan-has-defect").checked;
+    const qtyInField = document.getElementById("scan-qty-in");
+    const qty = qtyInField ? Number(qtyInField.value) || 1 : 1;
+    const description = hasDefect ? field("scan-defect-desc").value.trim() : null;
+    const severity = hasDefect ? field("scan-defect-severity").value : null;
+    const item = currentItem;
+    const rowBefore = cachedRow(item.item_id);
+    const body = {
+      item_id: item.item_id,
+      qty,
+      has_defect: hasDefect,
+      defect_description: description,
+      defect_severity: severity,
+      notes: field("scan-checkin-notes").value.trim(),
+    };
+    TG.hapticSuccess();
+    applyLocal(ItemState.afterCheckin(item, qty, severity), {
+      current_transaction: null,
+      ...(hasDefect ? withDefect("", severity, description) : {}),
+    });
+    showItem(currentItem);
+    inBackground(rowBefore && { ...rowBefore }, item, item.name + " (" + item.item_id + ") не принят",
+      () => apiPost("/transaction/checkin", body),
+      (res) => {
+        // Остаток на руках у штучных точнее знает таблица.
+        Cache.patch("equipment", "item_id", item.item_id,
+          ItemState.afterCheckin(item, qty, severity, res && res.qty_out));
+        if (hasDefect) markStale("defects");     // в ремонте появилась запись
+        markStale("orders");                     // заказ мог закрыться возвратом
       });
-      // Без окон: вибрации и отметки в списке сеанса достаточно. Окно «Выдано»
-      // после каждой позиции — лишний тап на десятке позиций подряд.
-      TG.hapticSuccess();
-      // Выдача вне состава заказа разрешена (акт пересобирается сам) — отмечаем
-      // её в списке выданного за заход, а не останавливаем человека.
-      const offOrder = !!(result && result.order_line === "off-order" && orderId);
-      if (orderId) markStale("orders");     // изменился статус и состав заказа
-      // Что стало с предметом, известно без нового поиска: выдали столько-то.
-      applyLocal(ItemState.afterCheckout(currentItem, qty, result && result.transaction_id));
-      // Выдача по заказу — это подряд десяток позиций. Показывать после каждой
-      // ту же карточку и ждать, пока человек сам нажмёт «сканировать», значит
-      // добавить к каждой позиции лишний тап: сразу открываем сканер снова.
-      if (lockedOrder) {
-        // У штучных позиций важно, сколько ушло: «Кабель XLR — 4 шт».
-        const qtyNote = currentItem.by_qty && qtyField ? " — " + qty + " шт" : "";
-        nextInOrder(currentItem.name + qtyNote + (offOrder ? " — сверх заявки" : ""));
-        return;
-      }
-      showItem(currentItem);
-    } catch (err) {
-      TG.hapticError();
-      TG.showAlert(formError(err));
-    } finally {
-      setSubmitting(false);
-    }
   }
 
-  async function submitCheckin() {
-    let hasDefect = false;
-    try {
-      hasDefect = field("scan-has-defect").checked;
-      setSubmitting(true);
-      const qtyInField = document.getElementById("scan-qty-in");
-      const qty = qtyInField ? Number(qtyInField.value) || 1 : 1;
-      const description = hasDefect ? field("scan-defect-desc").value.trim() : null;
-      const severity = hasDefect ? field("scan-defect-severity").value : null;
-      const res = await apiPost("/transaction/checkin", {
-        item_id: currentItem.item_id,
-        qty,
-        has_defect: hasDefect,
-        defect_description: description,
-        defect_severity: severity,
-        notes: field("scan-checkin-notes").value.trim(),
+  function submitDefect() {
+    const description = field("scan-standalone-desc").value.trim();
+    if (!description) { TG.showAlert("Опишите дефект"); return; }
+    const severity = field("scan-standalone-severity").value;
+    const item = currentItem;
+    const rowBefore = cachedRow(item.item_id);
+    TG.hapticSuccess();
+    // Показываем предмет заново, а не закрываем экран: человеку надо увидеть,
+    // изменился ли статус — незначительный дефект выдачу не блокирует.
+    applyLocal(ItemState.afterDefect(item, severity), withDefect("", severity, description));
+    showItem(currentItem);
+    inBackground(rowBefore && { ...rowBefore }, item, "Дефект " + item.item_id + " не сохранён",
+      () => apiPost("/defect/report", { item_id: item.item_id, description, severity }),
+      (res) => {
+        if (res && res.status) {
+          Cache.patch("equipment", "item_id", item.item_id, ItemState.afterDefect(item, severity, res.status));
+        }
+        markStale("defects");
       });
-      TG.hapticSuccess();
-      // Сначала — экран с принятым, потом всё остальное: раньше после приёма
-      // ждали ещё и список заказов, и кнопка висела в «Отправляем…».
-      applyLocal(ItemState.afterCheckin(currentItem, qty, severity, res && res.qty_out), {
-        current_transaction: null,
-        ...(hasDefect ? withDefect(res && res.defect_id, severity, description) : {}),
-      });
-      showItem(currentItem);
-      if (hasDefect) markStale("defects");     // в ремонте появилась запись
-      markStale("orders");                     // заказ мог закрыться возвратом
-      TG.showAlert("Оборудование принято");
-    } catch (err) {
-      TG.hapticError();
-      TG.showAlert(formError(err));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function submitDefect() {
-    try {
-      const description = field("scan-standalone-desc").value.trim();
-      if (!description) { TG.showAlert("Опишите дефект"); return; }
-      setSubmitting(true);
-      const severity = field("scan-standalone-severity").value;
-      const res = await apiPost("/defect/report", {
-        item_id: currentItem.item_id,
-        description,
-        severity,
-      });
-      TG.hapticSuccess();
-      // Показываем предмет заново, а не закрываем экран: человеку надо увидеть,
-      // изменился ли статус — незначительный дефект выдачу не блокирует.
-      // Новый статус бэкенд вернул в ответе, перечитывать предмет не нужно.
-      applyLocal(ItemState.afterDefect(currentItem, severity, res && res.status),
-        withDefect(res && res.defect_id, severity, description));
-      showItem(currentItem);
-      markStale("defects");
-      TG.showAlert("Дефект сохранён");
-    } catch (err) {
-      TG.hapticError();
-      TG.showAlert(formError(err));
-    } finally {
-      setSubmitting(false);
-    }
   }
 
   function onShow(params) {
     reset();
     renderCameraState();
+    renderFailed();   // отказ мог прийти, пока человек был на другом экране
     // Пришли с карточки заказа: заказ выбран, дальше только сканируем позиции.
     if (params && params.orderId !== undefined && params.orderId !== null) {
       lockedOrder = {
