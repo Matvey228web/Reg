@@ -12,7 +12,7 @@ tools:
 
 Порядок:
 1. Открой таблицу «Где искать аналог» в `CLAUDE.md` и разделы `docs/structure.md`. Определи слой (таблица, Worker, приложение, сайт).
-2. Найди аналог поиском по коду. Новая ручка бэкенда — `handleNotifyHello`, `handleNotifyWebhook`; настройка — `api_url`, `app_link`; экран — `app/js/orders.js` → `order.js`; страница сайта — `site/item.html` + `item.js`.
+2. Найди аналог поиском по коду. Новая ручка бэкенда — `handleNotifyHello`, `handleNotifyWebhook`; настройка — `api_url`, `app_link`; экран — `app/js/orders.js` → `order.js`; страница сайта — `site/item.html` + `item.js`; разовая правка данных в таблице — `cleanupTestData` / `catalogFix` (просмотр → копия → правка, запуск из редактора); поле модели, которое едет на сайт, — `section` (Models → `handlePublicCatalog` → `build-catalog.js` → `Site`); фото позиции — `site/photos.py` → `site/photos/` → `build-catalog.js`.
 3. Пройди цепочку аналога целиком, а не только функцию. Ручка тянет за собой: `case` в `doPost`, ветку в `app/js/mock-data.js`, кнопку в приложении, проверки в `test-local.js` и `test-worker.js`. Правка `app/js/*` требует поднять `?v=` в `app/index.html`.
 4. Если копировать аналог значит тащить лишнее, скажи об этом и назови цену (правило «Чего правила не отменяют»).
 
