@@ -14,11 +14,19 @@ const ModelsScreen = (() => {
   // Пусто — «не размечено»: такая модель видна на сайте в обоих разделах.
   // Забытая отметка не должна прятать технику с витрины.
   const SECTION_CHOICES = [
-    { value: "", label: "Не размечено — видно везде" },
-    { value: "CINE", label: "Только Кино" },
-    { value: "PHOTO", label: "Только Фото" },
-    { value: "CINE,PHOTO", label: "Кино и Фото" },
+    { value: "", label: "без # — видно везде" },
+    { value: "CINE", label: "#кино" },
+    { value: "PHOTO", label: "#фото" },
+    { value: "CINE,PHOTO", label: "#кино #фото" },
   ];
+
+  // В поиске #кино, #фото и #без отбирают по разделу, остальные слова — по
+  // названию: «#без samyang» — неразмеченные Samyang.
+  const TAG_FILTER = {
+    "#кино": (s) => s.indexOf("CINE") !== -1,
+    "#фото": (s) => s.indexOf("PHOTO") !== -1,
+    "#без": (s) => !s,
+  };
 
   function key(m) {
     return m.category + "|" + m.model_code;
@@ -63,8 +71,12 @@ const ModelsScreen = (() => {
 
   function matches(m) {
     if (!query) return true;
-    return [m.model_name, m.model_code, categoryLabel(m.category)]
-      .filter(Boolean).join(" ").toLowerCase().indexOf(query) !== -1;
+    const words = query.split(/\s+/);
+    const section = String(m.section || "");
+    if (!words.filter((w) => TAG_FILTER[w]).every((w) => TAG_FILTER[w](section))) return false;
+    const text = words.filter((w) => !TAG_FILTER[w]).join(" ");
+    return !text || [m.model_name, m.model_code, categoryLabel(m.category)]
+      .filter(Boolean).join(" ").toLowerCase().indexOf(text) !== -1;
   }
 
   function render() {

@@ -2710,8 +2710,16 @@ var SECTIONS = ["CINE", "PHOTO"];
 
 // Раздел хранится строкой через запятую. Наружу и внутрь ходит тот же вид:
 // "CINE", "PHOTO", "CINE,PHOTO" или пусто.
+// Хэштеги #кино и #фото — техническая пометка владельца для разметки в
+// таблице и в приложении (6 октября 2026). Наружу не выходят: на сайт идёт
+// тот же CINE/PHOTO.
+var SECTION_TAGS = { "#КИНО": "CINE", "КИНО": "CINE", "#CINE": "CINE",
+                     "#ФОТО": "PHOTO", "ФОТО": "PHOTO", "#PHOTO": "PHOTO" };
+
 function normalizeSection(value) {
-  var parts = String(value || "").toUpperCase().split(/[,;\s]+/);
+  var parts = String(value || "").toUpperCase().split(/[,;\s]+/).map(function (p) {
+    return SECTION_TAGS[p] || p;
+  });
   var out = [];
   SECTIONS.forEach(function (code) {
     if (parts.indexOf(code) !== -1) out.push(code);
@@ -2726,7 +2734,7 @@ function checkSection(value) {
   if (!raw) return "";
   var clean = normalizeSection(raw);
   if (!clean) {
-    throw apiError(400, "Неизвестный раздел: " + raw + ". Допустимо CINE, PHOTO или оба.");
+    throw apiError(400, "Неизвестный раздел: " + raw + ". Допустимо #кино, #фото или оба.");
   }
   return clean;
 }

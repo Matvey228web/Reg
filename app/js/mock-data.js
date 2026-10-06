@@ -1041,12 +1041,14 @@ const MockAPI = {
         const list = body && body.models;
         if (!list || !list.length) { const e = new Error("Нечего размечать: список пуст"); e.status = 400; throw e; }
         const allowed = ["CINE", "PHOTO"];
+        const tags = { "#КИНО": "CINE", "КИНО": "CINE", "#CINE": "CINE",
+                       "#ФОТО": "PHOTO", "ФОТО": "PHOTO", "#PHOTO": "PHOTO" };
         const wanted = list.map((row) => {
           const raw = String(row.section || "").trim();
-          const parts = raw.toUpperCase().split(/[,;\s]+/).filter(Boolean);
+          const parts = raw.toUpperCase().split(/[,;\s]+/).filter(Boolean).map((p) => tags[p] || p);
           const clean = allowed.filter((c) => parts.indexOf(c) !== -1).join(",");
           if (raw && !clean) {
-            const e = new Error("Неизвестный раздел: " + raw + ". Допустимо CINE, PHOTO или оба.");
+            const e = new Error("Неизвестный раздел: " + raw + ". Допустимо #кино, #фото или оба.");
             e.status = 400; throw e;
           }
           return { category: String(row.category || "").toUpperCase(),

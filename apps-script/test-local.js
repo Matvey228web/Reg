@@ -2301,6 +2301,16 @@ check('повтор той же разметки ничего не меняет'
        secToken).data.changed === 0, 'ожидали changed=0');
 
 sec = call('/models/sections', {
+  models: [{ category: 'CAM', model_code: secCode, section: '#кино #Фото' }],
+}, secToken);
+check('хэштеги #кино #фото понимаются как CINE,PHOTO', sec.ok === true &&
+  call('/models/list', { category: 'CAM' }, secToken).data
+    .filter(m => m.model_code === secCode)[0].section === 'CINE,PHOTO', sec);
+check('хэштег в таблице руками читается так же', normalizeSection('#фото') === 'PHOTO' &&
+  normalizeSection('кино; #ФОТО') === 'CINE,PHOTO');
+call('/models/sections', { models: [{ category: 'CAM', model_code: secCode, section: 'PHOTO' }] }, secToken);
+
+sec = call('/models/sections', {
   models: [{ category: 'CAM', model_code: secCode, section: 'ЗВУК' }],
 }, secToken);
 check('незнакомый раздел отклонён', sec.ok === false && sec.status === 400, sec);
