@@ -4304,6 +4304,44 @@ check('повторный перенос ничего не делает', r.ok =
 appendRow(sh('Transactions'), { transaction_id: 9924, item_id: mvOut.ids[0], status: 'Closed' });
 updateRow(sh('Transactions'), findRowByValue(sh('Transactions'), 'transaction_id', 9921).__row, { status: 'Closed' });
 
+console.log('-- удаление категории после переноса --');
+createCategory('DLA', 'ДЛ Старая', false);
+createCategory('DLB', 'ДЛ Новая', false);
+createCategory('DLC', 'ДЛ Занятая', false);
+const dlX = kfModel('DLA', 'ДЛ Модель', 2);
+const dlY = kfModel('DLC', 'ДЛ Остаток', 1);
+const dlNum = categories().filter(c => c.code === 'DLA')[0].num;
+appendRow(sh('ImportRules'), { category: 'DLA', match: 'name', keywords: 'дл-модель' });
+updateRow(sh('Equipment'), findRowByValue(sh('Equipment'), 'item_id', dlX.ids[0]).__row, { name: 'ДЛ Старое имя' });
+const dlCounters = () => rowsOf('Meta').filter(m => String(m.key).indexOf('unit_' + dlNum) === 0).length;
+const dlPlan = { sync_unit_names: true, moves: [{ from: dlX.key, to: 'DLB' }], delete_categories: ['DLA'] };
+
+check('категория со вещами: просмотр называет её, счётчик и правило', (() => {
+  const t = catalogFixTodo(dlPlan);
+  return t.errors.length === 0 && t.counts.deleted_categories === 1 && t.counts.deleted_counters === 1 &&
+    t.counts.deleted_rules === 1 && t.counts.moves === 1;
+})(), catalogFixTodo(dlPlan).errors);
+const dlBefore = JSON.stringify(dumpSheet('Categories')) + JSON.stringify(dumpSheet('Models'));
+r = catalogFixPlan({ delete_categories: ['DLA', 'DLC'] }, 'копия есть');
+check('непустая категория — отказ всего плана, ничего не тронуто',
+  r.ok === false && /DLC/.test(r.message) && /DLA/.test(r.message) && /не пуста/.test(r.message) &&
+  dlBefore === JSON.stringify(dumpSheet('Categories')) + JSON.stringify(dumpSheet('Models')), r.message);
+
+r = catalogFixPlan(dlPlan, 'копия есть');
+check('категория, опустевшая переносом в том же плане, удалена',
+  r.ok === true && r.counts.deleted_categories === 1 && !categories().some(c => c.code === 'DLA') &&
+  categories().some(c => c.code === 'DLB' || c.code === 'DLC'), r.message);
+check('счётчики Meta и правило импорта этой категории убраны',
+  dlCounters() === 0 && !rowsOf('ImportRules').some(x => x.category === 'DLA') && r.counts.deleted_rules === 1, r.counts);
+check('вещи переехали в DLB и получили имя модели после переноса (sync после moves)',
+  rowsOf('Equipment').filter(u => u.category === 'DLB').length === 2 &&
+  rowsOf('Equipment').filter(u => u.category === 'DLB').every(u => u.name === 'ДЛ Модель'), r.message);
+check('чужая категория DLC и её модель на месте', categories().some(c => c.code === 'DLC') &&
+  rowsOf('Models').some(m => catalogFixKey(m.category, m.model_code) === dlY.key));
+r = catalogFixPlan(dlPlan, 'копия есть');
+check('повтор: категория названа «нет в таблице», не отказ, всё по нулям',
+  r.ok === true && Object.keys(r.counts).every(k => r.counts[k] === 0) && /категория DLA \(удалить\)/.test(r.message), r.message);
+
 console.log('\n== объявления склада ==');
 // Складмен — роль Warehouse Staff, не Admin: писать объявления должен мочь он.
 const annStaff = secStaffLogin.ok ? secStaffLogin.data.token : 'нет-токена';

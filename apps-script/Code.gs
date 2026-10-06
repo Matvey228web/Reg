@@ -1294,6 +1294,20 @@ var CATALOG_FIX = {
   // по Equipment.name («Sony Burano 8k»), на сайте — по модели («Sony Burano»).
   // Решение владельца: имя вещи — имя её модели. Первые три плана применены.
   sync_unit_names: true,
+  // Пятый план (6 октября 2026, решение владельца): модель идёт в очевидную
+  // существующую категорию, дублей категорий не держим. Дубль STB
+  // «Стабилизация» завёл наш прежний план (create + перенос двух штативов) —
+  // штативы возвращаем в SUP, пустую STB убираем. Если по учёту категории
+  // не совпадут, план откажет целиком — лог отдать разработчику.
+  moves: [
+    { from: "STB-01", to: "SUP" }, { from: "STB-02", to: "SUP" },
+    { from: "LGT-05", to: "MOD" }, // Godox SB-UFW120, софтбокс
+    { from: "LGT-06", to: "MOD" }, // Godox Lantern 85
+    { from: "LGT-07", to: "MOD" }, // Godox Lantern 65
+    { from: "LGT-08", to: "MOD" }, // Godox Octabox 80
+    { from: "LEN-12", to: "FLT" }, // B+W T-Pro, фильтр
+  ],
+  delete_categories: ["STB"],
 };
 
 /**
@@ -1368,7 +1382,7 @@ function catalogFixPlanKey(key) {
 
 // Что сделать и что не выйдет. Только читает таблицу.
 function catalogFixTodo(plan) {
-  var todo = { categories: [], deletes: [], merges: [], moves: [], renames: [], prices: [], sections: [],
+  var todo = { categories: [], catDeletes: [], deletes: [], merges: [], moves: [], renames: [], prices: [], sections: [],
                syncs: [], syncModels: [], sync: !!plan.sync_unit_names, missing: [], errors: [], notes: [], check: [], keys: {} };
   var cats = categories();
   var catBy = {};
@@ -1593,8 +1607,47 @@ function catalogFixTodo(plan) {
                       to: to, name: src.model_name, units: unitsLeft(from).length });
   });
 
+  // Удаление категории — только пустой после слияний и переносов ЭТОГО плана:
+  // модель или вещь, оставшаяся в ней, — отказ всего плана. Вместе со строкой
+  // уходят счётчики Meta «unit_<номер><модель>» (номер освободившейся категории
+  // достанется следующей новой, и чужой счётчик сдвинул бы её нумерацию) и
+  // правила ImportRules, что направляют в неё.
+  var leaving = {};
+  todo.deletes.forEach(function (d) { if (d.key) leaving[d.key] = true; });
+  todo.merges.forEach(function (m) { leaving[m.from] = true; });
+  todo.moves.forEach(function (m) { leaving[m.from] = true; });
+  var catOf = function (r) { return String(r.category || "").trim().toUpperCase(); };
+  var ruleRows = readRows(getSheet(SHEETS.IMPORT_RULES));
+  (plan.delete_categories || []).forEach(function (raw) {
+    var code = String(raw || "").trim().toUpperCase();
+    var have = catBy[code];
+    if (!have) { todo.missing.push("категория " + code + " (удалить)"); return; }
+    var uses = [];
+    models.forEach(function (m) {
+      var k = catalogFixKey(m.category, m.model_code);
+      if (catOf(m) === code && !leaving[k]) uses.push("модель " + named(k));
+    });
+    todo.moves.forEach(function (m) { if (m.to === code) uses.push("модель " + m.from + " переносится в неё"); });
+    todo.categories.forEach(function (c) { if (c.action === "create" && c.code === code) uses.push("план её же создаёт"); });
+    units.forEach(function (u) {
+      if (catOf(u) !== code || doomed[String(u.item_id)] || leaving[catalogFixKey(u.category, u.model_code)]) return;
+      uses.push("вещь " + u.item_id);
+    });
+    if (uses.length) {
+      todo.errors.push("категория " + code + " «" + have.label + "» не пуста, удалять нельзя: " +
+        uses.slice(0, 5).join(", ") + (uses.length > 5 ? " …и ещё " + (uses.length - 5) : ""));
+      return;
+    }
+    var counterRe = new RegExp("^unit_" + have.num + "\\d\\d$");
+    todo.catDeletes.push({
+      code: code, label: have.label, num: have.num,
+      counters: Object.keys(counters).filter(function (k) { return counterRe.test(k); }),
+      rules: ruleRows.filter(function (r) { return catOf(r) === code; }).length,
+    });
+  });
+
   // Что останется после удалений и слияний — среди этого ищем совпадения названий.
-  var gone = function (key) { return !!deleted[key] || !!mergeTo[key]; };
+  var gone =function (key) { return !!deleted[key] || !!mergeTo[key]; };
   var target = function (k, what) {
     var key = resolve(catalogFixPlanKey(k));
     if (!modelBy[key] || deleted[key]) { todo.missing.push(catalogFixPlanKey(k) + " (" + what + ")"); return null; }
@@ -1716,6 +1769,9 @@ function catalogFixTodo(plan) {
     prices: todo.prices.length,
     sections: todo.sections.length,
     synced_units: todo.syncs.length,
+    deleted_categories: todo.catDeletes.length,
+    deleted_counters: todo.catDeletes.reduce(function (n, c) { return n + c.counters.length; }, 0),
+    deleted_rules: sum(todo.catDeletes, "rules"),
   };
   return todo;
 }
@@ -1724,7 +1780,7 @@ function catalogFixTodo(plan) {
 function catalogFixApply(todo) {
   var counts = { categories: 0, deleted_models: 0, deleted_units: 0, deleted_journal: 0, merges: 0,
                  moved_units: 0, moves: 0, renamed_models: 0, renamed_units: 0, prices: 0, sections: 0,
-                 synced_units: 0 };
+                 synced_units: 0, deleted_categories: 0, deleted_counters: 0, deleted_rules: 0 };
   var items = {};
   var keyOf = function (r) { return catalogFixKey(r.category, r.model_code); };
 
@@ -1794,6 +1850,19 @@ function catalogFixApply(todo) {
       return r.model_code === "" || !titleOf[keyOf(r)] ? undefined : titleOf[keyOf(r)];
     });
   }
+
+  // Последним: к этому времени все модели и вещи уже переехали. Строка
+  // категории — после счётчиков и правил: оборвись запуск, повтор доберёт.
+  todo.catDeletes.forEach(function (c) {
+    var gone = {};
+    c.counters.forEach(function (k) { gone[k] = true; });
+    counts.deleted_counters += trimSheetRows(getSheet(SHEETS.META), function (r) { return !!gone[String(r.key)]; });
+    counts.deleted_rules += trimSheetRows(getSheet(SHEETS.IMPORT_RULES), function (r) {
+      return String(r.category || "").trim().toUpperCase() === c.code;
+    });
+    counts.deleted_categories += trimSheetRows(catSheet, function (r) { return String(r.code || "").trim() === c.code; });
+  });
+  if (todo.catDeletes.length) IMPORT_CONFIG = null;
   return { counts: counts, items: items };
 }
 
@@ -1824,6 +1893,8 @@ function catalogFixHeadline(todo, counts) {
     " (вещей " + counts.moved_units + ")" +
     ", переименовано моделей " + counts.renamed_models + " (вещей " + counts.renamed_units + ")" +
     ", цен " + counts.prices + ", разделов " + counts.sections +
+    (counts.deleted_categories ? ", удалено категорий " + counts.deleted_categories +
+      " (счётчиков " + counts.deleted_counters + ", правил импорта " + counts.deleted_rules + ")" : "") +
     (todo.sync ? ", имён вещей приведено к имени модели " + counts.synced_units : "") +
     (todo.missing.length ? "; нет в таблице: " + todo.missing.length : "") +
     (todo.check.length ? "; проверить на складе: " + todo.check.length : "") +
@@ -1867,6 +1938,10 @@ function catalogFixReport(todo, counts, title) {
   }
   section("Перенести в другую категорию", todo.moves, function (m) {
     return m.from + " «" + m.name + "» → " + m.to + ": вещей " + m.units;
+  });
+  section("Удалить категории", todo.catDeletes, function (c) {
+    return c.code + " «" + c.label + "», номер " + c.num + ": счётчиков Meta " + c.counters.length +
+      (c.counters.length ? " (" + c.counters.join(", ") + ")" : "") + ", правил импорта " + c.rules;
   });
   section("Слить модели", todo.merges, function (m) {
     return m.from + " «" + m.name + "» → " + m.into + " «" + m.intoName + "»: вещей " + m.units;
