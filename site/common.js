@@ -258,6 +258,7 @@ var Site = (function () {
       .then(function (data) {
         catalog = data;
         index();
+        paintCount();
         goLive();
         return catalog;
       });
@@ -348,11 +349,13 @@ var Site = (function () {
       var list = data.models;
       if (!Array.isArray(list) || !list.length) return;
       var next = merge(list);
+      pruneCart(next.models);
       if (sign(next.models) === sign(catalog.models)) return;
       // Тот же объект: страницы держат на него ссылки.
       catalog.models = next.models;
       catalog.categories = next.categories;
       index();
+      paintCount();
       document.dispatchEvent(new CustomEvent("catalog-live"));
     }).catch(function () { /* остаёмся на снимке, тихо */ });
   }
@@ -528,8 +531,28 @@ var Site = (function () {
     return stored;
   }
 
+  // Считаем только позиции, которые есть в каталоге: после чистки каталога
+  // 6 октября 2026 у людей в корзине остались коды слитых и удалённых моделей —
+  // страница корзины их не показывала, а счётчик в шапке считал (баг владельца).
   function cartCount() {
-    return readCart().lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
+    var known = catalog && catalog.byKey;
+    return readCart().lines.reduce(function (sum, l) {
+      return known && !known[l.key] ? sum : sum + l.qty;
+    }, 0);
+  }
+
+  // Живой каталог — правда о том, что можно заказать: строки с исчезнувшими
+  // моделями убираем из памяти совсем. По снимку не чистим: в нём может не быть
+  // модели, которую человек положил, увидев её уже из живого ответа.
+  function pruneCart(models) {
+    var keys = {};
+    models.forEach(function (m) { keys[key(m)] = true; });
+    var cart = readCart();
+    var keep = cart.lines.filter(function (l) { return keys[l.key]; });
+    if (keep.length === cart.lines.length) return;
+    cart.lines = keep;
+    writeCart(cart);
+    document.dispatchEvent(new Event("cart-refresh"));
   }
 
   function qtyOf(modelKey) {
