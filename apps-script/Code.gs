@@ -176,9 +176,12 @@ var SCHEMA = {
   // выходит никогда: на сайте контакт — только @username.
   // mod_chat_id / mod_message_id — где висит сообщение с кнопками: решение
   // принимается только из того же чата (см. handleMyrentDecide).
+  // approved_at пустеет при правке: «выставить снова» без модерации разрешено
+  // только для содержимого, которое уже одобрили (см. handleMyrentRestore).
   MyRent: ["id", "created_at", "tg_id", "tg_username", "tg_name", "category", "title",
            "description", "price", "price_text", "photo", "photo_file_id", "status",
-           "decided_at", "decided_by", "mod_chat_id", "mod_message_id"],
+           "decided_at", "decided_by", "mod_chat_id", "mod_message_id",
+           "approved_at", "updated_at", "removed_at"],
   Meta: ["key", "value"],
   // Журнал служебных событий (см. logEvent). context — JSON с подробностями,
   // обрезанный: ячейка не резиновая, а стек на пару экранов читать некому.
@@ -2174,6 +2177,10 @@ function doPost(e) {
       // Ручки бота: без сессии сотрудника, их защищает bot_key (см. myrentCheckBot).
       case "/myrent/submit": data = handleMyrentSubmit(payload); break;
       case "/myrent/decide": data = handleMyrentDecide(payload); break;
+      case "/myrent/mine": data = handleMyrentMine(payload); break;
+      case "/myrent/update": data = handleMyrentUpdate(payload); break;
+      case "/myrent/remove": data = handleMyrentRemove(payload); break;
+      case "/myrent/restore": data = handleMyrentRestore(payload); break;
       case "/act/template": data = handleActTemplate(payload, token); break;
       case "/act/build": data = handleActBuild(payload, token); break;
       case "/item/lookup": data = handleItemLookup(payload, token); break;
@@ -5205,6 +5212,12 @@ function myrentRub(n) {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽/сутки";
 }
 
+function myrentCategoryLabel(code) {
+  var label = code;
+  MYRENT_CATEGORIES.forEach(function (c) { if (c.code === code) label = c.label; });
+  return label;
+}
+
 function myrentPrice(row) {
   var n = row.price === "" || row.price === null || row.price === undefined ? null : Number(row.price);
   return n ? myrentRub(n) : MYRENT_PRICE_TEXT;
@@ -5213,11 +5226,11 @@ function myrentPrice(row) {
 // verdict — строка итога вместо пометки «на модерацию»; пусто — карточка с кнопками.
 // Подпись фото в Telegram не длиннее 1024 знаков, а экранирование раздувает
 // текст, поэтому длинное описание укорачиваем, а не теряем всю подпись.
-function myrentCaption(row, verdict) {
-  var label = row.category;
-  MYRENT_CATEGORIES.forEach(function (c) { if (c.code === row.category) label = c.label; });
+// kind — «правка» для карточки после редактирования; по умолчанию «на модерацию».
+function myrentCaption(row, verdict, kind) {
+  var label = myrentCategoryLabel(row.category);
   function build(desc) {
-    var lines = ["<b>My rent" + (verdict ? "" : " · на модерацию") + "</b>",
+    var lines = ["<b>My rent" + (verdict ? "" : " · " + (kind || "на модерацию")) + "</b>",
       "Категория: " + tgEscape(label),
       "<b>" + tgEscape(row.title) + "</b>"];
     if (desc) lines.push(tgEscape(desc));
@@ -5237,7 +5250,7 @@ function myrentCaption(row, verdict) {
 // тема не принимает. Сбой Telegram студенту не показываем — в журнал; строка
 // остаётся pending без mod_message_id, и повторная отправка из бота (идемпотентная)
 // пробует доставить карточку ещё раз.
-function myrentSendModeration(botTok, row) {
+function myrentSendModeration(botTok, row, kind) {
   var chat = notifyChatId();
   if (!chat) {
     logEvent("telegram", "sendPhoto", "no-chat", "Не выбран чат склада: карточка " + row.id + " не ушла на модерацию");
@@ -5246,7 +5259,7 @@ function myrentSendModeration(botTok, row) {
   var thread = notifyThreadId("orders");
   function send(withThread, method) {
     var msg = {
-      chat_id: chat, caption: myrentCaption(row, ""), parse_mode: "HTML",
+      chat_id: chat, caption: myrentCaption(row, "", kind), parse_mode: "HTML",
       reply_markup: { inline_keyboard: [[
         { text: "✅ Одобрить", callback_data: "myr:a:" + row.id },
         { text: "❌ Отклонить", callback_data: "myr:r:" + row.id },
@@ -5297,6 +5310,37 @@ function myrentFetchPhoto(botTok, fileId) {
   return { bytes: bytes, kind: kind };
 }
 
+function myrentParsePrice(value) {
+  if (value === null || value === undefined || value === "") return null;
+  var price = Number(value);
+  if (!isFinite(price) || price !== Math.floor(price) || price < 0 || price > 1000000) {
+    throw apiError(400, "Цена — целое число от 0 до 1 000 000");
+  }
+  return price === 0 ? null : price; // сайт печатает 0 как «по договорённости»
+}
+
+function myrentCheckUsername(username) {
+  if (!/^[A-Za-z0-9_]{1,32}$/.test(username)) throw apiError(400, "Нужен @username в Telegram");
+}
+
+// Поле, которого нет (undefined), не проверяем: так правка проверяет только то,
+// что прислала, а submit присылает всё.
+function myrentCheckFields(category, title, description) {
+  if (category !== undefined && !MYRENT_CATEGORIES.some(function (c) { return c.code === category; })) {
+    throw apiError(400, "Неизвестная категория");
+  }
+  if (title !== undefined && (!title || title.length > 80)) throw apiError(400, "Название — от 1 до 80 знаков");
+  if (description !== undefined && description.length > 600) throw apiError(400, "Описание — не больше 600 знаков");
+}
+
+// Колонки approved_at/updated_at/removed_at появились позже самой вкладки. Живая
+// таблица получит их от setupSheets, но ручка не должна ждать, пока человек его
+// запустит: дописываем под замком при первой же записи. Читать без них можно —
+// отсутствующее поле просто пустое.
+function myrentEnsureColumns(sheet) {
+  ensureColumns(sheet, SCHEMA.MyRent);
+}
+
 function myrentFindDup(sheet, tgId, fileId) {
   var found = null;
   readRows(sheet).forEach(function (r) {
@@ -5313,21 +5357,10 @@ function handleMyrentSubmit(payload) {
   var title = String(payload.title || "").trim();
   var description = String(payload.description || "").trim();
   var fileId = String(payload.photo_file_id || "").trim();
-  var price = null;
-  if (payload.price !== null && payload.price !== undefined && payload.price !== "") {
-    price = Number(payload.price);
-    if (!isFinite(price) || price !== Math.floor(price) || price < 0 || price > 1000000) {
-      throw apiError(400, "Цена — целое число от 0 до 1 000 000");
-    }
-    if (price === 0) price = null; // сайт печатает 0 как «по договорённости»
-  }
+  var price = myrentParsePrice(payload.price);
   if (!tgId) throw apiError(400, "Нет id студента");
-  if (!/^[A-Za-z0-9_]{1,32}$/.test(username)) throw apiError(400, "Нужен @username в Telegram");
-  if (!MYRENT_CATEGORIES.some(function (c) { return c.code === category; })) {
-    throw apiError(400, "Неизвестная категория");
-  }
-  if (!title || title.length > 80) throw apiError(400, "Название — от 1 до 80 знаков");
-  if (description.length > 600) throw apiError(400, "Описание — не больше 600 знаков");
+  myrentCheckUsername(username);
+  myrentCheckFields(category, title, description);
   if (!fileId) throw apiError(400, "Нужно фото");
 
   var sheet = getSheet(SHEETS.MYRENT);
@@ -5344,6 +5377,7 @@ function handleMyrentSubmit(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
+    myrentEnsureColumns(sheet);
     again = myrentFindDup(sheet, tgId, fileId);
     if (!again) {
       var n = readRows(sheet).reduce(function (max, r) {
@@ -5383,8 +5417,8 @@ function myrentSubmitAgain(botTok, sheet, row) {
   return { id: row.id, status: row.status };
 }
 
-function myrentAttachModeration(botTok, sheet, row) {
-  var sent = myrentSendModeration(botTok, row);
+function myrentAttachModeration(botTok, sheet, row, kind) {
+  var sent = myrentSendModeration(botTok, row, kind);
   if (!sent) return;
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
@@ -5409,6 +5443,7 @@ function handleMyrentDecide(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(LOCK_TIMEOUT_MS);
   try {
+    myrentEnsureColumns(sheet);
     row = findRowByValue(sheet, "id", id);
     if (!row) throw apiError(404, "Нет такого объявления: " + id);
     // Кнопка из другого чата (бота могли добавить в чужую группу) решать не
@@ -5416,11 +5451,16 @@ function handleMyrentDecide(payload) {
     if (!String(row.mod_chat_id) || String(payload.chat_id === undefined ? "" : payload.chat_id) !== String(row.mod_chat_id)) {
       throw apiError(403, "Решать можно только из чата склада");
     }
+    // Снятое автором решать уже нельзя: карточка могла висеть в чате, пока студент
+    // нажимал «Снять». Статус «removed» отдаём как есть — это тот же repeat.
     if (row.status !== "pending") {
       repeat = true;
     } else {
+      var now = new Date().toISOString();
       row.status = approve ? "approved" : "rejected";
-      updateRow(sheet, row.__row, { status: row.status, decided_at: new Date().toISOString(), decided_by: by });
+      var patch = { status: row.status, decided_at: now, decided_by: by };
+      if (approve) patch.approved_at = now;
+      updateRow(sheet, row.__row, patch);
     }
   } finally {
     lock.releaseLock();
@@ -5428,16 +5468,8 @@ function handleMyrentDecide(payload) {
   if (repeat) return { id: id, status: row.status, repeat: true };
 
   // Дальше — только оповещения: решение уже записано, и сбой Telegram его не откатывает.
-  try {
-    var mark = approve ? "✅ Одобрено" : "❌ Отклонено";
-    telegramPost(botTok, "editMessageCaption", {
-      chat_id: String(row.mod_chat_id), message_id: Number(row.mod_message_id),
-      caption: myrentCaption(row, mark + (by ? " — " + tgEscape(by) : "")),
-      parse_mode: "HTML", reply_markup: { inline_keyboard: [] },
-    });
-  } catch (e) {
-    logEvent("telegram", "editMessageCaption", "network", e && e.message ? e.message : String(e), { id: id });
-  }
+  var mark = approve ? "✅ Одобрено" : "❌ Отклонено";
+  myrentCloseCard(botTok, row, mark + (by ? " — " + tgEscape(by) : ""));
   try {
     var site = String(getSettings().site_url || "").trim();
     var text;
@@ -5452,6 +5484,208 @@ function handleMyrentDecide(payload) {
     logEvent("telegram", "sendMessage", "exception", e && e.message ? e.message : String(e), { id: id });
   }
   return { id: id, status: row.status, repeat: false };
+}
+
+// Убрать кнопки и дописать итог под карточкой в чате склада. Это оповещение, не
+// решение: сбой Telegram только в журнал, запись в таблице уже сделана.
+function myrentCloseCard(botTok, row, verdict) {
+  if (!String(row.mod_chat_id || "") || !String(row.mod_message_id || "")) return;
+  try {
+    var res = telegramPost(botTok, "editMessageCaption", {
+      chat_id: String(row.mod_chat_id), message_id: Number(row.mod_message_id),
+      caption: myrentCaption(row, verdict),
+      parse_mode: "HTML", reply_markup: { inline_keyboard: [] },
+    });
+    if (res && res.ok === false) {
+      logEvent("telegram", "editMessageCaption", "telegram", res.description || "", { id: row.id });
+    }
+  } catch (e) {
+    logEvent("telegram", "editMessageCaption", "network", e && e.message ? e.message : String(e), { id: row.id });
+  }
+}
+
+function myrentTgId(payload) {
+  var tgId = String(payload.tg_id === undefined || payload.tg_id === null ? "" : payload.tg_id).trim();
+  if (!tgId) throw apiError(400, "Нет id студента");
+  return tgId;
+}
+
+// Чужой id и несуществующий неотличимы: 404 не выдаёт, что объявление есть.
+function myrentOwnRow(sheet, tgId, id) {
+  var row = findRowByValue(sheet, "id", id);
+  if (!row || String(row.tg_id) !== tgId) throw apiError(404, "Нет такого объявления: " + id);
+  return row;
+}
+
+function handleMyrentMine(payload) {
+  myrentCheckBot(payload);
+  var tgId = myrentTgId(payload);
+  var items = readRows(getSheet(SHEETS.MYRENT)).filter(function (r) {
+    return String(r.tg_id) === tgId;
+  }).reverse().slice(0, 20).map(function (r) {
+    var price = r.price === "" || r.price === null || r.price === undefined ? null : Number(r.price);
+    return {
+      id: String(r.id), status: String(r.status), category: String(r.category),
+      category_label: myrentCategoryLabel(String(r.category)),
+      title: String(r.title), description: String(r.description || ""),
+      price: price || null, price_text: price ? "" : MYRENT_PRICE_TEXT,
+      photo_file_id: String(r.photo_file_id), created_at: String(r.created_at),
+      updated_at: String(r.updated_at || r.created_at),
+    };
+  });
+  return { items: items };
+}
+
+// Правка возвращает объявление на модерацию и прячет его с сайта: иначе после
+// одобрения можно было бы подменить содержимое (решение владельца 7 октября 2026).
+// approved_at при этом стирается — иначе «снять» и «выставить снова» вернули бы
+// непроверенную правку на сайт без модерации.
+function handleMyrentUpdate(payload) {
+  var botTok = myrentCheckBot(payload);
+  var tgId = myrentTgId(payload);
+  var id = String(payload.id || "").trim();
+  var ch = payload.changes;
+  if (!ch || typeof ch !== "object" || Array.isArray(ch)) throw apiError(400, "Нужен объект changes");
+  function text(v) { return v === undefined || v === null ? undefined : String(v).trim(); }
+  var category = text(ch.category);
+  if (category !== undefined) category = category.toUpperCase();
+  var title = text(ch.title);
+  var description = text(ch.description);
+  var fileId = text(ch.photo_file_id);
+  var hasPrice = ch.price !== undefined;
+  var price = hasPrice ? myrentParsePrice(ch.price) : null;
+  myrentCheckFields(category, title, description);
+  if (fileId === "") throw apiError(400, "Нужно фото");
+  var username = String(payload.tg_username || "").trim().replace(/^@/, "");
+  if (username) myrentCheckUsername(username);
+
+  var sheet = getSheet(SHEETS.MYRENT);
+  var current = myrentOwnRow(sheet, tgId, id);
+  if (current.status === "removed") throw apiError(409, "Сначала выставите объявление снова");
+
+  // Диск медленный — до замка, как в handleModelsPhoto.
+  var folder = null, file = null, url = "";
+  if (fileId !== undefined && fileId !== String(current.photo_file_id)) {
+    var photo = myrentFetchPhoto(botTok, fileId);
+    folder = photoFolder();
+    var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMddHHmmss");
+    file = folder.createFile(Utilities.newBlob(photo.bytes, photo.kind.mime, id + "-" + stamp + "." + photo.kind.ext));
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    url = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w800";
+  }
+  function dropNewFile() { if (file) { try { file.setTrashed(true); } catch (ignored) {} } }
+
+  var before = null, next = null, repeat = false, oldUrl = "";
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    myrentEnsureColumns(sheet);
+    before = myrentOwnRow(sheet, tgId, id);
+    if (before.status === "removed") throw apiError(409, "Сначала выставите объявление снова");
+    var curPrice = before.price === "" || before.price === null || before.price === undefined ? null : Number(before.price) || null;
+    var photoNew = !!file && fileId !== String(before.photo_file_id);
+    var changed = photoNew ||
+      (category !== undefined && category !== String(before.category)) ||
+      (title !== undefined && title !== String(before.title)) ||
+      (description !== undefined && description !== String(before.description || "")) ||
+      (hasPrice && price !== curPrice);
+    if (!changed) {
+      repeat = true;
+      dropNewFile();
+    } else {
+      var now = new Date().toISOString();
+      var patch = { status: "pending", updated_at: now, decided_at: "", decided_by: "", approved_at: "",
+        mod_chat_id: "", mod_message_id: "" };
+      if (category !== undefined) patch.category = category;
+      if (title !== undefined) patch.title = title;
+      if (description !== undefined) patch.description = description;
+      if (hasPrice) { patch.price = price === null ? "" : price; patch.price_text = price === null ? MYRENT_PRICE_TEXT : ""; }
+      if (username) patch.tg_username = username;
+      if (photoNew) { patch.photo = url; patch.photo_file_id = fileId; oldUrl = String(before.photo || ""); }
+      updateRow(sheet, before.__row, patch);
+      next = Object.assign({}, before, patch);
+    }
+  } catch (e) {
+    dropNewFile();
+    throw e;
+  } finally {
+    lock.releaseLock();
+  }
+
+  if (repeat) {
+    if (before.status === "pending" && !String(before.mod_message_id || "")) myrentAttachModeration(botTok, sheet, before, "правка");
+    return { id: id, status: before.status, repeat: true };
+  }
+  // Старое фото убираем после записи: упавшая запись не должна оставить
+  // объявление без картинки.
+  if (oldUrl) {
+    try { trashOwnPhoto(folder, oldUrl); } catch (e) {
+      logEvent("myrent", "update", "trash_failed", e && e.message ? e.message : String(e), { url: oldUrl });
+    }
+  }
+  if (before.status === "pending") myrentCloseCard(botTok, before, "🔄 Заменено правкой");
+  myrentAttachModeration(botTok, sheet, next, "правка");
+  return { id: id, status: "pending", repeat: false };
+}
+
+// Снятие — сразу и без модерации: оно только прячет объявление.
+function handleMyrentRemove(payload) {
+  var botTok = myrentCheckBot(payload);
+  var tgId = myrentTgId(payload);
+  var id = String(payload.id || "").trim();
+  var sheet = getSheet(SHEETS.MYRENT);
+  var row = null, repeat = false;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    myrentEnsureColumns(sheet);
+    row = myrentOwnRow(sheet, tgId, id);
+    if (row.status === "removed") {
+      repeat = true;
+    } else {
+      updateRow(sheet, row.__row, { status: "removed", removed_at: new Date().toISOString() });
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  if (repeat) return { id: id, status: "removed", repeat: true };
+  // Карточка с кнопками в чате склада больше не нужна: решать по снятому нечего.
+  if (row.status === "pending") myrentCloseCard(botTok, row, "🗑 Снято автором");
+  return { id: id, status: "removed", repeat: false };
+}
+
+// Раньше одобренное содержимое не менялось (правка стирает approved_at), поэтому
+// возвращаем его на сайт сразу; остальное идёт на модерацию заново.
+function handleMyrentRestore(payload) {
+  var botTok = myrentCheckBot(payload);
+  var tgId = myrentTgId(payload);
+  var id = String(payload.id || "").trim();
+  var sheet = getSheet(SHEETS.MYRENT);
+  var row = null, status = "", repeat = false;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    myrentEnsureColumns(sheet);
+    row = myrentOwnRow(sheet, tgId, id);
+    if (row.status !== "removed") {
+      repeat = true;
+      status = String(row.status);
+    } else {
+      status = String(row.approved_at || "") ? "approved" : "pending";
+      var patch = { status: status, removed_at: "", updated_at: new Date().toISOString() };
+      if (status === "pending") {
+        patch.decided_at = ""; patch.decided_by = ""; patch.mod_chat_id = ""; patch.mod_message_id = "";
+      }
+      updateRow(sheet, row.__row, patch);
+      row = Object.assign({}, row, patch);
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  if (status === "pending" && (!repeat || !String(row.mod_message_id || ""))) {
+    myrentAttachModeration(botTok, sheet, row);
+  }
+  return { id: id, status: status, repeat: repeat };
 }
 
 // Публичное чтение, как /public/catalog: tg_id и служебные поля наружу не идут.

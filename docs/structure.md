@@ -109,7 +109,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Сайт | `/public/catalog`, `/public/order`, `/public/announcements`, `/public/my` (одобренное «Моё в аренду») |
 | Объявления | `/announcements/list`, `/announcement/save`, `/announcement/remove` (любой вошедший, не только Admin) |
 | Акт | `/act/template`, `/act/build` |
-| Моё в аренду (бот) | `/myrent/submit`, `/myrent/decide` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
+| Моё в аренду (бот) | `/myrent/submit`, `/myrent/decide`, `/myrent/mine`, `/myrent/update`, `/myrent/remove`, `/myrent/restore` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
 | Бот | `/notify/*`; `/labels/send` выведена из работы и отвечает `410` с подсказкой — ради старых версий приложения |
 | Сверка | `/inventory/save`, `/inventory/list` |
 | Админка | `/settings/*`, `/category/*`, `/maintenance` |
