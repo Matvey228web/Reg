@@ -36,7 +36,7 @@ const READS = new Set([
   "/equipment/list", "/models/list", "/item/lookup", "/item/history",
   "/orders/list", "/order/card", "/students/list", "/student/history",
   "/clients/list", "/client/history", "/defects/list", "/staff/list",
-  "/inventory/list", "/settings/get",
+  "/inventory/list", "/settings/get", "/myrent/admin/list",
   // Наличие на даты для сайта. Токена у посетителя нет, поэтому кэш здесь
   // общий — и это правильно: ответ у всех одинаковый.
   "/public/catalog",
@@ -77,7 +77,7 @@ const HARMLESS = new Set([
 // медленным, а именно про него и спрашивают.
 // Сюда же — чтения, которые таблица отдаёт не всем вошедшим (requireAdmin):
 // в общем кэше ответ админа достался бы складмену мимо проверки роли.
-const PERSONAL = new Set(["/settings/get", "/staff/list"]);
+const PERSONAL = new Set(["/settings/get", "/staff/list", "/myrent/admin/list"]);
 
 export default {
   async fetch(request, env, ctx) {
@@ -199,6 +199,12 @@ export default {
         ctx.waitUntil(env.CACHE.delete(staleKey("/public/announcements", await hash("{}")))
           .then(() => bumpGeneration(env))
           .then(() => refreshPublic(env, "/public/announcements", {})));
+      }
+      // Решение владельца 7 октября 2026: админ правит и снимает объявления
+      // студентов из приложения, и сайт должен увидеть это сразу, а не из
+      // долгой копии. Список для админа (/myrent/admin/list) — чтение, сюда не попадает.
+      if (endpoint.startsWith("/myrent/admin/")) {
+        ctx.waitUntil(dropPublicMy(env));
       }
     }
 
@@ -436,9 +442,18 @@ const menuKeyboard = {
   keyboard: [[{ text: MYRENT_BUTTON }, { text: MINE_BUTTON }]], resize_keyboard: true,
 };
 
+// Модерации больше нет (решение владельца 7 октября 2026): pending и rejected
+// остались только у старых строк, новый код их не создаёт.
 const STATUS_LABEL = {
   approved: "на сайте", pending: "на модерации", rejected: "отклонено", removed: "снято",
 };
+const statusLabel = (it) => it.status === "removed" && it.removed_by === "admin"
+  ? "снято администратором" : (STATUS_LABEL[it.status] || it.status);
+
+// Раздел My rent на сайте открывается с 15 октября 2026; после даты фраза
+// больше не нужна и пропадает сама.
+const MYRENT_OPENS = Date.UTC(2026, 9, 15);
+const opensNote = () => Date.now() < MYRENT_OPENS ? " Раздел My rent на сайте откроется 15 октября." : "";
 
 // Все вызовы таблицы от имени бота: ключ и длинный срок ожидания в одном месте.
 async function botCall(env, token, endpoint, payload) {
@@ -522,8 +537,8 @@ const HELLO = [
   "Привет! Это бот склада Mifs Rent.",
   "",
   "Если хотите сдавать своё снаряжение другим студентам, нажмите «" + MYRENT_BUTTON + "» " +
-    "(или /myrent): я задам несколько вопросов, покажу карточку и отправлю её на " +
-    "модерацию. Свои объявления можно посмотреть, исправить и снять: «" + MINE_BUTTON +
+    "(или /myrent): я задам несколько вопросов, покажу карточку и опубликую её " +
+    "в разделе My rent. Свои объявления можно посмотреть, исправить и снять: «" + MINE_BUTTON +
     "» (или /my). Выйти можно в любой момент: /cancel.",
 ].join("\n");
 
@@ -561,19 +576,16 @@ async function sendCard(token, chatId, view, caption, markup) {
   return tgApi(token, "sendDocument", { ...body, document: view.photo_file_id });
 }
 
-const EDIT_NOTE = "После правки объявление снова пройдёт модерацию и до одобрения " +
-  "не будет видно на сайте.";
-
 async function showPreview(token, chatId, state, username) {
   const edit = state.mode === "edit";
   await say(token, chatId, edit
-    ? "Проверьте карточку. " + EDIT_NOTE
+    ? "Проверьте карточку. После сохранения она сразу обновится на сайте."
     : "Проверьте карточку. Так её увидят на сайте.");
   const markup = { inline_keyboard: edit ? [
-    [{ text: "Отправить на модерацию", callback_data: "mys:send" }],
+    [{ text: "Сохранить", callback_data: "mys:send" }],
     [{ text: "К полям", callback_data: "myf:menu" }, { text: "Отмена", callback_data: "mys:cancel" }],
   ] : [
-    [{ text: "Отправить на модерацию", callback_data: "mys:send" }],
+    [{ text: "Опубликовать", callback_data: "mys:send" }],
     [{ text: "Заново", callback_data: "mys:again" }, { text: "Отмена", callback_data: "mys:cancel" }],
   ] };
   return sendCard(token, chatId, viewOf(state), cardCaption(viewOf(state), username), markup);
@@ -682,12 +694,13 @@ async function listMine(env, token, uid, chatId, username) {
     return;
   }
   for (const it of items) {
+    // Снятое администратором студент не возвращает и не правит: кнопок нет.
     const buttons = it.status === "removed"
-      ? [{ text: "Выставить снова", callback_data: "myo:" + it.id }]
+      ? (it.removed_by === "admin" ? [] : [{ text: "Выставить снова", callback_data: "myo:" + it.id }])
       : [{ text: "Редактировать", callback_data: "mye:" + it.id }, { text: "Снять", callback_data: "myx:" + it.id }];
     await sendCard(token, chatId, { photo_file_id: it.photo_file_id },
-      cardCaption(it, username, "Статус: " + (STATUS_LABEL[it.status] || it.status)),
-      { inline_keyboard: [buttons] });
+      cardCaption(it, username, "Статус: " + statusLabel(it)),
+      { inline_keyboard: buttons.length ? [buttons] : [] });
   }
 }
 
@@ -758,10 +771,25 @@ async function handleCallback(env, token, cb) {
 
   // Модерация в чате склада. Какой чат настоящий, Worker не знает — это
   // проверяет таблица по chat_id сообщения с карточкой.
-  const mod = data.match(/^myr:([ar]):([\w-]{1,32})$/);
+  const mod = data.match(/^myr:([arx]):([\w-]{1,32})$/);
   if (mod) {
     const by = cb.from && cb.from.username ? "@" + cb.from.username
       : String((cb.from && cb.from.first_name) || "склад");
+    // «Снять» — единственная живая кнопка карточки в чате склада. Повторное
+    // нажатие ничего не сбрасывает: кэш уже свежий.
+    if (mod[1] === "x") {
+      const ans = await botCall(env, token, "/myrent/takedown", {
+        id: mod[2], by, chat_id: msg.chat.id,
+      });
+      if (!ans.ok) return answer(ans.error || "Не получилось, нажмите ещё раз");
+      if ((ans.data || {}).repeat) return answer("Уже снято");
+      await answer("Снято");
+      await dropPublicMy(env);
+      return;
+    }
+    // Кнопки «Одобрить/Отклонить» остались на карточках, выложенных до отмены
+    // модерации: таблица отвечает на них совместимо (одобрить — ничего,
+    // отклонить — снятие администратором).
     const ans = await botCall(env, token, "/myrent/decide", {
       id: mod[2], decision: mod[1] === "a" ? "approve" : "reject", by, chat_id: msg.chat.id,
     });
@@ -769,10 +797,10 @@ async function handleCallback(env, token, cb) {
       return answer(ans.error || "Не получилось, нажмите ещё раз");
     }
     const d = ans.data || {};
-    const word = d.status === "approved" ? "одобрено" : d.status === "rejected" ? "отклонено"
-      : d.status === "removed" ? "снято автором" : "решено";
+    const word = d.status === "approved" ? "на сайте" : d.status === "rejected" ? "отклонено"
+      : d.status === "removed" ? "снято" : "решено";
     if (d.repeat) return answer("Уже " + word);
-    await answer(d.status === "approved" ? "Одобрено" : "Отклонено");
+    await answer(d.status === "approved" ? "Одобрено" : "Снято");
     await dropPublicMy(env);
     return;
   }
@@ -814,18 +842,20 @@ async function handleCallback(env, token, cb) {
     if (kind === "myy" || kind === "myo") {
       const ans = await botCall(env, token, kind === "myy" ? "/myrent/remove" : "/myrent/restore",
         { tg_id: uid, id });
-      if (!ans.ok) return answer(ans.error || "Не получилось, нажмите ещё раз");
+      if (!ans.ok) {
+        // Отказ таблицы (снято администратором: 403/409) объясняем текстом
+        // сообщения, а не короткой всплывашкой: её легко не дочитать.
+        await answer(ans.error || "Не получилось, нажмите ещё раз");
+        if (kind === "myo" && ans.error) await say(token, chatId, esc(ans.error));
+        return;
+      }
       const d = ans.data || {};
       await answer(kind === "myy" ? "Снято" : "Готово");
       await dropButtons();
-      if (kind === "myy") {
-        await say(token, chatId, "Объявление снято с сайта. Вернуть его можно в «" + MINE_BUTTON +
-          "» кнопкой «Выставить снова».");
-      } else {
-        await say(token, chatId, d.status === "approved"
-          ? "Объявление снова на сайте."
-          : "Объявление отправлено на модерацию. Когда склад решит, я напишу сюда.");
-      }
+      await say(token, chatId, kind === "myy"
+        ? "Объявление снято с сайта. Вернуть его можно в «" + MINE_BUTTON +
+          "» кнопкой «Выставить снова»."
+        : "Объявление снова на сайте.");
       if (!d.repeat) await dropPublicMy(env);
       return;
     }
@@ -834,7 +864,10 @@ async function handleCallback(env, token, cb) {
     const ans = await botCall(env, token, "/myrent/mine", { tg_id: uid });
     const it = ans.ok && ans.data && (ans.data.items || []).find((x) => x.id === id);
     if (!it) return answer(ans.ok ? "Объявление не найдено" : "Список недоступен, попробуйте позже");
-    if (it.status === "removed") return answer("Сначала выставите объявление снова");
+    if (it.status === "removed") {
+      return answer(it.removed_by === "admin" ? "Объявление снято администратором"
+        : "Сначала выставите объявление снова");
+    }
     await answer();
     const state = {
       mode: "edit", id, step: "menu", changes: {},
@@ -934,8 +967,8 @@ async function handleCallback(env, token, cb) {
       { tg_id: uid, tg_username: username, id: state.id, changes });
     if (!ans.ok) {
       // Состояние не трогаем: студент нажмёт кнопку ещё раз, ввод заново не нужен.
-      await say(token, chatId, "Не получилось отправить: " + esc(ans.error || "склад не отвечает") +
-        ". Нажмите «Отправить на модерацию» ещё раз — правка сохранена.");
+      await say(token, chatId, "Не получилось сохранить: " + esc(ans.error || "склад не отвечает") +
+        ". Нажмите «Сохранить» ещё раз — правка не потеряна.");
       return;
     }
     await env.CACHE.delete("dlg:" + uid);
@@ -943,7 +976,7 @@ async function handleCallback(env, token, cb) {
     const d = ans.data || {};
     await say(token, chatId, d.repeat
       ? "Изменений нет — объявление осталось как было."
-      : "Правка отправлена на модерацию. " + EDIT_NOTE + " Когда склад решит, я напишу сюда.");
+      : "Сохранено, объявление обновлено в разделе My rent.");
     if (!d.repeat) await dropPublicMy(env);
     return;
   }
@@ -957,12 +990,14 @@ async function handleCallback(env, token, cb) {
   if (ans.ok) {
     await env.CACHE.delete("dlg:" + uid);
     await dropButtons();
-    await say(token, chatId, "Отправлено на модерацию. Когда склад решит, я напишу сюда.");
+    await say(token, chatId, "Опубликовано в разделе My rent." + opensNote());
+    // Публикация без модерации: сайт должен показать объявление сразу.
+    await dropPublicMy(env);
     return;
   }
   // Состояние не трогаем: студент нажмёт кнопку ещё раз, ввод заново не нужен.
-  await say(token, chatId, "Не получилось отправить: склад сейчас не отвечает. " +
-    "Нажмите «Отправить на модерацию» ещё раз чуть позже — карточка сохранена.");
+  await say(token, chatId, "Не получилось опубликовать: " + esc(ans.error || "склад сейчас не отвечает") +
+    ". Нажмите «Опубликовать» ещё раз чуть позже — карточка сохранена.");
 }
 
 async function knownChats(env) {
