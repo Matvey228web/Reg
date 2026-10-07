@@ -602,6 +602,12 @@ a.add {
 .my-mark { font-size: 12px; line-height: 16px; color: var(--accent); }
 .my-offers { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; line-height: 18px; }
 .my-offers a { color: var(--ink); }
+.my-offers--cell { margin: 0; padding: 0 12px 12px; }
+/* Карточка позиции: текст крупнее, а @ник — цель для пальца. */
+.my-note--full { font-size: 15px; line-height: 22px; color: var(--ink); margin: 0 0 16px; }
+.my-offers--full { margin: 0; gap: 0; font-size: 15px; line-height: 22px; border-top: 1px solid var(--line); }
+.my-offers--full li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.my-offers--full a { display: inline-block; padding: 8px 0; color: var(--accent-text); }
 .card-free { font-variant-numeric: tabular-nums; }
 .card-free b { color: var(--ink); font-weight: 700; }
 .card-free.none { color: var(--accent-text); }

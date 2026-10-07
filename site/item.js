@@ -151,6 +151,62 @@
     $("qty").value = n;
   });
 
+  // Позиция My rent: ?my=<ключ>. Корзины и склада нет — только описание и
+  // способ связаться с владельцем.
+  function myKey() {
+    var m = /[?&]my=([^&]+)/.exec(location.search);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+
+  function renderMy(data, final) {
+    var m = data.items.filter(function (x) { return x.key === myKey(); })[0];
+    if (!m && !final) {
+      $("item").innerHTML = '<p class="empty">Загружаем…</p>';
+      return;
+    }
+    if (!m) {
+      $("item").innerHTML = '<p class="empty">Такой позиции нет. ' +
+        '<a href="index.html?s=my">Вернуться в My rent</a></p>';
+      return;
+    }
+    document.title = m.name + " · My rent · MifsRent";
+    if (Site.myClosed()) {
+      $("item").className = "soonwrap";
+      $("item").innerHTML = '<p class="soon">soon…</p>';
+      return;
+    }
+    var cat = data.categories.filter(function (c) { return c.code === m.category; })[0];
+    var src = Site.myPhoto(m);
+    $("item").innerHTML =
+      '<div class="item-shot">' +
+        (src ? '<img src="' + esc(src) + '" alt="" decoding="async" onerror="this.remove()" />' : "") +
+        Site.shotIcon(m) +
+      "</div>" +
+      '<div class="item-main">' +
+        '<p class="cap item-cat">' + esc(cat ? cat.label : "My rent") + "</p>" +
+        "<h1>" + esc(m.name) + "</h1>" +
+        (m.note ? '<p class="my-note my-note--full">' + esc(m.note) + "</p>" : "") +
+        '<ul class="my-offers my-offers--full">' + m.offers.map(Site.myOffer).join("") + "</ul>" +
+      "</div>";
+  }
+
+  if (myKey()) {
+    var back = $("crumb-back");
+    back.href = "index.html?s=my";
+    back.lastChild.textContent = "My rent";
+    Site.loadMy()
+      .then(function (data) {
+        renderMy(data);
+        // Позиция из бота может прийти позже my.json — тогда карточка
+        // дорисуется, а «нет такой» скажем только после ответа.
+        Site.myLiveDone().then(function () { renderMy(data, true); });
+      })
+      .catch(function () {
+        $("item").innerHTML = '<p class="empty">Раздел не загрузился. Обновите страницу.</p>';
+      });
+    return;
+  }
+
   Site.loadCatalog()
     .then(function (data) {
       catalog = data;

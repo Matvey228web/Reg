@@ -364,6 +364,93 @@ var Site = (function () {
     }).catch(function () { /* остаёмся на снимке, тихо */ });
   }
 
+  // --- My rent ---
+  // Основа — my.json (перенесено с Tilda), поверх неё объявления студентов из
+  // бота: /public/my. Живой ответ не обязателен: не пришёл за 5 секунд или
+  // отказал — на экране остаётся my.json, молча. Ключи бота («S-0001») с
+  // «MY-xx» не пересекаются, поэтому записи просто дописываются.
+  var myData = null, myLoading = null, myLiveEnd = null;
+
+  function liveMy() {
+    var ctl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, 5000) : null;
+    return fetch(BACKEND, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ endpoint: "/public/my", payload: {} }),
+      signal: ctl ? ctl.signal : undefined,
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (timer) clearTimeout(timer);
+        if (!data || !data.ok || !data.data) throw new Error("не ответил");
+        return data.data;
+      }, function (err) {
+        if (timer) clearTimeout(timer);
+        throw err;
+      });
+  }
+
+  // Один объект на страницу, как у каталога: страницы держат на него ссылку и
+  // перерисовываются по событию my-live.
+  function loadMy() {
+    if (myLoading) return myLoading;
+    myLoading = fetch("my.json")
+      .then(function (res) { return res.json(); })
+      .then(function (base) {
+        myData = base;
+        myLiveEnd = liveMy().then(function (live) {
+          var have = {};
+          myData.items.forEach(function (m) { have[m.key] = true; });
+          var add = (Array.isArray(live.items) ? live.items : []).filter(function (m) {
+            return m && m.key && m.name && Array.isArray(m.offers) && !have[m.key];
+          });
+          var cats = {};
+          myData.categories.forEach(function (c) { cats[c.code] = true; });
+          (Array.isArray(live.categories) ? live.categories : []).forEach(function (c) {
+            if (c && c.code && !cats[c.code]) { cats[c.code] = true; myData.categories.push(c); }
+          });
+          if (!add.length) return;
+          myData.items = myData.items.concat(add);
+          document.dispatchEvent(new CustomEvent("my-live"));
+        }).catch(function () { /* остаёмся на my.json, тихо */ });
+        return myData;
+      });
+    myLoading.catch(function () { myLoading = null; });
+    return myLoading;
+  }
+
+  // Живой ответ отработал (пришёл, отказал или не дождались): до этого момента
+  // позицию, которой нет в my.json, ещё рано объявлять несуществующей.
+  function myLiveDone() { return myLiveEnd || Promise.resolve(); }
+
+  // Снимок: у позиции из бота — абсолютная https-ссылка, у перенесённых —
+  // файл photos/<ключ>.jpg (если помечен в my.json).
+  function myPhoto(m) {
+    if (typeof m.photo_url === "string" && /^https:\/\//i.test(m.photo_url.trim())) return m.photo_url.trim();
+    return m.photo ? "photos/" + m.key + ".jpg" : "";
+  }
+
+  function myPrice(o) {
+    return o.price ? Number(o.price).toLocaleString("ru-RU") + " ₽/сутки" : (o.price_text || "Договорная");
+  }
+
+  // Строка владельца: ссылка @ник — единственное место сайта, где Telegram
+  // разрешён (решение владельца, 5 октября 2026).
+  function myOffer(o) {
+    var bits = [myPrice(o)];
+    if (o.qty > 1) bits.push(o.qty + " шт.");
+    return '<li><a href="https://t.me/' + encodeURIComponent(o.tg) +
+      '" target="_blank" rel="noopener">@' + escapeHtml(o.tg) + "</a> · " + escapeHtml(bits.join(" · ")) +
+      (o.note ? '<span class="my-note">' + escapeHtml(o.note) + "</span>" : "") + "</li>";
+  }
+
+  // До открытия раздела витрина и карточка показывают «soon…». Файл к этому
+  // времени уже выложен — это не защита данных, а только витрина.
+  function myClosed() {
+    return !!myData && Date.now() < Date.parse(myData.opens_at);
+  }
+
   // Единственный живой запрос сайта, и только когда даты выбраны.
   function availability(from, to) {
     return fetch(BACKEND, {
@@ -648,6 +735,7 @@ var Site = (function () {
     humanDate: humanDate, icon: icon, shotIcon: shotIcon, shotAttr: shotAttr, tick: tick,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
+    loadMy: loadMy, myLiveDone: myLiveDone, myPhoto: myPhoto, myOffer: myOffer, myClosed: myClosed,
     OPERATOR_URL: OPERATOR_URL,
     sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,

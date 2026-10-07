@@ -138,29 +138,22 @@
   // Telegram разрешён: так решил владелец, иначе связаться не с кем.
   var my = null;
 
-  function myOffer(o) {
-    var bits = [];
-    if (o.qty) bits.push(o.qty + " шт.");
-    bits.push(o.price ? o.price + " ₽" : "цена по договорённости");
-    return '<li><a href="https://t.me/' + encodeURIComponent(o.tg) +
-      '" target="_blank" rel="noopener">@' + esc(o.tg) + "</a> · " + esc(bits.join(" · ")) +
-      (o.note ? '<span class="my-note">' + esc(o.note) + "</span>" : "") + "</li>";
-  }
+  document.addEventListener("my-live", function () {
+    if (my && Site.section() === "my") renderMy();
+  });
 
   function renderMy() {
     $("controls").hidden = true;
     $("status").textContent = "";
     $("empty").hidden = true;
     if (!my) {
-      fetch("my.json")
-        .then(function (res) { return res.json(); })
+      Site.loadMy()
         .then(function (data) { my = data; if (Site.section() === "my") renderMy(); })
         .catch(function () { $("status").textContent = "Раздел не загрузился. Обновите страницу."; });
       return;
     }
-    // Открытие назначил владелец (15 октября, 12:00 по Москве). Файл к этому
-    // времени уже выложен — прячем только витрину, это не защита данных.
-    if (Date.now() < Date.parse(my.opens_at)) {
+    // Открытие назначил владелец (15 октября, 12:00 по Москве).
+    if (Site.myClosed()) {
       $("groups").className = "soonwrap";
       $("groups").innerHTML = '<p class="soon">soon…</p>';
       return;
@@ -171,15 +164,20 @@
       if (!list.length) return;
       html += '<h2 class="group-title">' + esc(c.label) + "</h2>" +
         '<div class="grid">' + list.map(function (m) {
+          var src = Site.myPhoto(m);
+          // Ссылка охватывает снимок и название, а список владельцев стоит рядом:
+          // @ник сам ссылка, а ссылка внутри ссылки — сломанная разметка.
           return '<div class="cell my-cell">' +
-            '<div class="shot">' + (m.photo
-              ? '<img src="photos/' + esc(m.key) + '.jpg" alt="" loading="lazy" decoding="async" onerror="this.remove()" />'
-              : "") + Site.shotIcon(m) + "</div>" +
-            '<div class="card-body"><div class="card-name">' + esc(m.name) + "</div>" +
-              (m.mark ? '<div class="my-mark">' + esc(m.mark) + "</div>" : "") +
-              (m.note ? '<p class="my-note">' + esc(m.note) + "</p>" : "") +
-              '<ul class="my-offers">' + m.offers.map(myOffer).join("") + "</ul>" +
-            "</div>" +
+            '<a class="card" href="item.html?my=' + encodeURIComponent(m.key) + '">' +
+              '<div class="shot">' + (src
+                ? '<img src="' + esc(src) + '" alt="" loading="lazy" decoding="async" onerror="this.remove()" />'
+                : "") + Site.shotIcon(m) + "</div>" +
+              '<div class="card-body"><div class="card-name">' + esc(m.name) + "</div>" +
+                (m.mark ? '<div class="my-mark">' + esc(m.mark) + "</div>" : "") +
+                (m.note ? '<p class="my-note">' + esc(m.note) + "</p>" : "") +
+              "</div>" +
+            "</a>" +
+            '<ul class="my-offers my-offers--cell">' + m.offers.map(Site.myOffer).join("") + "</ul>" +
           "</div>";
         }).join("") + "</div>";
     });
