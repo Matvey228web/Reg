@@ -893,5 +893,165 @@ tg = [];
 await hook(mod("myr:a:S-0001"));
 ok("отказ таблицы показан модератору", /Чат не тот/.test(lastTg("answerCallbackQuery").body.text), tg);
 
+console.log("\n== My rent: «Мои объявления», правка, снятие, возврат ==");
+const mineItems = [
+  { id: "S-0004", status: "approved", category: "LGT", category_label: "Свет", title: "Nanlite <60>", description: "Комплект", price: 1500, price_text: "", photo_file_id: "f4" },
+  { id: "S-0003", status: "pending", category: "CAM", category_label: "Камера", title: "Sony", description: "", price: null, price_text: "Договорная", photo_file_id: "f3" },
+  { id: "S-0002", status: "rejected", category: "CAM", category_label: "Камера", title: "Canon", description: "", price: 900, price_text: "", photo_file_id: "f2" },
+  { id: "S-0001", status: "removed", category: "AUD", category_label: "Звук", title: "Rode", description: "", price: 300, price_text: "", photo_file_id: "f1" },
+];
+const prevReply = upstream.reply;
+const my2 = { items: [], updated: null, removed: null, restored: null, restoreStatus: "approved", updateReply: null };
+upstream.reply = (body) => {
+  if (body.endpoint === "/myrent/mine") return { ok: true, data: { items: my2.items }, error: null, status: 200 };
+  if (body.endpoint === "/myrent/update") {
+    my2.updated = body.payload;
+    return my2.updateReply || { ok: true, data: { id: body.payload.id, status: "pending" }, error: null, status: 200 };
+  }
+  if (body.endpoint === "/myrent/remove") {
+    my2.removed = body.payload;
+    return { ok: true, data: { id: body.payload.id, status: "removed", repeat: false }, error: null, status: 200 };
+  }
+  if (body.endpoint === "/myrent/restore") {
+    my2.restored = body.payload;
+    return { ok: true, data: { id: body.payload.id, status: my2.restoreStatus, repeat: false }, error: null, status: 200 };
+  }
+  return prevReply(body);
+};
+const btns = (m) => m.body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data).join();
+const cards = () => tg.filter((x) => x.method === "sendPhoto");
+
+tg = [];
+await hook(priv({ text: "Мои объявления" }));
+ok("пустой список — подсказка нажать «My rent»",
+   tg.length === 1 && /ажмите «My rent»/.test(tg[0].body.text), tg);
+
+my2.items = mineItems;
+tg = []; upstream.calls = [];
+await hook(priv({ text: "/my" }));
+const cs = cards();
+ok("по сообщению на объявление, mine ушёл", cs.length === 4 && upstream.calls.includes("/myrent/mine"), tg);
+ok("на сайте: Редактировать и Снять", btns(cs[0]) === "mye:S-0004,myx:S-0004", cs[0]);
+ok("на модерации: Редактировать и Снять", btns(cs[1]) === "mye:S-0003,myx:S-0003", cs[1]);
+ok("отклонено: Редактировать и Снять", btns(cs[2]) === "mye:S-0002,myx:S-0002", cs[2]);
+ok("снято: только Выставить снова", btns(cs[3]) === "myo:S-0001", cs[3]);
+ok("в подписи статус и экранированный текст",
+   /Статус: на сайте/.test(cs[0].body.caption) && /Nanlite &lt;60&gt;/.test(cs[0].body.caption) &&
+   /Статус: снято/.test(cs[3].body.caption) && cs[0].body.photo === "f4", cs[0]);
+
+// Правка названия и цены.
+tg = [];
+await hook(press("mye:S-0004"));
+ok("правка: диалог в режиме edit, на нажатие отвечено",
+   dlg().mode === "edit" && dlg().id === "S-0004" && dlg().step === "menu" &&
+   tg.some((x) => x.method === "answerCallbackQuery"), dlg());
+ok("меню полей с «Готово»", /myf:category/.test(btns(lastTg("sendPhoto"))) && /myf:done/.test(btns(lastTg("sendPhoto"))), tg);
+await hook(press("myf:title"));
+ok("спросили название", dlg().step === "title", dlg());
+tg = [];
+await hook(priv({ text: "x".repeat(81) }));
+ok("проверка названия та же, что при создании", dlg().step === "title" && tg.length === 1, tg);
+await hook(priv({ text: "Nanlite 60 новый" }));
+ok("после названия — снова меню, правка в changes",
+   dlg().step === "menu" && dlg().changes.title === "Nanlite 60 новый", dlg());
+await hook(press("myf:price"));
+await hook(priv({ text: "много" }));
+ok("цена проверяется как при создании", dlg().step === "price", dlg());
+await hook(priv({ text: "2500" }));
+ok("цена принята, меню", dlg().step === "menu" && dlg().changes.price === 2500, dlg());
+tg = [];
+await hook(press("myf:done"));
+ok("«Готово» — предупреждение про модерацию",
+   dlg().step === "preview" && /снова пройдёт модерацию/.test(tg.find((x) => x.method === "sendMessage").body.text), tg);
+ok("в предпросмотре новые значения",
+   /Nanlite 60 новый/.test(lastTg("sendPhoto").body.caption) && /2 500/.test(lastTg("sendPhoto").body.caption), tg);
+upstream.calls = []; tg = [];
+await hook(press("mys:send"));
+ok("update ушёл только с изменёнными полями",
+   my2.updated && my2.updated.bot_key === secret && my2.updated.tg_id === 777 && my2.updated.id === "S-0004" &&
+   my2.updated.tg_username === "ivan_s" &&
+   JSON.stringify(my2.updated.changes) === JSON.stringify({ title: "Nanlite 60 новый", price: 2500 }), my2.updated);
+ok("после правки диалог стёрт, кэш /public/my сброшен",
+   !dlg() && upstream.calls.includes("/public/my"), { d: dlg(), c: upstream.calls });
+ok("сказано про модерацию", /модерац/.test(lastTg("sendMessage").body.text), tg);
+
+// Правка фото.
+await hook(press("mye:S-0003"));
+await hook(press("myf:photo"));
+await hook(priv({ text: "не фото" }));
+ok("вместо фото текст — шаг прежний", dlg().step === "photo", dlg());
+await hook(priv({ photo: [{ file_id: "newph", file_size: 5 }] }));
+ok("фото принято, меню", dlg().step === "menu" && dlg().changes.photo_file_id === "newph", dlg());
+await hook(press("myf:done"));
+my2.updated = null;
+await hook(press("mys:send"));
+ok("update только с фото", my2.updated && JSON.stringify(my2.updated.changes) === JSON.stringify({ photo_file_id: "newph" }), my2.updated);
+
+// Категория в правке.
+await hook(press("mye:S-0003"));
+await hook(press("myf:category"));
+await hook(press("myc:LGT"));
+ok("категория в правке — тот же шаг, затем меню",
+   dlg().step === "menu" && dlg().changes.category === "LGT" && dlg().mode === "edit", dlg());
+await hook(priv({ text: "/cancel" }));
+
+// Ничего не менялось.
+await hook(press("mye:S-0002"));
+await hook(press("myf:title"));
+await hook(priv({ text: "Canon" }));
+my2.updated = null; tg = [];
+await hook(press("myf:done"));
+ok("«Готово» без изменений — сказано, update не вызван, диалог жив",
+   my2.updated === null && dlg().step === "menu" &&
+   tg.some((x) => x.method === "sendMessage" && /ничего не изменили/.test(x.body.text)), tg);
+ok("и на нажатие отвечено", tg.some((x) => x.method === "answerCallbackQuery" && /Ничего не изменилось/.test(x.body.text)), tg);
+await hook(press("mys:cancel"));
+ok("«Отмена» стирает правку", !dlg(), dlg());
+
+// Снятие.
+tg = []; upstream.calls = [];
+await hook(press("myx:S-0004"));
+ok("снятие: сначала вопрос, таблица не тронута",
+   btns(lastTg("sendMessage")) === "myy:S-0004,myn:S-0004" && !my2.removed, tg);
+await hook(press("myn:S-0004"));
+ok("«Нет» — ничего не снято", !my2.removed, my2.removed);
+tg = [];
+await hook(press("myy:S-0004"));
+ok("«Да, снять» — remove вызван, кэш сброшен",
+   my2.removed && my2.removed.id === "S-0004" && my2.removed.tg_id === 777 &&
+   my2.removed.bot_key === secret && upstream.calls.includes("/public/my"), { r: my2.removed, c: upstream.calls });
+ok("на нажатие отвечено", tg.some((x) => x.method === "answerCallbackQuery"), tg);
+
+// Возврат.
+tg = []; upstream.calls = [];
+await hook(press("myo:S-0001"));
+ok("restore вызван сразу, кэш сброшен",
+   my2.restored && my2.restored.id === "S-0001" && my2.restored.tg_id === 777 && upstream.calls.includes("/public/my"), my2.restored);
+ok("сказано, что объявление на сайте", /на сайте/.test(lastTg("sendMessage").body.text), tg);
+my2.restoreStatus = "pending";
+tg = [];
+await hook(press("myo:S-0001"));
+ok("возврат через модерацию — так и сказано", /модерац/.test(lastTg("sendMessage").body.text), tg);
+
+// Чужие нажатия.
+my2.removed = null; my2.restored = null; my2.updated = null;
+tg = []; upstream.calls = [];
+const groupMsgCb = { message_id: 7, chat: { id: -100500, type: "supergroup" } };
+for (const d of ["myy:S-0004", "myo:S-0001", "mye:S-0004", "myx:S-0004", "myf:done"]) {
+  await hook(press(d, { message: groupMsgCb }));
+}
+ok("кнопки студента из группы только отвечены",
+   tg.length === 5 && tg.every((x) => x.method === "answerCallbackQuery") && !upstream.calls.length, tg);
+tg = [];
+const anotherStudent = { id: 999, username: "petr" };
+for (const d of ["myy:S-0004", "myo:S-0001", "mye:S-0004", "mys:send"]) {
+  await hook(press(d, { from: anotherStudent }));
+}
+ok("чужая кнопка в чате другого студента только отвечена",
+   tg.length === 4 && tg.every((x) => x.method === "answerCallbackQuery") &&
+   !my2.removed && !my2.restored && !upstream.calls.length, tg);
+ok("KV диалога не появилось", !env.CACHE.store.has("dlg:999"));
+upstream.reply = prevReply;
+
 console.log("\n" + (bad ? "❌ ПРОВАЛОВ: " + bad : "✅ Worker: проверки пройдены"));
 process.exit(bad ? 1 : 0);

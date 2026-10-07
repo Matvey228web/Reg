@@ -431,7 +431,30 @@ const say = (token, chatId, textHtml, extra) =>
     disable_web_page_preview: true, ...(extra || {}),
   });
 
-const menuKeyboard = { keyboard: [[{ text: MYRENT_BUTTON }]], resize_keyboard: true };
+const MINE_BUTTON = "Мои объявления";
+const menuKeyboard = {
+  keyboard: [[{ text: MYRENT_BUTTON }, { text: MINE_BUTTON }]], resize_keyboard: true,
+};
+
+const STATUS_LABEL = {
+  approved: "на сайте", pending: "на модерации", rejected: "отклонено", removed: "снято",
+};
+
+// Все вызовы таблицы от имени бота: ключ и длинный срок ожидания в одном месте.
+async function botCall(env, token, endpoint, payload) {
+  const res = await callUpstream({ ...env, UPSTREAM_TIMEOUT_MS: MYRENT_UPSTREAM_MS }, {
+    endpoint, payload: { bot_key: await webhookPath(token), ...payload },
+  });
+  return res.envelope;
+}
+
+// Сайт должен увидеть перемену сразу: сносим свежую и долгую копии и собираем
+// новую, пока сайт не спросил.
+async function dropPublicMy(env) {
+  await env.CACHE.delete(staleKey("/public/my", await hash("{}")));
+  await bumpGeneration(env);
+  await refreshPublic(env, "/public/my", {});
+}
 
 async function loadDialog(env, uid) {
   const raw = await env.CACHE.get("dlg:" + uid);
@@ -477,13 +500,14 @@ function priceText(price) {
 
 // Карточка как на сайте. Подпись фото у Telegram — до 1024 знаков, а
 // экранирование раздувает текст, поэтому описание при нужде урезается.
-function cardCaption(state, username) {
+function cardCaption(state, username, statusLine) {
   const build = (desc) => [
     "<b>" + esc(state.title) + "</b>",
     esc(state.category_label || state.category),
     desc ? esc(desc) : "",
     "<b>" + esc(priceText(state.price)) + "</b>",
-    "@" + esc(username),
+    username ? "@" + esc(username) : "",
+    statusLine ? "\n" + esc(statusLine) : "",
   ].filter(Boolean).join("\n");
   let desc = state.description || "";
   let out = build(desc);
@@ -499,7 +523,8 @@ const HELLO = [
   "",
   "Если хотите сдавать своё снаряжение другим студентам, нажмите «" + MYRENT_BUTTON + "» " +
     "(или /myrent): я задам несколько вопросов, покажу карточку и отправлю её на " +
-    "модерацию. Выйти можно в любой момент: /cancel.",
+    "модерацию. Свои объявления можно посмотреть, исправить и снять: «" + MINE_BUTTON +
+    "» (или /my). Выйти можно в любой момент: /cancel.",
 ].join("\n");
 
 async function startDialog(env, token, uid, chatId, username) {
@@ -520,23 +545,150 @@ async function startDialog(env, token, uid, chatId, username) {
   });
 }
 
+// Правка пишется поверх исходных значений: так «что изменилось» считается
+// сравнением, а не отслеживанием каждого нажатия.
+const viewOf = (state) => state.mode === "edit" ? { ...state.draft, ...state.changes } : state;
+
+// Файл-документ как фото не отправить, а карточка должна показать то, что
+// получит модератор. Тип файла из таблицы (список «Мои объявления») мы не
+// знаем, поэтому при отказе sendPhoto пробуем документ.
+async function sendCard(token, chatId, view, caption, markup) {
+  const body = { chat_id: String(chatId), caption, parse_mode: "HTML", reply_markup: markup };
+  if (view.photo_kind !== "document") {
+    const res = await tgApi(token, "sendPhoto", { ...body, photo: view.photo_file_id });
+    if (res && res.ok) return res;
+  }
+  return tgApi(token, "sendDocument", { ...body, document: view.photo_file_id });
+}
+
+const EDIT_NOTE = "После правки объявление снова пройдёт модерацию и до одобрения " +
+  "не будет видно на сайте.";
+
 async function showPreview(token, chatId, state, username) {
-  await say(token, chatId, "Проверьте карточку. Так её увидят на сайте.");
-  const body = {
-    chat_id: String(chatId),
-    caption: cardCaption(state, username),
-    parse_mode: "HTML",
-    reply_markup: { inline_keyboard: [
-      [{ text: "Отправить на модерацию", callback_data: "mys:send" }],
-      [{ text: "Заново", callback_data: "mys:again" }, { text: "Отмена", callback_data: "mys:cancel" }],
-    ] },
-  };
-  // Файл-документ как фото не отправить, а карточка должна показать то, что
-  // получит модератор.
-  const res = state.photo_kind === "document"
-    ? await tgApi(token, "sendDocument", { ...body, document: state.photo_file_id })
-    : await tgApi(token, "sendPhoto", { ...body, photo: state.photo_file_id });
-  return res;
+  const edit = state.mode === "edit";
+  await say(token, chatId, edit
+    ? "Проверьте карточку. " + EDIT_NOTE
+    : "Проверьте карточку. Так её увидят на сайте.");
+  const markup = { inline_keyboard: edit ? [
+    [{ text: "Отправить на модерацию", callback_data: "mys:send" }],
+    [{ text: "К полям", callback_data: "myf:menu" }, { text: "Отмена", callback_data: "mys:cancel" }],
+  ] : [
+    [{ text: "Отправить на модерацию", callback_data: "mys:send" }],
+    [{ text: "Заново", callback_data: "mys:again" }, { text: "Отмена", callback_data: "mys:cancel" }],
+  ] };
+  return sendCard(token, chatId, viewOf(state), cardCaption(viewOf(state), username), markup);
+}
+
+const EDIT_FIELD_BUTTONS = [
+  [["category", "Категория"], ["title", "Название"]],
+  [["description", "Описание"], ["price", "Цена"]],
+  [["photo", "Фото"]],
+];
+
+async function showEditMenu(token, chatId, state, username) {
+  const rows = EDIT_FIELD_BUTTONS.map((r) =>
+    r.map(([f, label]) => ({ text: label, callback_data: "myf:" + f })));
+  rows.push([{ text: "Готово", callback_data: "myf:done" }, { text: "Отмена", callback_data: "mys:cancel" }]);
+  const view = viewOf(state);
+  return sendCard(token, chatId, view,
+    cardCaption(view, username, "Что изменить?"), { inline_keyboard: rows });
+}
+
+// Шаги диалога одни на создание и правку: вопрос и проверка не расходятся.
+// take возвращает {set} или {error}; куда положить значение — решает applyStep.
+const STEP_TAKE = {
+  title: (said) => (!said || said.length > 80)
+    ? { error: "Название — от 1 до 80 знаков." } : { set: { title: said } },
+  description: (said) => {
+    if (said.length > 600) return { error: "Описание — до 600 знаков, сейчас " + said.length + "." };
+    if (!said) return { error: "Отправьте текст или «-», чтобы пропустить." };
+    return { set: { description: said === "-" ? "" : said } };
+  },
+  price: (said) => (!/^\d{1,7}$/.test(said) || Number(said) > 1000000)
+    ? { error: "Цена — целое число рублей от 0 до 1 000 000 или кнопка «Договорная»." }
+    : { set: { price: Number(said) } },
+  photo: (said, msg) => {
+    const photo = pickPhoto(msg);
+    return photo ? { set: { photo_file_id: photo.id, photo_kind: photo.kind } }
+      : { error: "Нужна фотография: пришлите её как картинку." };
+  },
+};
+
+const STEP_NEXT = { category: "title", title: "description", description: "price", price: "photo" };
+
+// false — вопрос задать не удалось (нет списка категорий), шаг менять нельзя.
+async function askStep(env, token, chatId, step, lead) {
+  const pre = lead ? lead + "\n" : "";
+  if (step === "category") {
+    const cats = await myCategories(env);
+    if (!cats) {
+      await say(token, chatId, "Сейчас не получается открыть список категорий, попробуйте позже.");
+      return false;
+    }
+    await say(token, chatId, "Что вы сдаёте? Выберите категорию.", {
+      reply_markup: { inline_keyboard: cats.map((c) => [{ text: c.label, callback_data: "myc:" + c.code }]) },
+    });
+    return true;
+  }
+  if (step === "title") await say(token, chatId, pre + "Как называется? От 1 до 80 знаков.");
+  else if (step === "description") {
+    await say(token, chatId, "Опишите снаряжение: состояние, комплект, условия (до 600 знаков). " +
+      "Если описание не нужно, отправьте «-».");
+  } else if (step === "price") {
+    await say(token, chatId, "Цена за сутки в рублях — числом, например 1500.", {
+      reply_markup: { inline_keyboard: [[{ text: "Договорная", callback_data: "myp:neg" }]] },
+    });
+  } else if (step === "photo") await say(token, chatId, pre + "Пришлите фото снаряжения.");
+  return true;
+}
+
+// Принятое значение: при создании ведёт к следующему шагу, при правке — назад
+// в меню полей. Запись в KV одна на шаг.
+async function applyStep(env, token, uid, chatId, state, set, username, lead) {
+  if (state.mode === "edit") {
+    Object.assign(state.changes, set);
+    state.step = "menu";
+    await saveDialog(env, uid, state);
+    await showEditMenu(token, chatId, state, username);
+    return;
+  }
+  Object.assign(state, set);
+  const next = STEP_NEXT[state.step];
+  state.step = next || "preview";
+  await saveDialog(env, uid, state);
+  if (next) await askStep(env, token, chatId, next, lead);
+  else await showPreview(token, chatId, state, username);
+}
+
+const EDIT_FIELDS = ["category", "title", "description", "price", "photo_file_id"];
+
+function editDiff(state) {
+  const out = {};
+  for (const f of EDIT_FIELDS) {
+    if (f in state.changes && state.changes[f] !== state.draft[f]) out[f] = state.changes[f];
+  }
+  return out;
+}
+
+async function listMine(env, token, uid, chatId, username) {
+  const ans = await botCall(env, token, "/myrent/mine", { tg_id: uid });
+  if (!ans.ok) {
+    await say(token, chatId, "Сейчас не получается открыть список, попробуйте позже.");
+    return;
+  }
+  const items = (ans.data && ans.data.items) || [];
+  if (!items.length) {
+    await say(token, chatId, "У вас пока нет объявлений. Нажмите «" + MYRENT_BUTTON + "», чтобы выставить первое.");
+    return;
+  }
+  for (const it of items) {
+    const buttons = it.status === "removed"
+      ? [{ text: "Выставить снова", callback_data: "myo:" + it.id }]
+      : [{ text: "Редактировать", callback_data: "mye:" + it.id }, { text: "Снять", callback_data: "myx:" + it.id }];
+    await sendCard(token, chatId, { photo_file_id: it.photo_file_id },
+      cardCaption(it, username, "Статус: " + (STATUS_LABEL[it.status] || it.status)),
+      { inline_keyboard: [buttons] });
+  }
 }
 
 function pickPhoto(msg) {
@@ -571,6 +723,10 @@ async function privateMessage(env, token, msg) {
     await startDialog(env, token, uid, chatId, msg.from.username);
     return;
   }
+  if (lower === "my" || said === MINE_BUTTON) {
+    await listMine(env, token, uid, chatId, msg.from.username);
+    return;
+  }
 
   const state = await loadDialog(env, uid);
   if (!state) {
@@ -580,42 +736,11 @@ async function privateMessage(env, token, msg) {
   const hint = (t) => say(token, chatId, t + " Выйти: /cancel.");
   if (cmd) return hint("Эта команда сейчас не нужна.");
 
-  if (state.step === "title") {
-    if (!said || said.length > 80) return hint("Название — от 1 до 80 знаков.");
-    state.title = said;
-    state.step = "description";
-    await saveDialog(env, uid, state);
-    return say(token, chatId, "Опишите снаряжение: состояние, комплект, условия (до 600 знаков). " +
-      "Если описание не нужно, отправьте «-».");
-  }
-  if (state.step === "description") {
-    if (said.length > 600) return hint("Описание — до 600 знаков, сейчас " + said.length + ".");
-    if (!said) return hint("Отправьте текст или «-», чтобы пропустить.");
-    state.description = said === "-" ? "" : said;
-    state.step = "price";
-    await saveDialog(env, uid, state);
-    return say(token, chatId, "Цена за сутки в рублях — числом, например 1500.", {
-      reply_markup: { inline_keyboard: [[{ text: "Договорная", callback_data: "myp:neg" }]] },
-    });
-  }
-  if (state.step === "price") {
-    if (!/^\d{1,7}$/.test(said) || Number(said) > 1000000) {
-      return hint("Цена — целое число рублей от 0 до 1 000 000 или кнопка «Договорная».");
-    }
-    state.price = Number(said);
-    state.step = "photo";
-    await saveDialog(env, uid, state);
-    return say(token, chatId, "Пришлите фото снаряжения.");
-  }
-  if (state.step === "photo") {
-    const photo = pickPhoto(msg);
-    if (!photo) return hint("Нужна фотография: пришлите её как картинку.");
-    state.photo_file_id = photo.id;
-    state.photo_kind = photo.kind;
-    state.step = "preview";
-    await saveDialog(env, uid, state);
-    await showPreview(token, chatId, state, msg.from.username);
-    return;
+  const take = STEP_TAKE[state.step];
+  if (take) {
+    const got = take(said, msg);
+    if (got.error) return hint(got.error);
+    return applyStep(env, token, uid, chatId, state, got.set, msg.from.username);
   }
   if (state.step === "category") return hint("Выберите категорию кнопкой выше.");
   return hint("Нажмите кнопку под карточкой.");
@@ -637,67 +762,147 @@ async function handleCallback(env, token, cb) {
   if (mod) {
     const by = cb.from && cb.from.username ? "@" + cb.from.username
       : String((cb.from && cb.from.first_name) || "склад");
-    const res = await callUpstream({ ...env, UPSTREAM_TIMEOUT_MS: MYRENT_UPSTREAM_MS }, {
-      endpoint: "/myrent/decide",
-      payload: {
-        bot_key: await webhookPath(token), id: mod[2],
-        decision: mod[1] === "a" ? "approve" : "reject",
-        by, chat_id: msg.chat.id,
-      },
+    const ans = await botCall(env, token, "/myrent/decide", {
+      id: mod[2], decision: mod[1] === "a" ? "approve" : "reject", by, chat_id: msg.chat.id,
     });
-    const ans = res.envelope;
     if (!ans.ok) {
       return answer(ans.error || "Не получилось, нажмите ещё раз");
     }
     const d = ans.data || {};
-    const word = d.status === "approved" ? "одобрено" : d.status === "rejected" ? "отклонено" : "решено";
+    const word = d.status === "approved" ? "одобрено" : d.status === "rejected" ? "отклонено"
+      : d.status === "removed" ? "снято автором" : "решено";
     if (d.repeat) return answer("Уже " + word);
     await answer(d.status === "approved" ? "Одобрено" : "Отклонено");
-    // Сайт должен увидеть решение сразу: сносим свежую и долгую копии,
-    // как после снятия объявления, и собираем новую, пока сайт не спросил.
-    await env.CACHE.delete(staleKey("/public/my", await hash("{}")));
-    await bumpGeneration(env);
-    await refreshPublic(env, "/public/my", {});
+    await dropPublicMy(env);
     return;
   }
 
-  // Кнопки диалога живут только в личном чате того, кто диалог ведёт.
-  const m = data.match(/^(myc|myp|mys):(.*)$/);
+  // Кнопки студента живут только в личном чате того, кто их нажал: чужая
+  // кнопка (из группы или пересланная) не должна менять чужие объявления.
+  const m = data.match(/^(myc|myp|mys|mye|myx|myy|myn|myo|myf):(.*)$/);
   const uid = cb.from && cb.from.id;
   if (!m || !uid || msg.chat.type !== "private" || String(msg.chat.id) !== String(uid)) return answer();
   const chatId = msg.chat.id;
   const username = cb.from.username;
-  const state = await loadDialog(env, uid);
   const stale = () => answer("Диалог устарел. Начните заново: «" + MYRENT_BUTTON + "».");
   // Нажатую кнопку убираем: старые кнопки не должны перекидывать диалог назад.
   const dropButtons = () => tgApi(token, "editMessageReplyMarkup", {
     chat_id: String(chatId), message_id: msg.message_id, reply_markup: { inline_keyboard: [] },
   });
+  const kind = m[1];
 
-  if (m[1] === "myc") {
+  // Кнопки списка «Мои объявления»: состояние диалога им не нужно.
+  if (kind === "mye" || kind === "myx" || kind === "myy" || kind === "myn" || kind === "myo") {
+    const id = m[2];
+    if (!/^[\w-]{1,32}$/.test(id)) return answer();
+    if (kind === "myx") {
+      await answer();
+      await say(token, chatId, "Снять объявление с сайта? Позже его можно выставить снова.", {
+        reply_markup: { inline_keyboard: [[
+          { text: "Да, снять", callback_data: "myy:" + id },
+          { text: "Нет", callback_data: "myn:" + id },
+        ]] },
+      });
+      return;
+    }
+    if (kind === "myn") {
+      await answer();
+      await dropButtons();
+      await say(token, chatId, "Хорошо, объявление осталось как было.");
+      return;
+    }
+    if (kind === "myy" || kind === "myo") {
+      const ans = await botCall(env, token, kind === "myy" ? "/myrent/remove" : "/myrent/restore",
+        { tg_id: uid, id });
+      if (!ans.ok) return answer(ans.error || "Не получилось, нажмите ещё раз");
+      const d = ans.data || {};
+      await answer(kind === "myy" ? "Снято" : "Готово");
+      await dropButtons();
+      if (kind === "myy") {
+        await say(token, chatId, "Объявление снято с сайта. Вернуть его можно в «" + MINE_BUTTON +
+          "» кнопкой «Выставить снова».");
+      } else {
+        await say(token, chatId, d.status === "approved"
+          ? "Объявление снова на сайте."
+          : "Объявление отправлено на модерацию. Когда склад решит, я напишу сюда.");
+      }
+      if (!d.repeat) await dropPublicMy(env);
+      return;
+    }
+    // mye: начать правку
+    if (!username) return answer("Нужен ник в Telegram");
+    const ans = await botCall(env, token, "/myrent/mine", { tg_id: uid });
+    const it = ans.ok && ans.data && (ans.data.items || []).find((x) => x.id === id);
+    if (!it) return answer(ans.ok ? "Объявление не найдено" : "Список недоступен, попробуйте позже");
+    if (it.status === "removed") return answer("Сначала выставите объявление снова");
+    await answer();
+    const state = {
+      mode: "edit", id, step: "menu", changes: {},
+      draft: {
+        category: it.category, category_label: it.category_label, title: it.title,
+        description: it.description || "", price: it.price === undefined ? null : it.price,
+        photo_file_id: it.photo_file_id,
+      },
+    };
+    await saveDialog(env, uid, state);
+    await showEditMenu(token, chatId, state, username);
+    return;
+  }
+
+  const state = await loadDialog(env, uid);
+
+  if (kind === "myc") {
     if (!state || state.step !== "category") return stale();
     const cats = await myCategories(env);
     if (!cats) return answer("Список категорий недоступен, попробуйте позже");
     const cat = cats.find((c) => c.code === m[2]);
     if (!cat) return answer("Такой категории нет");
     await answer();
-    state.category = cat.code;
-    state.category_label = cat.label;
-    state.step = "title";
-    await saveDialog(env, uid, state);
     await dropButtons();
-    await say(token, chatId, "Категория: " + esc(cat.label) + ".\nКак называется? От 1 до 80 знаков.");
+    await applyStep(env, token, uid, chatId, state,
+      { category: cat.code, category_label: cat.label }, username,
+      "Категория: " + esc(cat.label) + ".");
     return;
   }
 
-  if (m[1] === "myp") {
+  if (kind === "myp") {
     if (!state || state.step !== "price" || m[2] !== "neg") return stale();
     await answer();
-    state.price = null;
-    state.step = "photo";
-    await saveDialog(env, uid, state);
     await dropButtons();
-    await say(token, chatId, "Цена: договорная. Пришлите фото снаряжения.");
+    await applyStep(env, token, uid, chatId, state, { price: null }, username, "Цена: договорная.");
+    return;
+  }
+
+  if (kind === "myf") {
+    if (!state || state.mode !== "edit") return stale();
+    if (state.step !== "menu" && m[2] !== "menu") return stale();
+    if (m[2] === "menu") {
+      await answer();
+      await dropButtons();
+      state.step = "menu";
+      await saveDialog(env, uid, state);
+      await showEditMenu(token, chatId, state, username);
+      return;
+    }
+    if (m[2] === "done") {
+      if (!Object.keys(editDiff(state)).length) {
+        await answer("Ничего не изменилось");
+        await say(token, chatId, "Вы ничего не изменили. Выберите поле или нажмите «Отмена».");
+        return;
+      }
+      await answer();
+      await dropButtons();
+      state.step = "preview";
+      await saveDialog(env, uid, state);
+      await showPreview(token, chatId, state, username);
+      return;
+    }
+    if (!(m[2] in STEP_TAKE) && m[2] !== "category") return answer();
+    await answer();
+    if (!await askStep(env, token, chatId, m[2])) return;
+    await dropButtons();
+    state.step = m[2];
+    await saveDialog(env, uid, state);
     return;
   }
 
@@ -709,7 +914,7 @@ async function handleCallback(env, token, cb) {
     await say(token, chatId, "Отменено. Начать заново: «" + MYRENT_BUTTON + "».");
     return;
   }
-  if (m[2] === "again") {
+  if (m[2] === "again" && state && state.mode !== "edit") {
     await answer();
     await dropButtons();
     await startDialog(env, token, uid, chatId, username);
@@ -719,18 +924,37 @@ async function handleCallback(env, token, cb) {
   if (!username) return answer("Нужен ник в Telegram");
 
   await answer("Отправляю…");
-  const res = await callUpstream({ ...env, UPSTREAM_TIMEOUT_MS: MYRENT_UPSTREAM_MS }, {
-    endpoint: "/myrent/submit",
-    payload: {
-      bot_key: await webhookPath(token),
-      tg_id: uid, tg_username: username,
-      tg_name: [cb.from.first_name, cb.from.last_name].filter(Boolean).join(" "),
-      category: state.category, title: state.title, description: state.description || "",
-      price: state.price === undefined ? null : state.price,
-      photo_file_id: state.photo_file_id,
-    },
+  if (state.mode === "edit") {
+    const changes = editDiff(state);
+    if (!Object.keys(changes).length) {
+      await say(token, chatId, "Вы ничего не изменили, отправлять нечего.");
+      return;
+    }
+    const ans = await botCall(env, token, "/myrent/update",
+      { tg_id: uid, tg_username: username, id: state.id, changes });
+    if (!ans.ok) {
+      // Состояние не трогаем: студент нажмёт кнопку ещё раз, ввод заново не нужен.
+      await say(token, chatId, "Не получилось отправить: " + esc(ans.error || "склад не отвечает") +
+        ". Нажмите «Отправить на модерацию» ещё раз — правка сохранена.");
+      return;
+    }
+    await env.CACHE.delete("dlg:" + uid);
+    await dropButtons();
+    const d = ans.data || {};
+    await say(token, chatId, d.repeat
+      ? "Изменений нет — объявление осталось как было."
+      : "Правка отправлена на модерацию. " + EDIT_NOTE + " Когда склад решит, я напишу сюда.");
+    if (!d.repeat) await dropPublicMy(env);
+    return;
+  }
+  const ans = await botCall(env, token, "/myrent/submit", {
+    tg_id: uid, tg_username: username,
+    tg_name: [cb.from.first_name, cb.from.last_name].filter(Boolean).join(" "),
+    category: state.category, title: state.title, description: state.description || "",
+    price: state.price === undefined ? null : state.price,
+    photo_file_id: state.photo_file_id,
   });
-  if (res.ok && res.envelope.ok) {
+  if (ans.ok) {
     await env.CACHE.delete("dlg:" + uid);
     await dropButtons();
     await say(token, chatId, "Отправлено на модерацию. Когда склад решит, я напишу сюда.");
