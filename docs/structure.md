@@ -88,7 +88,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | `Defects` | дефекты и их закрытие |
 | `Inventory` | журнал сверок: итог и расхождения, не все найденные позиции |
 | `Announcements` | объявления склада для сайта: заголовок, абзацы, «показывать до»; снятое получает `removed_at`, а не удаляется |
-| `MyRent` | «Моё в аренду»: объявления студентов из бота, статус `pending`/`approved`/`rejected`, где висит карточка модерации; `tg_id` наружу не выходит |
+| `MyRent` | «Моё в аренду»: объявления студентов из бота, статус `approved`/`removed` (старые строки ещё `pending`/`rejected`), `removed_by` — `author`/`admin`, где висит карточка со «Снять»; модерации нет (решение владельца 7 октября 2026); `tg_id` наружу не выходит |
 | `ImportMap`, `ImportRules` | как читать чужую выгрузку: синонимы колонок и раскладка по категориям |
 | `Meta` | значения настроек |
 | `Logs` | журнал сбоев: время, род, ручка, причина, текст, подробности. Подрезается до 90 дней ночью |
@@ -109,7 +109,8 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Сайт | `/public/catalog`, `/public/order`, `/public/announcements`, `/public/my` (одобренное «Моё в аренду») |
 | Объявления | `/announcements/list`, `/announcement/save`, `/announcement/remove` (любой вошедший, не только Admin) |
 | Акт | `/act/template`, `/act/build` |
-| Моё в аренду (бот) | `/myrent/submit`, `/myrent/decide`, `/myrent/mine`, `/myrent/update`, `/myrent/remove`, `/myrent/restore` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
+| Моё в аренду (бот) | `/myrent/submit`, `/myrent/takedown`, `/myrent/decide` (только для старых карточек), `/myrent/mine`, `/myrent/update`, `/myrent/remove`, `/myrent/restore` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
+| Моё в аренду (админ) | `/myrent/admin/list`, `/myrent/admin/save`, `/myrent/admin/photo`, `/myrent/admin/remove`, `/myrent/admin/restore` — по токену, только Admin |
 | Бот | `/notify/*`; `/labels/send` выведена из работы и отвечает `410` с подсказкой — ради старых версий приложения |
 | Сверка | `/inventory/save`, `/inventory/list` |
 | Админка | `/settings/*`, `/category/*`, `/maintenance` |

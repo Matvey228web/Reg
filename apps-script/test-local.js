@@ -4625,8 +4625,14 @@ console.log('\n== My rent: объявления студентов через б
   check('без токена бота ключ не проходит — 403', call('/myrent/submit', Object.assign({}, base, { bot_key: '' })).status === 403);
   scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
   check('пустая таблица /public/my', JSON.stringify(call('/public/my').data.items) === '[]');
-  check('/public/my отдаёт 10 категорий', call('/public/my').data.categories.length === 10 &&
-    call('/public/my').data.categories[0].code === 'CAM');
+  // Категории My rent — каталог склада плюс «Разгрузка» и «Студийное» (решение
+  // владельца 7 октября 2026), по алфавиту подписей.
+  const myCats = call('/public/my').data.categories;
+  check('/public/my: категории каталога плюс UNL и STD',
+    myCats.length === categories().length + 2 && myCats.some((c) => c.code === 'UNL' && c.label === 'Разгрузка') &&
+    myCats.some((c) => c.code === 'STD') && myCats.some((c) => c.code === 'CAM'), myCats);
+  check('/public/my: категории по алфавиту',
+    myCats.every((c, i) => i === 0 || myCats[i - 1].label.localeCompare(c.label, 'ru') <= 0), myCats.map((c) => c.label));
 
   check('чужая категория — 400', call('/myrent/submit', Object.assign({}, base, { category: 'XXX' })).status === 400);
   check('пустое название — 400', call('/myrent/submit', Object.assign({}, base, { title: ' ' })).status === 400);
@@ -4637,197 +4643,287 @@ console.log('\n== My rent: объявления студентов через б
 
   sent.length = 0;
   let sub = call('/myrent/submit', base);
-  check('submit — S-0001 pending', sub.ok && sub.data.id === 'S-0001' && sub.data.status === 'pending', sub);
+  check('submit — S-0001 сразу approved', sub.ok && sub.data.id === 'S-0001' && sub.data.status === 'approved', sub);
   let row = mySheet()[0];
-  check('строка pending, username без @', row && row.status === 'pending' && row.tg_username === 'student_a', row);
+  check('строка approved, approved_at записан, username без @',
+    row && row.status === 'approved' && !!row.approved_at && row.removed_by === '' && row.tg_username === 'student_a', row);
   check('фото в Диске, открыто по ссылке',
     /^https:\/\/drive\.google\.com\/thumbnail\?id=file-\d+&sz=w800$/.test(row.photo) &&
     drive.folders['Mifs Rent — фото'].files.some((f) => /^S-0001-.+\.jpg$/.test(f.name) && f.sharing && f.sharing[0] === 'ANYONE_WITH_LINK'));
   const mod = calls('sendPhoto');
-  check('карточка ушла в чат склада одним sendPhoto', mod.length === 1 && String(mod[0].chat_id) === String(WH) && mod[0].photo === 'FILE-1', mod);
-  check('кнопки Одобрить/Отклонить',
-    JSON.stringify(mod[0].reply_markup.inline_keyboard[0].map((b) => b.callback_data)) === JSON.stringify(['myr:a:S-0001', 'myr:r:S-0001']));
-  check('подпись: экранирование, цена, @username',
+  check('информационная карточка в чат склада одним sendPhoto', mod.length === 1 && String(mod[0].chat_id) === String(WH) && mod[0].photo === 'FILE-1', mod);
+  check('одна кнопка «🗑 Снять» myr:x:S-0001',
+    mod[0].reply_markup.inline_keyboard.length === 1 && mod[0].reply_markup.inline_keyboard[0].length === 1 &&
+    mod[0].reply_markup.inline_keyboard[0][0].callback_data === 'myr:x:S-0001' && /Снять/.test(mod[0].reply_markup.inline_keyboard[0][0].text),
+    mod[0].reply_markup);
+  check('подпись «My rent · новое», экранирование, цена, @username',
+    /My rent · новое/.test(mod[0].caption) && !/модерац/.test(mod[0].caption) &&
     /Sony A7 &lt;Kit&gt;/.test(mod[0].caption) && /3 000 ₽\/сутки/.test(mod[0].caption) && /@student_a/.test(mod[0].caption), mod[0].caption);
   check('mod_chat_id и mod_message_id записаны', String(row.mod_chat_id) === String(WH) && String(row.mod_message_id) !== '', row);
 
-  sent.length = 0;
-  sub = call('/myrent/submit', base);
-  check('повторный submit — тот же id, строка одна, чат молчит',
-    sub.ok && sub.data.id === 'S-0001' && mySheet().length === 1 && calls('sendPhoto').length === 0 && calls('getFile').length === 0, sub);
-
-  check('pending не виден на сайте', call('/public/my').data.items.length === 0);
-
-  // decide: сначала отказы
-  check('decide из чужого чата — 403', call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve', chat_id: -555, by: '@x' }).status === 403);
-  check('decide без chat_id — 403', call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve' }).status === 403);
-  check('decide неизвестного id — 404', call('/myrent/decide', { bot_key: botKey, id: 'S-9999', decision: 'approve', chat_id: WH }).status === 404);
-  check('после отказов всё ещё pending', mySheet()[0].status === 'pending');
-
-  sent.length = 0;
-  let dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve', chat_id: WH, by: '@owner' });
-  check('approve — approved, repeat false', dec.ok && dec.data.status === 'approved' && dec.data.repeat === false, dec);
-  row = mySheet()[0];
-  check('решение записано', row.status === 'approved' && row.decided_by === '@owner' && !!row.decided_at, row);
-  const ed = calls('editMessageCaption');
-  check('подпись обновлена, кнопки сняты',
-    ed.length === 1 && /✅ Одобрено — @owner/.test(ed[0].caption) && ed[0].reply_markup.inline_keyboard.length === 0 &&
-    Number(ed[0].message_id) === Number(row.mod_message_id), ed);
-  const toStudent = calls('sendMessage').filter((m) => String(m.chat_id) === '777');
-  check('студенту ушло сообщение со ссылкой',
-    toStudent.length === 1 && /опубликовано в разделе My rent/.test(toStudent[0].text) && /example\.test\/\?s=my/.test(toStudent[0].text), toStudent);
-
   const pub = call('/public/my').data;
-  check('одобренное видно на сайте в форме my.json',
+  check('submit → сразу видно в /public/my в форме my.json',
     pub.items.length === 1 && pub.items[0].key === 'S-0001' && pub.items[0].name === 'Sony A7 <Kit>' &&
     pub.items[0].offers[0].tg === 'student_a' && pub.items[0].offers[0].price === 3000 &&
     pub.items[0].offers[0].qty === 1 && pub.items[0].photo === false && /thumbnail/.test(pub.items[0].photo_url), pub.items);
   check('tg_id наружу не уходит', JSON.stringify(call('/public/my')).indexOf('777') === -1);
 
   sent.length = 0;
-  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'reject', chat_id: WH, by: '@other' });
-  check('второе решение — repeat:true, статус прежний',
-    dec.ok && dec.data.repeat === true && dec.data.status === 'approved' && mySheet()[0].status === 'approved', dec);
-  check('при повторе ничего не отправлено', calls('editMessageCaption').length === 0 && calls('sendMessage').length === 0);
+  sub = call('/myrent/submit', base);
+  check('повторный submit — тот же id, строка одна, чат молчит',
+    sub.ok && sub.data.id === 'S-0001' && mySheet().length === 1 && calls('sendPhoto').length === 0 && calls('getFile').length === 0, sub);
 
-  // отклонение, договорная цена
   const second = call('/myrent/submit', Object.assign({}, base, { title: 'Штатив', price: null, photo_file_id: 'FILE-2', category: 'GRP' }));
-  check('второе объявление — S-0002', second.ok && second.data.id === 'S-0002', second);
+  check('второе объявление — S-0002 approved', second.ok && second.data.id === 'S-0002' && second.data.status === 'approved', second);
   check('цена пустая → «Договорная»', mySheet()[1].price === '' && mySheet()[1].price_text === 'Договорная');
   check('в подписи «Договорная»', /Цена: Договорная/.test(calls('sendPhoto').pop().caption));
-  sent.length = 0;
-  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0002', decision: 'reject', chat_id: WH, by: '@owner' });
-  check('reject — rejected', dec.ok && dec.data.status === 'rejected' && dec.data.repeat === false, dec);
-  const rej = calls('sendMessage').filter((m) => String(m.chat_id) === '777');
-  check('студенту — про отклонение и /myrent', rej.length === 1 && /не прошло модерацию/.test(rej[0].text) && /\/myrent/.test(rej[0].text), rej);
-  check('/public/my без pending и rejected', call('/public/my').data.items.length === 1);
   const third = call('/myrent/submit', Object.assign({}, base, { title: 'Третий', photo_file_id: 'FILE-3' }));
-  call('/myrent/decide', { bot_key: botKey, id: third.data.id, decision: 'approve', chat_id: WH, by: '@owner' });
-  check('новые сверху', call('/public/my').data.items.map((i) => i.key).join() === 'S-0003,S-0001');
-  check('approve записал approved_at', !!mySheet()[0].approved_at && !!mySheet()[2].approved_at && !mySheet()[1].approved_at, mySheet());
+  check('новые сверху', call('/public/my').data.items.map((i) => i.key).join() === 'S-0003,S-0002,S-0001');
 
-  console.log('\n-- My rent: свои объявления, правка, снятие --');
-  const stu = (extra) => Object.assign({ bot_key: botKey, tg_id: 777 }, extra);
+  console.log('\n-- My rent: «Снять» из чата склада --');
+  const tk = (extra) => Object.assign({ bot_key: botKey, id: 'S-0001', chat_id: WH, by: '@owner' }, extra);
   const byId = (id) => mySheet().filter((r) => r.id === id)[0];
   const pubKeys = () => call('/public/my').data.items.map((i) => i.key).join();
-  // S-0001 одобрено, S-0002 отклонено, S-0003 одобрено; все студента 777.
+  check('takedown с чужим bot_key — 403', call('/myrent/takedown', tk({ bot_key: 'bad' })).status === 403);
+  check('takedown из чужого чата — 403', call('/myrent/takedown', tk({ chat_id: -555 })).status === 403);
+  check('takedown без chat_id — 403', call('/myrent/takedown', tk({ chat_id: undefined })).status === 403);
+  check('takedown неизвестного id — 404', call('/myrent/takedown', tk({ id: 'S-9999' })).status === 404);
+  check('после отказов объявление на месте', byId('S-0001').status === 'approved' && pubKeys() === 'S-0003,S-0002,S-0001');
 
+  sent.length = 0;
+  let td = call('/myrent/takedown', tk());
+  check('takedown — removed, repeat false', td.ok && td.data.status === 'removed' && td.data.repeat === false, td);
+  row = byId('S-0001');
+  check('removed_by admin, removed_at и решивший записаны',
+    row.status === 'removed' && row.removed_by === 'admin' && !!row.removed_at && row.decided_by === '@owner', row);
+  check('скрыто с сайта', pubKeys() === 'S-0003,S-0002');
+  const ed = calls('editMessageCaption');
+  check('подпись «Снято — @owner», кнопки сняты',
+    ed.length === 1 && /🗑 Снято — @owner/.test(ed[0].caption) && ed[0].reply_markup.inline_keyboard.length === 0 &&
+    Number(ed[0].message_id) === Number(row.mod_message_id), ed);
+  const toStudent = calls('sendMessage').filter((m) => String(m.chat_id) === '777');
+  check('студенту — «снято администратором»',
+    toStudent.length === 1 && /Ваше объявление «Sony A7 &lt;Kit&gt;» снято администратором/.test(toStudent[0].text), toStudent);
+
+  sent.length = 0;
+  td = call('/myrent/takedown', tk({ by: '@other' }));
+  check('повторный takedown — repeat:true, ничего не отправлено',
+    td.ok && td.data.repeat === true && td.data.status === 'removed' && sent.length === 0 && byId('S-0001').decided_by === '@owner', td);
+
+  console.log('\n-- My rent: студент и снятое админом --');
+  const stu = (extra) => Object.assign({ bot_key: botKey, tg_id: 777 }, extra);
+  sent.length = 0;
+  let rs = call('/myrent/restore', stu({ id: 'S-0001' }));
+  check('студент возвращает снятое админом — 403 с текстом',
+    rs.status === 403 && /снято администратором/.test(rs.error), rs);
+  const up403 = call('/myrent/update', stu({ id: 'S-0001', changes: { title: 'Ещё' } }));
+  check('студент правит снятое админом — 403', up403.status === 403 && /снято администратором/.test(up403.error), up403);
+  const rm403 = call('/myrent/remove', stu({ id: 'S-0001' }));
+  check('студент «снимает» снятое админом — repeat, removed_by остаётся admin',
+    rm403.ok && rm403.data.repeat === true && byId('S-0001').removed_by === 'admin', rm403);
+  check('после отказов скрыто и чат молчит', byId('S-0001').status === 'removed' && pubKeys() === 'S-0003,S-0002' && sent.length === 0);
+
+  console.log('\n-- My rent: старые карточки «Одобрить/Отклонить» --');
+  // Строки, созданные до отмены модерации: pending с живой карточкой.
+  updateRow(getSheet(SHEETS.MYRENT), byId('S-0003').__row, { status: 'pending', mod_chat_id: String(WH), mod_message_id: '900' });
+  check('pending не виден на сайте (как раньше)', pubKeys() === 'S-0002');
+  check('decide с чужим bot_key — 403', call('/myrent/decide', { bot_key: 'bad', id: 'S-0003', decision: 'approve', chat_id: WH }).status === 403);
+  check('decide из чужого чата — 403', call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'reject', chat_id: -555, by: '@x' }).status === 403);
+  check('decide без chat_id — 403', call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'approve' }).status === 403);
+  check('decide неизвестного id — 404', call('/myrent/decide', { bot_key: botKey, id: 'S-9999', decision: 'approve', chat_id: WH }).status === 404);
+  sent.length = 0;
+  let dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'approve', chat_id: WH, by: '@owner' });
+  check('старое «Одобрить» публикует поданное до отмены модерации',
+    dec.ok && dec.data.repeat === false && dec.data.status === 'approved' && byId('S-0003').status === 'approved' &&
+    calls('editMessageCaption').length === 1 && /Опубликовано/.test(calls('editMessageCaption')[0].caption), dec);
+  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'approve', chat_id: WH, by: '@owner' });
+  check('повторное «Одобрить» — repeat', dec.ok && dec.data.repeat === true && dec.data.status === 'approved', dec);
+  sent.length = 0;
+  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'reject', chat_id: WH, by: '@owner' });
+  check('старое «Отклонить» — снятие админом', dec.ok && dec.data.status === 'removed' && dec.data.repeat === false &&
+    byId('S-0003').removed_by === 'admin', dec);
+  check('карточка закрыта, студенту про снятие',
+    calls('editMessageCaption').length === 1 && Number(calls('editMessageCaption')[0].message_id) === 900 &&
+    calls('sendMessage').filter((m) => String(m.chat_id) === '777' && /снято администратором/.test(m.text)).length === 1);
+  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'reject', chat_id: WH, by: '@owner' });
+  check('повторное «Отклонить» — repeat', dec.ok && dec.data.repeat === true && dec.data.status === 'removed', dec);
+
+  console.log('\n-- My rent: свои объявления, правка, снятие --');
+  // Дальше: S-0001 и S-0003 снято админом, S-0002 опубликовано; все студента 777.
   check('mine с чужим bot_key — 403', call('/myrent/mine', { bot_key: 'bad', tg_id: 777 }).status === 403);
   check('mine без tg_id — 400', call('/myrent/mine', { bot_key: botKey }).status === 400);
   let mine = call('/myrent/mine', stu());
   check('mine: свои, новые сверху', mine.ok && mine.data.items.map((i) => i.id).join() === 'S-0003,S-0002,S-0001', mine);
   check('mine: форма записи', (() => {
     const i = mine.data.items[2];
-    return i.status === 'approved' && i.category === 'CAM' && i.category_label === 'Камера' && i.title === 'Sony A7 <Kit>' &&
+    return i.status === 'removed' && i.category === 'CAM' && i.category_label === categories().filter((c) => c.code === 'CAM')[0].label && i.title === 'Sony A7 <Kit>' &&
       i.price === 3000 && i.photo_file_id === 'FILE-1' && !!i.created_at && !!i.updated_at && !('tg_id' in i);
   })(), mine.data.items[2]);
+  check('mine: removed_by — admin у снятого, пусто у опубликованного',
+    mine.data.items[2].removed_by === 'admin' && mine.data.items[0].removed_by === 'admin' && mine.data.items[1].removed_by === '' &&
+    mine.data.items[1].status === 'approved', mine.data.items.map((i) => [i.id, i.removed_by]));
   check('mine: у второй цена null и «Договорная»', mine.data.items[1].price === null && mine.data.items[1].price_text === 'Договорная');
   check('mine чужого студента — пусто', JSON.stringify(call('/myrent/mine', stu({ tg_id: 888 })).data.items) === '[]');
 
   // чужой tg_id — 404 на любой ручке, ничего не меняется
   const snapshot = JSON.stringify(mySheet());
   sent.length = 0;
-  check('update чужого — 404', call('/myrent/update', stu({ tg_id: 888, id: 'S-0001', changes: { title: 'Взлом' } })).status === 404);
-  check('remove чужого — 404', call('/myrent/remove', stu({ tg_id: 888, id: 'S-0001' })).status === 404);
-  check('restore чужого — 404', call('/myrent/restore', stu({ tg_id: 888, id: 'S-0001' })).status === 404);
+  check('update чужого — 404', call('/myrent/update', stu({ tg_id: 888, id: 'S-0002', changes: { title: 'Взлом' } })).status === 404);
+  check('remove чужого — 404', call('/myrent/remove', stu({ tg_id: 888, id: 'S-0002' })).status === 404);
+  check('restore чужого — 404', call('/myrent/restore', stu({ tg_id: 888, id: 'S-0002' })).status === 404);
   check('update несуществующего — 404', call('/myrent/update', stu({ id: 'S-9999', changes: { title: 'x' } })).status === 404);
   check('после 404 таблица и чат не тронуты', JSON.stringify(mySheet()) === snapshot && sent.length === 0);
 
   // проверка полей правки
-  check('правка: чужая категория — 400', call('/myrent/update', stu({ id: 'S-0001', changes: { category: 'XXX' } })).status === 400);
-  check('правка: пустое название — 400', call('/myrent/update', stu({ id: 'S-0001', changes: { title: ' ' } })).status === 400);
-  check('правка: дробная цена — 400', call('/myrent/update', stu({ id: 'S-0001', changes: { price: 1.5 } })).status === 400);
-  check('правка: без changes — 400', call('/myrent/update', stu({ id: 'S-0001' })).status === 400);
-  check('после отказов правки статус прежний', byId('S-0001').status === 'approved' && sent.length === 0);
+  check('правка: чужая категория — 400', call('/myrent/update', stu({ id: 'S-0002', changes: { category: 'XXX' } })).status === 400);
+  check('правка: пустое название — 400', call('/myrent/update', stu({ id: 'S-0002', changes: { title: ' ' } })).status === 400);
+  check('правка: дробная цена — 400', call('/myrent/update', stu({ id: 'S-0002', changes: { price: 1.5 } })).status === 400);
+  check('правка: без changes — 400', call('/myrent/update', stu({ id: 'S-0002' })).status === 400);
+  check('после отказов правки статус прежний', byId('S-0002').status === 'approved' && sent.length === 0);
 
-  // правка одобренного: pending, скрыто, новая карточка
-  let up = call('/myrent/update', stu({ id: 'S-0001', tg_username: '@student_new', changes: { title: 'Sony A7 IV', price: 4000 } }));
-  check('update — pending, repeat false', up.ok && up.data.status === 'pending' && up.data.repeat === false, up);
-  row = byId('S-0001');
-  check('правка записана, approved_at стёрт, username обновлён',
-    row.status === 'pending' && row.title === 'Sony A7 IV' && row.price === 4000 && row.price_text === '' &&
-    row.approved_at === '' && !!row.updated_at && row.tg_username === 'student_new' && row.decided_at === '', row);
-  check('правка скрыта с сайта', pubKeys() === 'S-0003');
+  // правка применяется сразу
+  const oldMsg = Number(byId('S-0002').mod_message_id);
+  sent.length = 0;
+  let up = call('/myrent/update', stu({ id: 'S-0002', tg_username: '@student_new', changes: { title: 'Штатив Pro', price: 4000 } }));
+  check('update — approved сразу, repeat false', up.ok && up.data.status === 'approved' && up.data.repeat === false, up);
+  row = byId('S-0002');
+  check('правка записана, username обновлён',
+    row.status === 'approved' && row.title === 'Штатив Pro' && row.price === 4000 && row.price_text === '' &&
+    !!row.approved_at && !!row.updated_at && row.tg_username === 'student_new', row);
+  check('правка сразу на сайте', call('/public/my').data.items.filter((i) => i.key === 'S-0002')[0].name === 'Штатив Pro' && pubKeys() === 'S-0002');
   let cards = calls('sendPhoto');
-  check('новая карточка «правка» с кнопками',
-    cards.length === 1 && /My rent · правка/.test(cards[0].caption) && /Sony A7 IV/.test(cards[0].caption) &&
-    cards[0].reply_markup.inline_keyboard[0][0].callback_data === 'myr:a:S-0001' && cards[0].photo === 'FILE-1', cards);
-  check('mod_message_id новой карточки записан', String(row.mod_chat_id) === String(WH) && String(row.mod_message_id) !== '', row);
-  check('старая карточка уже закрыта — не правится', calls('editMessageCaption').length === 0);
+  check('новая карточка «правка» с кнопкой «Снять»',
+    cards.length === 1 && /My rent · правка/.test(cards[0].caption) && /Штатив Pro/.test(cards[0].caption) &&
+    cards[0].reply_markup.inline_keyboard[0][0].callback_data === 'myr:x:S-0002' && cards[0].photo === 'FILE-2', cards);
+  const closed = calls('editMessageCaption');
+  check('кнопка прежней карточки снята, «заменено правкой»',
+    closed.length === 1 && Number(closed[0].message_id) === oldMsg && closed[0].reply_markup.inline_keyboard.length === 0 &&
+    /Заменено правкой/.test(closed[0].caption), closed);
+  check('mod_message_id указывает на новую карточку', Number(byId('S-0002').mod_message_id) !== oldMsg && String(byId('S-0002').mod_message_id) !== '');
 
   // правка без изменений
   sent.length = 0;
-  up = call('/myrent/update', stu({ id: 'S-0001', changes: { title: 'Sony A7 IV', price: 4000, category: 'cam' } }));
+  up = call('/myrent/update', stu({ id: 'S-0002', changes: { title: 'Штатив Pro', price: 4000, category: 'grp' } }));
   check('правка без изменений — repeat, карточки нет',
-    up.ok && up.data.repeat === true && up.data.status === 'pending' && calls('sendPhoto').length === 0 && calls('getFile').length === 0, up);
-
-  // правка ещё не решённого: старая карточка гасится
-  const oldMsg = Number(byId('S-0001').mod_message_id);
-  sent.length = 0;
-  up = call('/myrent/update', stu({ id: 'S-0001', changes: { description: 'Новое описание' } }));
-  const closed = calls('editMessageCaption');
-  check('правка pending: старая карточка без кнопок, «заменено правкой»',
-    up.ok && closed.length === 1 && Number(closed[0].message_id) === oldMsg && closed[0].reply_markup.inline_keyboard.length === 0 &&
-    /Заменено правкой/.test(closed[0].caption) && calls('sendPhoto').length === 1, closed);
+    up.ok && up.data.repeat === true && up.data.status === 'approved' && calls('sendPhoto').length === 0 && calls('getFile').length === 0, up);
 
   // смена фото: скачано заново, старый свой файл в корзине
   const photoFiles = () => drive.folders['Mifs Rent — фото'].files;
-  const oldPhotoId = photoIdFromUrl(byId('S-0003').photo);
+  const oldPhotoId = photoIdFromUrl(byId('S-0002').photo);
   sent.length = 0;
-  up = call('/myrent/update', stu({ id: 'S-0003', changes: { photo_file_id: 'FILE-9' } }));
-  row = byId('S-0003');
-  check('смена фото — pending, новый file_id и файл в Диске',
-    up.ok && row.status === 'pending' && row.photo_file_id === 'FILE-9' && calls('getFile').length === 1 &&
-    photoIdFromUrl(row.photo) !== oldPhotoId && photoFiles().some((f) => f.id === photoIdFromUrl(row.photo) && !f.trashed), row);
+  up = call('/myrent/update', stu({ id: 'S-0002', changes: { photo_file_id: 'FILE-9' } }));
+  row = byId('S-0002');
+  check('смена фото — новый file_id и файл в Диске, остаётся на сайте',
+    up.ok && row.status === 'approved' && row.photo_file_id === 'FILE-9' && calls('getFile').length === 1 &&
+    photoIdFromUrl(row.photo) !== oldPhotoId && photoFiles().some((f) => f.id === photoIdFromUrl(row.photo) && !f.trashed) &&
+    pubKeys() === 'S-0002', row);
   check('старое фото в корзине', photoFiles().filter((f) => f.id === oldPhotoId)[0].trashed === true);
   check('карточка ушла с новым file_id', calls('sendPhoto').length === 1 && calls('sendPhoto')[0].photo === 'FILE-9');
-  check('S-0003 скрыто, на сайте пусто', pubKeys() === '');
 
-  // решение по новой карточке: approve ставит approved_at
-  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve', chat_id: WH, by: '@owner' });
-  check('approve после правки — approved, approved_at записан', dec.ok && dec.data.status === 'approved' && !!byId('S-0001').approved_at, dec);
-  check('снова на сайте', pubKeys() === 'S-0001');
+  // старая отклонённая строка после правки автора становится опубликованной
+  updateRow(getSheet(SHEETS.MYRENT), byId('S-0002').__row, { status: 'rejected' });
+  check('rejected не виден на сайте', pubKeys() === '');
+  up = call('/myrent/update', stu({ id: 'S-0002', changes: { description: 'Новое описание' } }));
+  check('правка старого rejected — approved и на сайте', up.ok && up.data.status === 'approved' && byId('S-0002').status === 'approved' && pubKeys() === 'S-0002', up);
 
-  // снять одобренное и выставить снова — без модерации
+  // снять автором и выставить снова — сразу
   sent.length = 0;
-  let rm = call('/myrent/remove', stu({ id: 'S-0001' }));
+  let rm = call('/myrent/remove', stu({ id: 'S-0002' }));
   check('remove — removed, repeat false', rm.ok && rm.data.status === 'removed' && rm.data.repeat === false, rm);
-  check('снятое скрыто, removed_at записан', pubKeys() === '' && !!byId('S-0001').removed_at);
-  check('у решённой карточки нечего гасить', calls('editMessageCaption').length === 0);
-  rm = call('/myrent/remove', stu({ id: 'S-0001' }));
-  check('повторное remove — repeat', rm.ok && rm.data.repeat === true && rm.data.status === 'removed', rm);
-  check('update на снятом — 409', call('/myrent/update', stu({ id: 'S-0001', changes: { title: 'Ещё' } })).status === 409);
-  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve', chat_id: WH, by: '@owner' });
-  check('decide на снятом — repeat, статус removed', dec.ok && dec.data.repeat === true && dec.data.status === 'removed' && byId('S-0001').status === 'removed', dec);
-  sent.length = 0;
-  let rs = call('/myrent/restore', stu({ id: 'S-0001' }));
-  check('restore ранее одобренного — сразу approved, без карточки',
-    rs.ok && rs.data.status === 'approved' && rs.data.repeat === false && calls('sendPhoto').length === 0 && pubKeys() === 'S-0001', rs);
-  check('removed_at очищен', byId('S-0001').removed_at === '');
-  rs = call('/myrent/restore', stu({ id: 'S-0001' }));
-  check('restore не снятого — repeat, статус прежний', rs.ok && rs.data.repeat === true && rs.data.status === 'approved', rs);
-
-  // снять ждущее модерации: карточка гасится; вернуть — снова на модерацию
-  const pendMsg = Number(byId('S-0003').mod_message_id);
-  sent.length = 0;
-  rm = call('/myrent/remove', stu({ id: 'S-0003' }));
+  check('снятое скрыто, removed_by author', pubKeys() === '' && !!byId('S-0002').removed_at && byId('S-0002').removed_by === 'author');
   const gone = calls('editMessageCaption');
-  check('remove pending — карточка «снято автором» без кнопок',
-    rm.ok && gone.length === 1 && Number(gone[0].message_id) === pendMsg && /Снято автором/.test(gone[0].caption) &&
-    gone[0].reply_markup.inline_keyboard.length === 0, gone);
-  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0003', decision: 'approve', chat_id: WH, by: '@owner' });
-  check('кнопка со снятой карточки не публикует', dec.ok && dec.data.repeat === true && dec.data.status === 'removed' && pubKeys() === 'S-0001', dec);
-  sent.length = 0;
-  rs = call('/myrent/restore', stu({ id: 'S-0003' }));
-  check('restore не одобренного — pending и новая карточка',
-    rs.ok && rs.data.status === 'pending' && calls('sendPhoto').length === 1 && /на модерацию/.test(calls('sendPhoto')[0].caption) &&
-    String(byId('S-0003').mod_message_id) !== '' && pubKeys() === 'S-0001', rs);
-
-  // отклонённое: снять и вернуть — тоже на модерацию
-  call('/myrent/remove', stu({ id: 'S-0002' }));
+  check('карточка в чате: «снято автором», кнопки сняты',
+    gone.length === 1 && /Снято автором/.test(gone[0].caption) && gone[0].reply_markup.inline_keyboard.length === 0, gone);
+  rm = call('/myrent/remove', stu({ id: 'S-0002' }));
+  check('повторное remove — repeat', rm.ok && rm.data.repeat === true && rm.data.status === 'removed', rm);
+  check('update на снятом автором — 409', call('/myrent/update', stu({ id: 'S-0002', changes: { title: 'Ещё' } })).status === 409);
   sent.length = 0;
   rs = call('/myrent/restore', stu({ id: 'S-0002' }));
-  check('restore отклонённого — pending и карточка', rs.ok && rs.data.status === 'pending' && calls('sendPhoto').length === 1, rs);
+  check('restore снятого автором — сразу approved и на сайте',
+    rs.ok && rs.data.status === 'approved' && rs.data.repeat === false && pubKeys() === 'S-0002', rs);
+  check('removed_at и removed_by очищены', byId('S-0002').removed_at === '' && byId('S-0002').removed_by === '');
+  cards = calls('sendPhoto');
+  check('при возврате — новая карточка со «Снять»', cards.length === 1 && cards[0].reply_markup.inline_keyboard[0][0].callback_data === 'myr:x:S-0002', cards);
+  rs = call('/myrent/restore', stu({ id: 'S-0002' }));
+  check('restore не снятого — repeat, статус прежний', rs.ok && rs.data.repeat === true && rs.data.status === 'approved', rs);
+
+  console.log('\n-- My rent: администратор в приложении --');
+  const adm = call('/auth/login', { login: 'matvey', pin: '432143' }).data.token;
+  const staffTok = call('/auth/login', { login: 'modeledit', pin: '246802' }).data.token;
+  const ids = ['/myrent/admin/list', '/myrent/admin/save', '/myrent/admin/photo', '/myrent/admin/remove', '/myrent/admin/restore'];
+  ids.forEach((ep) => {
+    check(ep + ': без токена — 401', call(ep, { id: 'S-0002' }).status === 401);
+    check(ep + ': сотруднику — 403', call(ep, { id: 'S-0002', changes: {}, image: '' }, staffTok).status === 403);
+  });
+
+  const al = call('/myrent/admin/list', {}, adm);
+  check('admin/list: все строки, новые сверху, категории как у /public/my',
+    al.ok && al.data.items.map((i) => i.id).join() === 'S-0003,S-0002,S-0001' && al.data.categories.length === categories().length + 2, al);
+  check('admin/list: форма записи, tg_id не выходит', (() => {
+    const i = al.data.items[2];
+    return i.status === 'removed' && i.removed_by === 'admin' && i.category_label === categories().filter((c) => c.code === 'CAM')[0].label && i.price === 3000 &&
+      /thumbnail/.test(i.photo) && i.tg_username === 'student_a' && i.tg_name === 'Аня' && !!i.created_at && !!i.updated_at;
+  })() && JSON.stringify(al).indexOf('777') === -1, al.data.items[2]);
+
+  sent.length = 0;
+  const preStatus = byId('S-0002').status;
+  let sv = call('/myrent/admin/save', { id: 'S-0002', changes: { title: '  Штатив Админ ', category: 'cam', description: 'Правка админа', price: null } }, adm);
+  row = byId('S-0002');
+  check('admin/save: применено сразу, статус не тронут',
+    sv.ok && sv.data.id === 'S-0002' && sv.data.status === preStatus && row.title === 'Штатив Админ' && row.category === 'CAM' &&
+    row.description === 'Правка админа' && row.price === '' && row.price_text === 'Договорная' && row.status === preStatus, row);
+  check('admin/save: студент не получает сообщений, карточки нет', sent.length === 0);
+  check('admin/save: сразу в /public/my', call('/public/my').data.items.filter((i) => i.key === 'S-0002')[0].name === 'Штатив Админ');
+  check('admin/save: чужая категория — 400', call('/myrent/admin/save', { id: 'S-0002', changes: { category: 'XXX' } }, adm).status === 400);
+  check('admin/save: пустое название — 400', call('/myrent/admin/save', { id: 'S-0002', changes: { title: ' ' } }, adm).status === 400);
+  check('admin/save: дробная цена — 400', call('/myrent/admin/save', { id: 'S-0002', changes: { price: 1.5 } }, adm).status === 400);
+  check('admin/save: без changes — 400', call('/myrent/admin/save', { id: 'S-0002' }, adm).status === 400);
+  check('admin/save: неизвестный id — 404', call('/myrent/admin/save', { id: 'S-9999', changes: { title: 'x' } }, adm).status === 404);
+  sv = call('/myrent/admin/save', { id: 'S-0001', changes: { title: 'Снятое, но правится' } }, adm);
+  check('admin/save: снятое правится, остаётся снятым', sv.ok && sv.data.status === 'removed' && byId('S-0001').status === 'removed', sv);
+
+  const b64 = (arr) => 'data:image/jpeg;base64,' + Buffer.from(arr).toString('base64');
+  const jpg = (n) => b64([0xFF, 0xD8, 0xFF, 0xE0].concat(new Array(n || 40).fill(7)));
+  const oldAdm = photoIdFromUrl(byId('S-0002').photo);
+  const oldFileId = byId('S-0002').photo_file_id;
+  let ph = call('/myrent/admin/photo', { id: 'S-0002', image: jpg() }, adm);
+  check('admin/photo: фото сохранено, ссылка в строке',
+    ph.ok && /^https:\/\/drive\.google\.com\/thumbnail\?id=file-\d+&sz=w800$/.test(ph.data.photo) && byId('S-0002').photo === ph.data.photo, ph);
+  check('admin/photo: файл открыт по ссылке, старый в корзине, photo_file_id прежний',
+    photoFiles().some((f) => f.id === photoIdFromUrl(ph.data.photo) && !f.trashed && f.sharing[0] === 'ANYONE_WITH_LINK') &&
+    photoFiles().filter((f) => f.id === oldAdm)[0].trashed === true && byId('S-0002').photo_file_id === oldFileId);
+  check('admin/photo: сразу в /public/my', call('/public/my').data.items.filter((i) => i.key === 'S-0002')[0].photo_url === ph.data.photo);
+  check('admin/photo: не data URL — 400', call('/myrent/admin/photo', { id: 'S-0002', image: 'https://x.y/a.jpg' }, adm).status === 400);
+  check('admin/photo: пусто — 400', call('/myrent/admin/photo', { id: 'S-0002', image: '' }, adm).status === 400);
+  check('admin/photo: не картинка — 400',
+    call('/myrent/admin/photo', { id: 'S-0002', image: b64([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]) }, adm).status === 400);
+  check('admin/photo: больше 700 КБ — 413', call('/myrent/admin/photo', { id: 'S-0002', image: jpg(701 * 1024) }, adm).status === 413);
+  const filesBefore = photoFiles().length;
+  check('admin/photo: неизвестный id — 404, файл не создан',
+    call('/myrent/admin/photo', { id: 'S-9999', image: jpg() }, adm).status === 404 && photoFiles().length === filesBefore);
+
+  sent.length = 0;
+  let ar = call('/myrent/admin/remove', { id: 'S-0002' }, adm);
+  check('admin/remove — removed, removed_by admin', ar.ok && ar.data.status === 'removed' && ar.data.repeat === false &&
+    byId('S-0002').removed_by === 'admin' && pubKeys() === '', ar);
+  check('admin/remove: карточка закрыта, студенту про снятие',
+    calls('editMessageCaption').length === 1 && /Снято/.test(calls('editMessageCaption')[0].caption) &&
+    calls('sendMessage').filter((m) => String(m.chat_id) === '777' && /снято администратором/.test(m.text)).length === 1);
+  check('admin/remove: студент вернуть не может', call('/myrent/restore', stu({ id: 'S-0002' })).status === 403);
+  ar = call('/myrent/admin/remove', { id: 'S-0002' }, adm);
+  check('admin/remove повторно — repeat', ar.ok && ar.data.repeat === true, ar);
+  check('admin/remove: неизвестный id — 404', call('/myrent/admin/remove', { id: 'S-9999' }, adm).status === 404);
+
+  sent.length = 0;
+  ar = call('/myrent/admin/restore', { id: 'S-0002' }, adm);
+  check('admin/restore — approved, на сайте, removed_by очищен',
+    ar.ok && ar.data.status === 'approved' && byId('S-0002').removed_by === '' && pubKeys() === 'S-0002', ar);
+  check('admin/restore: новая карточка в чате', calls('sendPhoto').length === 1 &&
+    calls('sendPhoto')[0].reply_markup.inline_keyboard[0][0].callback_data === 'myr:x:S-0002');
+  ar = call('/myrent/admin/restore', { id: 'S-0001' }, adm);
+  check('admin/restore снятого админом S-0001 — approved', ar.ok && ar.data.status === 'approved' && pubKeys() === 'S-0002,S-0001', ar);
+  check('admin/restore: неизвестный id — 404', call('/myrent/admin/restore', { id: 'S-9999' }, adm).status === 404);
+  check('admin/restore не снятого — repeat', call('/myrent/admin/restore', { id: 'S-0002' }, adm).data.repeat === true);
 
   metaSet('setting_site_url', '');
 }
