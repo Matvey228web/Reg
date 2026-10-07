@@ -52,6 +52,10 @@
   --on-accent: #fff;        /* текст на заливке акцента */
   --ok: #1b7f45;            /* «отправлено»: заливка кнопки, белый на ней даёт 5.3 */
   --shot: #0f0f12;          /* фон пустой карточки без картинки категории */
+  --edge: #050506;          /* нижняя грань нейтральной клавиши */
+  --edge-accent: #7d0f0a;   /* нижняя грань красной клавиши; ниже выводится из --accent */
+  --edge-accent: color-mix(in srgb, var(--accent) 52%, #000);
+  --lit: rgba(255, 255, 255, .1); /* блик на верхней кромке нейтральной клавиши */
 
   /* Приглушение картинок (баннер, фон пустых карточек): завеса цвета страницы
      поверх снимка. В светлой теме она светлая — картинка там «выцветает», а
@@ -74,6 +78,8 @@
 html[data-theme="light"] {
   color-scheme: light;
 
+  --edge: #bdbab3;
+  --lit: rgba(255, 255, 255, .9);
   --bg: #f4f3f0;
   --panel: #ffffff;
   --line: #dcdad5;
@@ -720,8 +726,8 @@ a.add {
 .btn--send[disabled].is-sending, .btn--send[disabled].is-done { opacity: 1; }
 @keyframes send-sheen { from { transform: translateX(-120%); } to { transform: translateX(300%); } }
 @keyframes send-ring {
-  from { box-shadow: 0 0 0 0 rgba(58, 165, 105, .55); }
-  to { box-shadow: 0 0 0 12px rgba(58, 165, 105, 0); }
+  from { box-shadow: var(--key-shadow), 0 0 0 0 rgba(58, 165, 105, .55); }
+  to { box-shadow: var(--key-shadow), 0 0 0 12px rgba(58, 165, 105, 0); }
 }
 .btn-label { position: relative; display: inline-flex; align-items: center; gap: 8px; }
 .btn-label.is-swap { animation: send-label .3s ease-out; }
@@ -1019,3 +1025,29 @@ footer a { color: var(--dim); }
   font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Клавиши --- */
+
+/* Решение владельца (7 октября 2026): кнопки должны быть «кнопочными». У красной
+   и нейтральной клавиши есть нижняя грань и блик на кромке; нажатие утапливает
+   её на 3 точки сразу, без перехода (слой «Палец» из docs/DESIGN.md). Грани
+   считаются из --accent, поэтому сезонные темы получают их сами. Размеры не
+   меняются: грань — это тень, а не рамка, вёрстку она не двигает. */
+.btn, .cart-link, .card-add .stepper--wide {
+  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 3px 0 var(--edge-accent);
+}
+.add, .btn--secondary {
+  --key-shadow: inset 0 1px 0 var(--lit), 0 3px 0 var(--edge);
+}
+.btn, .cart-link, .card-add .stepper--wide, .add, .btn--secondary {
+  box-shadow: var(--key-shadow);
+  transition: transform 60ms, box-shadow 60ms;
+}
+.btn:active:not([disabled]), .cart-link:active, .add:active,
+.card-add .stepper--wide:has(button:active) {
+  transform: translateY(3px);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, .25), 0 0 0 transparent;
+  filter: none;
+}
+.btn[disabled] { box-shadow: none; }
+.theme-btn:active::before { transform: translateY(2px); }
