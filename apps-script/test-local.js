@@ -1051,7 +1051,7 @@ check('счётчик промахов обнулён удачным входо�
 
 console.log('\n== справочник категорий живёт в таблице ==');
 const catSheet = getSheet(SHEETS.CATEGORIES);
-check('лист категорий засеян умолчаниями', readRows(catSheet).length === 14,
+check('лист категорий засеян умолчаниями', readRows(catSheet).length === 13,
   readRows(catSheet).map(c => c.code));
 check('номера категорий двузначные строки',
   readRows(catSheet).every(c => /^\d{2}$/.test(String(c.num))),
@@ -1182,7 +1182,7 @@ let cfg = call('/settings/get', {}, token);
 check('настройки отдаются вошедшему', cfg.ok === true, cfg);
 check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
   cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
-check('категории приходят вместе с настройками', cfg.data.categories.length === 14);
+check('категории приходят вместе с настройками', cfg.data.categories.length === 13);
 // Кнопка «Создать недостающие вкладки»: видна, только пока таблица отстаёт
 // от схемы в коде.
 check('после setupSheets таблица не отстаёт — кнопку не показываем',
@@ -1954,10 +1954,10 @@ check('и молчит на чужой',
       importField(rowBlank, keysBlank, 'КИНО', 'status'));
 
 // Правка листа подхватывается без правки кода — ради этого всё и делалось.
-spreadsheet.getSheetByName('ImportRules').appendRow(['CNS', 'name', 'гойда', 'тест']);
+spreadsheet.getSheetByName('ImportRules').appendRow(['GRP', 'name', 'гойда', 'тест']);
 IMPORT_CONFIG = null;
 check('добавленное в таблицу правило работает сразу',
-      importCategory('', '', 'Ковёр гойда') === 'CNS', importCategory('', '', 'Ковёр гойда'));
+      importCategory('', '', 'Ковёр гойда') === 'GRP', importCategory('', '', 'Ковёр гойда'));
 spreadsheet.getSheetByName('ImportRules').deleteRow(spreadsheet.getSheetByName('ImportRules').getLastRow());
 IMPORT_CONFIG = null;
 

@@ -69,7 +69,7 @@ const MOCK_SETTINGS_SPEC = {
 let mockCats = CONFIG.CATEGORIES.map((c) => ({
   ...c,
   // Мешки, флаги и расходники считаются количеством: личного QR у них нет.
-  by_qty: c.code === "GRP" || c.code === "CNS",
+  by_qty: c.code === "GRP",
 }));
 function mockByQty(code) {
   const c = mockCats.find((x) => x.code === code);
