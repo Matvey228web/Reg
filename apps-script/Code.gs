@@ -5244,20 +5244,27 @@ function myrentSendModeration(botTok, row) {
     return null;
   }
   var thread = notifyThreadId("orders");
-  function send(withThread) {
+  function send(withThread, method) {
     var msg = {
-      chat_id: chat, photo: row.photo_file_id, caption: myrentCaption(row, ""), parse_mode: "HTML",
+      chat_id: chat, caption: myrentCaption(row, ""), parse_mode: "HTML",
       reply_markup: { inline_keyboard: [[
         { text: "✅ Одобрить", callback_data: "myr:a:" + row.id },
         { text: "❌ Отклонить", callback_data: "myr:r:" + row.id },
       ]] },
     };
+    msg[method === "sendPhoto" ? "photo" : "document"] = row.photo_file_id;
     if (withThread) msg.message_thread_id = Number(thread);
-    return telegramPost(botTok, "sendPhoto", msg);
+    return telegramPost(botTok, method, msg);
+  }
+  // Снимок, присланный файлом, Telegram не отдаёт через sendPhoto: идентификатор
+  // документа годится только для sendDocument.
+  function sendAny(withThread) {
+    var body = send(withThread, "sendPhoto");
+    return body.ok ? body : send(withThread, "sendDocument");
   }
   try {
-    var body = send(!!thread);
-    if (!body.ok && thread) body = send(false);
+    var body = sendAny(!!thread);
+    if (!body.ok && thread) body = sendAny(false);
     if (!body.ok) {
       logEvent("telegram", "sendPhoto", "telegram", body.description || "", { id: row.id });
       return null;

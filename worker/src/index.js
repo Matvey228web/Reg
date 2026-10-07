@@ -44,10 +44,12 @@ const READS = new Set([
   // (/announcement/save, /announcement/remove) в чтения не входит и сама
   // сбрасывает кэш, так что снятое объявление исчезает с сайта сразу.
   "/announcements/list", "/public/announcements",
+  // Объявления студентов (раздел My rent): тоже публичное чтение без токена.
+  "/public/my",
 ]);
 
 // Чтения, которые кэшируются без токена: их зовёт сайт, где никто не входит.
-const PUBLIC_READS = new Set(["/public/catalog", "/public/announcements"]);
+const PUBLIC_READS = new Set(["/public/catalog", "/public/announcements", "/public/my"]);
 
 // Таблица отвечает от 7 до 30 секунд, а сайт ждёт объявления пять и сдаётся:
 // после каждой записи и каждых пяти минут первому посетителю объявлений не
@@ -284,10 +286,35 @@ async function telegramWebhook(request, env, ctx, given) {
 }
 
 async function handleUpdate(env, token, update) {
+  if (update.callback_query) return handleCallback(env, token, update.callback_query);
+
   const msg = update.message || update.edited_message || update.channel_post ||
     update.my_chat_member;
   const chat = msg && msg.chat;
   if (!chat || !chat.id) return;
+
+  // Личные чаты — диалог «My rent». Группы идут прежним путём ниже, без
+  // изменений. Личный чат студента в список «чатов склада» не запоминаем:
+  // иначе настройки заполнились бы студентами. Исключение — /id: так
+  // складмен находит свой личный чат.
+  if (chat.type === "private" && update.message) {
+    if (/^\/id(@[\w_]+)?\b/i.test(String(msg.text || "").trim())) {
+      await rememberChat(env, chat, msg);
+      await tgSend(token, chat.id, answerText(msg), null);
+      return;
+    }
+    return privateMessage(env, token, msg);
+  }
+
+  await rememberChat(env, chat, msg);
+
+  // В форуме ответ без номера темы уходит в «Общее», и человек, спросивший
+  // /id в своей теме, его не увидит.
+  const thread = msg.is_topic_message === true ? msg.message_thread_id : null;
+  if (answerWanted(update)) await tgSend(token, chat.id, answerText(msg), thread);
+}
+
+async function rememberChat(env, chat, msg) {
 
   const row = {
     chat_id: String(chat.id),
@@ -300,11 +327,6 @@ async function handleUpdate(env, token, update) {
   if (await chatChanged(env, row)) {
     await env.CACHE.put("chat:" + chat.id, JSON.stringify(row), { expirationTtl: TG_CHAT_TTL });
   }
-
-  // В форуме ответ без номера темы уходит в «Общее», и человек, спросивший
-  // /id в своей теме, его не увидит.
-  const thread = msg.is_topic_message === true ? msg.message_thread_id : null;
-  if (answerWanted(update)) await tgSend(token, chat.id, answerText(msg), thread);
 }
 
 // Каждое сообщение в чате — это не повод писать в KV: записей в сутки около
@@ -373,6 +395,350 @@ async function tgSend(token, chatId, body, thread) {
     // Повторять нечего: 200 мы уже отдали. Человек напишет команду снова —
     // это дешевле, чем очередь повторов у Telegram из-за вежливого ответа.
   }
+}
+
+// ---- «My rent»: объявление студента через бота ----
+//
+// Решение владельца 7 октября 2026: студент выставляет своё снаряжение в
+// личном чате с ботом, склад одобряет кнопкой в своём чате. Диалог живёт в
+// KV, а не в таблице: это черновик на сутки, не данные.
+
+const DIALOG_TTL = 60 * 60 * 24;
+const MYRENT_BUTTON = "My rent";
+// Таблица на фото и модерацию тратит до 20 секунд; бюджет waitUntil — 30, и
+// ещё нужен ответ студенту. Повтор безопасен: submit идемпотентен по фото, а
+// decide на уже решённое отвечает repeat.
+const MYRENT_UPSTREAM_MS = 20000;
+
+const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+async function tgApi(token, method, body) {
+  try {
+    const res = await fetch("https://api.telegram.org/bot" + token + "/" + method, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+const say = (token, chatId, textHtml, extra) =>
+  tgApi(token, "sendMessage", {
+    chat_id: String(chatId), text: textHtml, parse_mode: "HTML",
+    disable_web_page_preview: true, ...(extra || {}),
+  });
+
+const menuKeyboard = { keyboard: [[{ text: MYRENT_BUTTON }]], resize_keyboard: true };
+
+async function loadDialog(env, uid) {
+  const raw = await env.CACHE.get("dlg:" + uid);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+// Пишем только при смене шага: записей в KV около тысячи в сутки на всё.
+const saveDialog = (env, uid, state) =>
+  env.CACHE.put("dlg:" + uid, JSON.stringify(state), { expirationTtl: DIALOG_TTL });
+
+// Публичное чтение для самого Worker (категории для кнопок). Ходит тем же
+// путём и в те же ключи, что и сайт, чтобы не плодить второй кэш.
+async function readPublic(env, endpoint) {
+  const key = await cacheKey(env, endpoint, {}, "");
+  const hit = await env.CACHE.get(key);
+  if (hit) return JSON.parse(hit);
+  const old = await env.CACHE.get(staleKey(endpoint, await hash("{}")));
+  if (old) return JSON.parse(old);
+  const res = await callUpstream(env, { endpoint, payload: {} });
+  if (!res.ok || !res.envelope.ok) return null;
+  const value = JSON.stringify(res.envelope);
+  await env.CACHE.put(key, value, { expirationTtl: TTL.cache });
+  await env.CACHE.put(staleKey(endpoint, await hash("{}")), value, { expirationTtl: STALE_TTL });
+  return res.envelope;
+}
+
+// Список категорий приходит из таблицы, копии в Worker нет: добавили
+// категорию там — кнопка появилась без выкладки Worker.
+async function myCategories(env) {
+  const answer = await readPublic(env, "/public/my");
+  const list = answer && answer.data && answer.data.categories;
+  if (!Array.isArray(list) || !list.length) return null;
+  return list.map((c) => typeof c === "string"
+    ? { code: c, label: c }
+    : { code: String(c.code), label: String(c.label || c.code) });
+}
+
+function priceText(price) {
+  if (price === null || price === undefined) return "Договорная";
+  return String(price).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽/сутки";
+}
+
+// Карточка как на сайте. Подпись фото у Telegram — до 1024 знаков, а
+// экранирование раздувает текст, поэтому описание при нужде урезается.
+function cardCaption(state, username) {
+  const build = (desc) => [
+    "<b>" + esc(state.title) + "</b>",
+    esc(state.category_label || state.category),
+    desc ? esc(desc) : "",
+    "<b>" + esc(priceText(state.price)) + "</b>",
+    "@" + esc(username),
+  ].filter(Boolean).join("\n");
+  let desc = state.description || "";
+  let out = build(desc);
+  while (out.length > 1024 && desc) {
+    desc = desc.slice(0, Math.max(0, desc.length - 50));
+    out = build(desc ? desc + "…" : "");
+  }
+  return out;
+}
+
+const HELLO = [
+  "Привет! Это бот склада Mifs Rent.",
+  "",
+  "Если хотите сдавать своё снаряжение другим студентам, нажмите «" + MYRENT_BUTTON + "» " +
+    "(или /myrent): я задам несколько вопросов, покажу карточку и отправлю её на " +
+    "модерацию. Выйти можно в любой момент: /cancel.",
+].join("\n");
+
+async function startDialog(env, token, uid, chatId, username) {
+  if (!username) {
+    await say(token, chatId, "Чтобы с вами могли связаться, нужен ник в Telegram. " +
+      "Задайте его в настройках Telegram (Настройки → Имя пользователя), " +
+      "затем снова нажмите «" + MYRENT_BUTTON + "».");
+    return;
+  }
+  const cats = await myCategories(env);
+  if (!cats) {
+    await say(token, chatId, "Сейчас не получается открыть список категорий, попробуйте позже.");
+    return;
+  }
+  await saveDialog(env, uid, { step: "category" });
+  await say(token, chatId, "Что вы сдаёте? Выберите категорию.", {
+    reply_markup: { inline_keyboard: cats.map((c) => [{ text: c.label, callback_data: "myc:" + c.code }]) },
+  });
+}
+
+async function showPreview(token, chatId, state, username) {
+  await say(token, chatId, "Проверьте карточку. Так её увидят на сайте.");
+  const body = {
+    chat_id: String(chatId),
+    caption: cardCaption(state, username),
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: [
+      [{ text: "Отправить на модерацию", callback_data: "mys:send" }],
+      [{ text: "Заново", callback_data: "mys:again" }, { text: "Отмена", callback_data: "mys:cancel" }],
+    ] },
+  };
+  // Файл-документ как фото не отправить, а карточка должна показать то, что
+  // получит модератор.
+  const res = state.photo_kind === "document"
+    ? await tgApi(token, "sendDocument", { ...body, document: state.photo_file_id })
+    : await tgApi(token, "sendPhoto", { ...body, photo: state.photo_file_id });
+  return res;
+}
+
+function pickPhoto(msg) {
+  if (Array.isArray(msg.photo) && msg.photo.length) {
+    const best = msg.photo.reduce((a, b) =>
+      ((b.file_size || b.width * b.height || 0) >= (a.file_size || a.width * a.height || 0) ? b : a));
+    return { id: best.file_id, kind: "photo" };
+  }
+  const d = msg.document;
+  if (d && d.file_id && /^image\//i.test(String(d.mime_type || ""))) return { id: d.file_id, kind: "document" };
+  return null;
+}
+
+async function privateMessage(env, token, msg) {
+  const chatId = msg.chat.id;
+  const uid = msg.from && msg.from.id;
+  if (!uid) return;
+  const said = String(msg.text || "").trim();
+  const cmd = (said.match(/^\/(\w+)(@[\w_]+)?(\s|$)/) || [])[1];
+  const lower = cmd ? cmd.toLowerCase() : "";
+
+  if (lower === "start" || lower === "help") {
+    await say(token, chatId, esc(HELLO), { reply_markup: menuKeyboard });
+    return;
+  }
+  if (lower === "cancel") {
+    if (await env.CACHE.get("dlg:" + uid)) await env.CACHE.delete("dlg:" + uid);
+    await say(token, chatId, "Отменено. Начать заново: «" + MYRENT_BUTTON + "».", { reply_markup: menuKeyboard });
+    return;
+  }
+  if (lower === "myrent" || said === MYRENT_BUTTON) {
+    await startDialog(env, token, uid, chatId, msg.from.username);
+    return;
+  }
+
+  const state = await loadDialog(env, uid);
+  if (!state) {
+    await say(token, chatId, "Чтобы выставить своё снаряжение, нажмите «" + MYRENT_BUTTON + "».", { reply_markup: menuKeyboard });
+    return;
+  }
+  const hint = (t) => say(token, chatId, t + " Выйти: /cancel.");
+  if (cmd) return hint("Эта команда сейчас не нужна.");
+
+  if (state.step === "title") {
+    if (!said || said.length > 80) return hint("Название — от 1 до 80 знаков.");
+    state.title = said;
+    state.step = "description";
+    await saveDialog(env, uid, state);
+    return say(token, chatId, "Опишите снаряжение: состояние, комплект, условия (до 600 знаков). " +
+      "Если описание не нужно, отправьте «-».");
+  }
+  if (state.step === "description") {
+    if (said.length > 600) return hint("Описание — до 600 знаков, сейчас " + said.length + ".");
+    if (!said) return hint("Отправьте текст или «-», чтобы пропустить.");
+    state.description = said === "-" ? "" : said;
+    state.step = "price";
+    await saveDialog(env, uid, state);
+    return say(token, chatId, "Цена за сутки в рублях — числом, например 1500.", {
+      reply_markup: { inline_keyboard: [[{ text: "Договорная", callback_data: "myp:neg" }]] },
+    });
+  }
+  if (state.step === "price") {
+    if (!/^\d{1,7}$/.test(said) || Number(said) > 1000000) {
+      return hint("Цена — целое число рублей от 0 до 1 000 000 или кнопка «Договорная».");
+    }
+    state.price = Number(said);
+    state.step = "photo";
+    await saveDialog(env, uid, state);
+    return say(token, chatId, "Пришлите фото снаряжения.");
+  }
+  if (state.step === "photo") {
+    const photo = pickPhoto(msg);
+    if (!photo) return hint("Нужна фотография: пришлите её как картинку.");
+    state.photo_file_id = photo.id;
+    state.photo_kind = photo.kind;
+    state.step = "preview";
+    await saveDialog(env, uid, state);
+    await showPreview(token, chatId, state, msg.from.username);
+    return;
+  }
+  if (state.step === "category") return hint("Выберите категорию кнопкой выше.");
+  return hint("Нажмите кнопку под карточкой.");
+}
+
+// ---- нажатия на кнопки ----
+
+async function handleCallback(env, token, cb) {
+  const data = String(cb.data || "");
+  const answer = (t) => tgApi(token, "answerCallbackQuery", {
+    callback_query_id: cb.id, ...(t ? { text: String(t).slice(0, 190) } : {}),
+  });
+  const msg = cb.message;
+  if (!msg || !msg.chat) return answer();
+
+  // Модерация в чате склада. Какой чат настоящий, Worker не знает — это
+  // проверяет таблица по chat_id сообщения с карточкой.
+  const mod = data.match(/^myr:([ar]):([\w-]{1,32})$/);
+  if (mod) {
+    const by = cb.from && cb.from.username ? "@" + cb.from.username
+      : String((cb.from && cb.from.first_name) || "склад");
+    const res = await callUpstream({ ...env, UPSTREAM_TIMEOUT_MS: MYRENT_UPSTREAM_MS }, {
+      endpoint: "/myrent/decide",
+      payload: {
+        bot_key: await webhookPath(token), id: mod[2],
+        decision: mod[1] === "a" ? "approve" : "reject",
+        by, chat_id: msg.chat.id,
+      },
+    });
+    const ans = res.envelope;
+    if (!ans.ok) {
+      return answer(ans.error || "Не получилось, нажмите ещё раз");
+    }
+    const d = ans.data || {};
+    const word = d.status === "approved" ? "одобрено" : d.status === "rejected" ? "отклонено" : "решено";
+    if (d.repeat) return answer("Уже " + word);
+    await answer(d.status === "approved" ? "Одобрено" : "Отклонено");
+    // Сайт должен увидеть решение сразу: сносим свежую и долгую копии,
+    // как после снятия объявления, и собираем новую, пока сайт не спросил.
+    await env.CACHE.delete(staleKey("/public/my", await hash("{}")));
+    await bumpGeneration(env);
+    await refreshPublic(env, "/public/my", {});
+    return;
+  }
+
+  // Кнопки диалога живут только в личном чате того, кто диалог ведёт.
+  const m = data.match(/^(myc|myp|mys):(.*)$/);
+  const uid = cb.from && cb.from.id;
+  if (!m || !uid || msg.chat.type !== "private" || String(msg.chat.id) !== String(uid)) return answer();
+  const chatId = msg.chat.id;
+  const username = cb.from.username;
+  const state = await loadDialog(env, uid);
+  const stale = () => answer("Диалог устарел. Начните заново: «" + MYRENT_BUTTON + "».");
+  // Нажатую кнопку убираем: старые кнопки не должны перекидывать диалог назад.
+  const dropButtons = () => tgApi(token, "editMessageReplyMarkup", {
+    chat_id: String(chatId), message_id: msg.message_id, reply_markup: { inline_keyboard: [] },
+  });
+
+  if (m[1] === "myc") {
+    if (!state || state.step !== "category") return stale();
+    const cats = await myCategories(env);
+    if (!cats) return answer("Список категорий недоступен, попробуйте позже");
+    const cat = cats.find((c) => c.code === m[2]);
+    if (!cat) return answer("Такой категории нет");
+    await answer();
+    state.category = cat.code;
+    state.category_label = cat.label;
+    state.step = "title";
+    await saveDialog(env, uid, state);
+    await dropButtons();
+    await say(token, chatId, "Категория: " + esc(cat.label) + ".\nКак называется? От 1 до 80 знаков.");
+    return;
+  }
+
+  if (m[1] === "myp") {
+    if (!state || state.step !== "price" || m[2] !== "neg") return stale();
+    await answer();
+    state.price = null;
+    state.step = "photo";
+    await saveDialog(env, uid, state);
+    await dropButtons();
+    await say(token, chatId, "Цена: договорная. Пришлите фото снаряжения.");
+    return;
+  }
+
+  // mys
+  if (m[2] === "cancel") {
+    await answer("Отменено");
+    await env.CACHE.delete("dlg:" + uid);
+    await dropButtons();
+    await say(token, chatId, "Отменено. Начать заново: «" + MYRENT_BUTTON + "».");
+    return;
+  }
+  if (m[2] === "again") {
+    await answer();
+    await dropButtons();
+    await startDialog(env, token, uid, chatId, username);
+    return;
+  }
+  if (m[2] !== "send" || !state || state.step !== "preview") return stale();
+  if (!username) return answer("Нужен ник в Telegram");
+
+  await answer("Отправляю…");
+  const res = await callUpstream({ ...env, UPSTREAM_TIMEOUT_MS: MYRENT_UPSTREAM_MS }, {
+    endpoint: "/myrent/submit",
+    payload: {
+      bot_key: await webhookPath(token),
+      tg_id: uid, tg_username: username,
+      tg_name: [cb.from.first_name, cb.from.last_name].filter(Boolean).join(" "),
+      category: state.category, title: state.title, description: state.description || "",
+      price: state.price === undefined ? null : state.price,
+      photo_file_id: state.photo_file_id,
+    },
+  });
+  if (res.ok && res.envelope.ok) {
+    await env.CACHE.delete("dlg:" + uid);
+    await dropButtons();
+    await say(token, chatId, "Отправлено на модерацию. Когда склад решит, я напишу сюда.");
+    return;
+  }
+  // Состояние не трогаем: студент нажмёт кнопку ещё раз, ввод заново не нужен.
+  await say(token, chatId, "Не получилось отправить: склад сейчас не отвечает. " +
+    "Нажмите «Отправить на модерацию» ещё раз чуть позже — карточка сохранена.");
 }
 
 async function knownChats(env) {

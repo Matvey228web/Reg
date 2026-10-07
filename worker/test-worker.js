@@ -730,5 +730,168 @@ for (const k of ["q:1", "q:2", "dead:3", "dead:4"]) env.CACHE.store.delete(k);
 const hEmpty = await (await worker.fetch(new Request("https://api.invalid/health"), env, ctx)).json();
 ok("пустой ящик — даты нет", hEmpty.queue === 0 && hEmpty.dead === 0 && hEmpty.oldest_dead_at === null, hEmpty);
 
+console.log("\n== My rent: диалог в личном чате ==");
+const myCats = [{ code: "CAM", label: "Камера" }, { code: "LGT", label: "Свет" }];
+let myState = { submitted: null, decided: null, decideReply: null };
+upstream.reply = (body) => {
+  if (body.endpoint === "/public/my") return { ok: true, data: { categories: myCats, items: [] }, error: null, status: 200 };
+  if (body.endpoint === "/myrent/submit") {
+    myState.submitted = body.payload;
+    return myState.submitFail ? { ok: false, data: null, error: "сбой", status: 502 }
+      : { ok: true, data: { id: "S-0001", status: "pending" }, error: null, status: 200 };
+  }
+  if (body.endpoint === "/myrent/decide") {
+    myState.decided = body.payload;
+    return myState.decideReply || { ok: true, data: { id: body.payload.id, status: "approved", repeat: false }, error: null, status: 200 };
+  }
+  return listReply([]);
+};
+upstream.calls = [];
+tg = [];
+
+const student = { id: 777, username: "ivan_s", first_name: "Иван" };
+const priv = (extra) => ({ message: { chat: { id: 777, type: "private" }, from: student, date: 1790001000, ...extra } });
+const press = (data, extra) => ({ callback_query: { id: "cb1", from: student, data,
+  message: { message_id: 5, chat: { id: 777, type: "private" } }, ...(extra || {}) } });
+const lastTg = (m) => [...tg].reverse().find((x) => x.method === m);
+const dlg = () => env.CACHE.store.get("dlg:777") && JSON.parse(env.CACHE.store.get("dlg:777").value);
+
+await hook(priv({ text: "/start" }));
+ok("приветствие с кнопкой «My rent»",
+   tg.length === 1 && tg[0].body.reply_markup.keyboard[0][0].text === "My rent", tg);
+ok("личный чат студента не попал в список чатов склада", !chatKeys().includes("chat:777"), chatKeys());
+
+tg = [];
+await hook(priv({ text: "My rent" }));
+ok("кнопки категорий берутся из /public/my",
+   lastTg("sendMessage").body.reply_markup.inline_keyboard.map((r) => r[0].callback_data).join() === "myc:CAM,myc:LGT", tg);
+ok("шаг — категория", dlg().step === "category", dlg());
+
+await hook(press("myc:LGT"));
+ok("ответ на нажатие дан всегда", tg.some((x) => x.method === "answerCallbackQuery"), tg);
+ok("после категории — название", dlg().step === "title" && dlg().category === "LGT", dlg());
+
+tg = [];
+await hook(priv({ text: "x".repeat(81) }));
+ok("длинное название — подсказка, шаг прежний", dlg().step === "title" && tg.length === 1, dlg());
+await hook(priv({ text: "Aputure <300d>" }));
+await hook(priv({ text: "-" }));
+ok("описание «-» пропущено", dlg().step === "price" && dlg().description === "", dlg());
+
+tg = [];
+await hook(priv({ text: "много" }));
+ok("плохая цена — подсказка, шаг прежний", dlg().step === "price" && tg.length === 1, dlg());
+await hook(priv({ text: "-5" }));
+await hook(priv({ text: "1500.5" }));
+ok("отрицательная и дробная цены не приняты", dlg().step === "price", dlg());
+await hook(priv({ text: "3000" }));
+ok("цена принята", dlg().step === "photo" && dlg().price === 3000, dlg());
+
+tg = [];
+await hook(priv({ text: "вот фото" }));
+ok("текст вместо фото — подсказка", dlg().step === "photo", dlg());
+await hook(priv({ photo: [{ file_id: "small", file_size: 10 }, { file_id: "big", file_size: 900 }] }));
+ok("взят самый большой размер", dlg().photo_file_id === "big" && dlg().step === "preview", dlg());
+const pv = lastTg("sendPhoto");
+ok("предпросмотр — фото с подписью как на сайте",
+   pv && pv.body.photo === "big" && pv.body.parse_mode === "HTML" &&
+   /<b>Aputure &lt;300d&gt;<\/b>/.test(pv.body.caption) && /3 000 ₽\/сутки/.test(pv.body.caption) &&
+   /@ivan_s/.test(pv.body.caption) && /Свет/.test(pv.body.caption), pv);
+ok("под карточкой три кнопки",
+   pv.body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data).join() === "mys:send,mys:again,mys:cancel", pv);
+
+// Сбой таблицы: состояние остаётся, можно нажать ещё раз.
+myState.submitFail = true;
+tg = [];
+await hook(press("mys:send"));
+ok("при сбое состояние сохранено", dlg() && dlg().step === "preview", dlg());
+ok("студенту сказано нажать позже", /ещё раз/.test(lastTg("sendMessage").body.text), tg);
+myState.submitFail = false;
+tg = [];
+await hook(press("mys:send"));
+ok("submit ушёл с ключом бота и полями",
+   myState.submitted && myState.submitted.bot_key === secret && myState.submitted.tg_id === 777 &&
+   myState.submitted.tg_username === "ivan_s" && myState.submitted.category === "LGT" &&
+   myState.submitted.price === 3000 && myState.submitted.photo_file_id === "big" &&
+   myState.submitted.title === "Aputure <300d>", myState.submitted);
+ok("после успеха состояние стёрто", dlg() === null || dlg() === undefined, dlg());
+ok("сказано про модерацию", /модерац/.test(lastTg("sendMessage").body.text), tg);
+
+console.log("\n== My rent: «Договорная», отмена, без ника ==");
+await hook(priv({ text: "/myrent" }));
+await hook(press("myc:CAM"));
+await hook(priv({ text: "Sony FX3" }));
+await hook(priv({ text: "Body" }));
+await hook(press("myp:neg"));
+ok("«Договорная» — цена пустая", dlg().step === "photo" && dlg().price === null, dlg());
+await hook(priv({ document: { file_id: "doc1", mime_type: "image/png" } }));
+ok("документ-картинка принят", dlg().step === "preview" && dlg().photo_kind === "document", dlg());
+ok("в карточке «Договорная»", /Договорная/.test(lastTg("sendDocument").body.caption), tg);
+await hook(press("mys:again"));
+ok("«Заново» — снова категория", dlg().step === "category", dlg());
+tg = [];
+await hook(priv({ text: "/cancel" }));
+ok("/cancel стирает диалог", !dlg(), dlg());
+ok("и отвечает", tg.length === 1 && /Отменено/.test(tg[0].body.text), tg);
+
+// Кнопка из чужого чата диалог не двигает.
+await hook(priv({ text: "/myrent" }));
+tg = [];
+await hook(press("myc:CAM", { message: { message_id: 6, chat: { id: -100500, type: "supergroup" } } }));
+ok("кнопка диалога из группы только отвечена", dlg().step === "category" && tg.length === 1 &&
+   tg[0].method === "answerCallbackQuery", tg);
+await hook(priv({ text: "/cancel" }));
+
+const noNick = { id: 888, first_name: "Без ника" };
+tg = []; upstream.calls = [];
+await hook({ message: { chat: { id: 888, type: "private" }, from: noNick, date: 1, text: "My rent" } });
+ok("без ника — объяснение и никакого диалога",
+   tg.length === 1 && /ник/.test(tg[0].body.text) && !env.CACHE.store.has("dlg:888"), tg);
+
+console.log("\n== My rent: группы и /id как раньше ==");
+tg = [];
+await hook(groupMsg("/start"));
+ok("в группе /start — прежнее приветствие с номером чата",
+   tg.length === 1 && /-1009876543210/.test(tg[0].body.text) && !tg[0].body.reply_markup, tg);
+tg = [];
+await hook(priv({ text: "/id" }));
+ok("/id в личном чате работает", tg.length === 1 && /Этот чат: 777/.test(tg[0].body.text), tg);
+
+console.log("\n== My rent: модерация и /public/my ==");
+upstream.calls = [];
+// Категории для кнопок уже прогрели кэш — это тот же ключ, что у сайта.
+ok("диалог прогрел общий кэш /public/my", [...env.CACHE.store.keys()].some((k) => k.includes(":/public/my:")));
+for (const k of [...env.CACHE.store.keys()]) if (k.includes("/public/my")) env.CACHE.store.delete(k);
+let pub = await call("/public/my", {}, "");
+ok("/public/my — публичное чтение: первый промах", pub.cache === "miss", pub.cache);
+pub = await call("/public/my", {}, "");
+ok("второй — из кэша без токена", pub.cache === "hit", pub.cache);
+ok("долгая копия лежит", [...env.CACHE.store.keys()].some((k) => k.startsWith("stale:/public/my:")));
+
+upstream.calls = []; tg = [];
+const mod = (data) => ({ callback_query: { id: "cb2", from: { id: 5, username: "sklad" }, data,
+  message: { message_id: 9, chat: { id: -100500, type: "supergroup" } } } });
+await hook(mod("myr:a:S-0001"));
+ok("decide вызван с ключом, id, решением, кто и из какого чата",
+   myState.decided && myState.decided.bot_key === secret && myState.decided.id === "S-0001" &&
+   myState.decided.decision === "approve" && myState.decided.by === "@sklad" &&
+   myState.decided.chat_id === -100500, myState.decided);
+ok("на нажатие отвечено", tg.some((x) => x.method === "answerCallbackQuery" && /Одобрено/.test(x.body.text)), tg);
+ok("кэш /public/my сброшен и собран заново",
+   upstream.calls.includes("/myrent/decide") && upstream.calls.includes("/public/my"), upstream.calls);
+upstream.calls = [];
+pub = await call("/public/my", {}, "");
+ok("следующее чтение — снова из кэша, но уже свежего", pub.cache === "hit" && upstream.calls.length === 0, { c: pub.cache, u: upstream.calls });
+
+myState.decideReply = { ok: true, data: { id: "S-0001", status: "approved", repeat: true }, error: null, status: 200 };
+upstream.calls = []; tg = [];
+await hook(mod("myr:r:S-0001"));
+ok("повторное решение — «уже», кэш не трогается",
+   /Уже/.test(lastTg("answerCallbackQuery").body.text) && !upstream.calls.includes("/public/my"), { tg, c: upstream.calls });
+myState.decideReply = { ok: false, data: null, error: "Чат не тот", status: 403 };
+tg = [];
+await hook(mod("myr:a:S-0001"));
+ok("отказ таблицы показан модератору", /Чат не тот/.test(lastTg("answerCallbackQuery").body.text), tg);
+
 console.log("\n" + (bad ? "❌ ПРОВАЛОВ: " + bad : "✅ Worker: проверки пройдены"));
 process.exit(bad ? 1 : 0);
