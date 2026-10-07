@@ -940,7 +940,6 @@ footer a { color: var(--dim); }
   .controls { grid-template-columns: auto 1fr; align-items: center; }
   .catalog { grid-column: 1; grid-row: 1; }
   .searchbar { grid-column: 2; grid-row: 1; }
-  .chips { grid-column: 1 / -1; }
   .hero { min-height: 320px; }
   .hero::before { background-image: url(img/hero.jpg); }
   .item-shot { aspect-ratio: 16 / 9; max-height: 380px; }
