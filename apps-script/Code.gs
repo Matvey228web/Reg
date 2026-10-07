@@ -6257,6 +6257,11 @@ function bookingOverlaps(order, start, end) {
  * видно в отладчике. Здесь их нет с самого начала — ни item_id, ни
  * serial_number, ни inventory_number. По ним ищут технику, когда она пропала.
  */
+// Раздел по категории сильнее отметки модели: звука в «Фото» не бывает (решение
+// владельца 7 октября 2026). Иначе неразмеченная звуковая модель — а новые
+// приходят неразмеченными — показывалась бы в обоих разделах.
+var SECTION_BY_CATEGORY = { AUD: "CINE" };
+
 function handlePublicCatalog(payload) {
   var today = new Date().toISOString().substring(0, 10);
   var from = parseRuDate(payload.from) || today;
@@ -6288,7 +6293,7 @@ function handlePublicCatalog(payload) {
       category_label: labels[parts[0]] || parts[0],
       model_code: parts[1],
       model_name: names[key] || a.model_name || "",
-      section: sections[key] || "",
+      section: SECTION_BY_CATEGORY[parts[0]] || sections[key] || "",
       photo: photos[key] || "",
       total: a.total,
       free: a.free,

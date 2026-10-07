@@ -1845,6 +1845,18 @@ check('в ответе все категории справочника, и пу
   pub.ok && pub.data.categories);
 check('категории отсортированы по названию',
   pub.ok && pub.data.categories.every((c, i, a) => !i || String(a[i - 1].label).localeCompare(String(c.label), 'ru') <= 0));
+// Звук только в «Кино» (решение владельца 7 октября 2026): и неразмеченный, и
+// ошибочно отмеченный «Фото».
+{
+  const mSheet = getSheet(SHEETS.MODELS);
+  const audRows = readRows(mSheet).filter(r => r.category === 'AUD');
+  const audKeys = audRows.map(r => 'AUD-' + pad2(Number(r.model_code)));
+  if (audRows.length) updateRow(mSheet, audRows[0].__row, { section: 'PHOTO' });
+  const audPub = call('/public/catalog', { from: '2026-03-04', to: '2026-03-05' }).data.models.filter(m => m.category === 'AUD');
+  check('звук на сайте только в «Кино», отметка модели не важна',
+    audPub.length > 0 && audPub.every(m => m.section === 'CINE'), { audKeys, audPub });
+  if (audRows.length) updateRow(mSheet, audRows[0].__row, { section: audRows[0].section || '' });
+}
 const pubSky = pub.ok && pub.data.models.filter(m => m.model_name === 'Arri SkyPanel S60')[0];
 check('у модели видно всего и свободно',
       !!pubSky && pubSky.total === 2 && pubSky.free === 2, pubSky);
