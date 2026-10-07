@@ -13,7 +13,7 @@
 // Время берётся с часов посетителя. Изменили календарь или файл темы — поднимите
 // ?v= у этого скрипта в трёх html.
 (function () {
-  var VERSION = "20261002b";
+  var VERSION = "20261007a";
 
   var CALENDAR = [
     { id: "cinema", label: "День кино", from: "12-29", to: "12-29", color: "#120a0a",
@@ -26,7 +26,6 @@
 
   var root = document.documentElement;
   var meta = document.querySelector('meta[name="theme-color"]');
-  var COLORS = { light: "#f4f3f0", dark: "#0d0d0f" };
 
   // --- светлая/тёмная ---
   var theme = null;
@@ -35,6 +34,20 @@
     if (t === "light" || t === "dark") theme = t;
   } catch (e) { /* хранилище закрыто — остаётся тёмная */ }
   if (theme) root.setAttribute("data-theme", theme);
+
+  // Цвета строки браузера берём из токена --bg в style.css, а не дублируем
+  // литералами: скрипт стоит после style.css и ждёт его, так что значения уже
+  // есть. <meta theme-color> в html остаётся литералом осознанно: он нужен до
+  // стилей и скриптов (первый кадр, закрытый JS). Сезонные цвета — ниже, в CALENDAR.
+  var COLORS = { light: "", dark: "" };
+  (function () {
+    var was = root.getAttribute("data-theme");
+    ["light", "dark"].forEach(function (t) {
+      root.setAttribute("data-theme", t);
+      COLORS[t] = getComputedStyle(root).getPropertyValue("--bg").trim();
+    });
+    if (was) root.setAttribute("data-theme", was); else root.removeAttribute("data-theme");
+  })();
 
   // --- сезон ---
   function inRange(c, md) {
@@ -80,9 +93,11 @@
   // Для common.js: что за сезон идёт и какое у него приветствие.
   window.MifsSeason = season;
 
-  if (meta) {
+  // Стили не подгрузились (значение пустое) — строка остаётся как в html.
+  if (meta && COLORS.dark) {
     var dark = (season && season.color) || COLORS.dark;
     meta.setAttribute("content", theme === "light" ? COLORS.light : dark);
   }
-  window.MifsThemeColors = { light: COLORS.light, dark: (season && season.color) || COLORS.dark };
+  // base — обычная тёмная без сезона: common.js возвращает её, когда тему гасят.
+  window.MifsThemeColors = { light: COLORS.light, dark: (season && season.color) || COLORS.dark, base: COLORS.dark };
 })();
