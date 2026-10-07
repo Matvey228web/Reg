@@ -509,9 +509,9 @@ var Site = (function () {
       if (p) p.textContent = hero.sub;
     }
     var colors = window.MifsThemeColors;
-    if (colors) colors.dark = "#0d0d0f";
+    if (colors && colors.base) colors.dark = colors.base;
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta && root.getAttribute("data-theme") !== "light") meta.setAttribute("content", "#0d0d0f");
+    if (meta && colors && colors.base && root.getAttribute("data-theme") !== "light") meta.setAttribute("content", colors.base);
     window.MifsSeason = null;
   }
 
@@ -841,7 +841,7 @@ document.addEventListener("DOMContentLoaded", function () {
   var btn = Site.$("theme-toggle");
   if (!btn) return;
   // Цвета строки браузера считает theme.js: у сезонной темы своя тёмная.
-  var COLORS = window.MifsThemeColors || { light: "#f4f3f0", dark: "#0d0d0f" };
+  var COLORS = window.MifsThemeColors || {};
 
   function now() {
     return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
@@ -858,7 +858,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var next = now() === "light" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", next);
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", COLORS[next]);
+    if (meta && COLORS[next]) meta.setAttribute("content", COLORS[next]);
     try { localStorage.setItem("mifs_theme", next); } catch (e) { /* не сохранилось — до перезагрузки */ }
     paint();
   });
