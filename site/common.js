@@ -592,6 +592,13 @@ var Site = (function () {
     return 0;
   }
 
+  // Заявка ушла — корзина пустеет вместе с датами: следующая заявка с тем же
+  // составом была бы дублем. Данные студента (formRead) остаются — их
+  // забывает только кнопка «Забыть мои данные».
+  function clearCart() {
+    writeCart({ lines: [], from: "", to: "" });
+  }
+
   // Даты храним в виде 2026-01-01 — так их сравнивать, — а показываем и пишем
   // в заявку как 01-01-2026. Время просто строкой «10:00».
   function cartDates(from, to, fromTime, toTime) {
@@ -645,7 +652,7 @@ var Site = (function () {
     sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,
     qtyOf: qtyOf, storageOk: storageOk,
-    setQty: setQty, removeFromCart: removeFromCart, cartDates: cartDates,
+    setQty: setQty, removeFromCart: removeFromCart, clearCart: clearCart, cartDates: cartDates,
     paintCount: paintCount, refreshCart: refreshCart,
     formRead: formRead, formWrite: formWrite, formForget: formForget,
   };
