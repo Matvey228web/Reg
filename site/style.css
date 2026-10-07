@@ -852,6 +852,8 @@ input[type="checkbox"]:checked::after {
 
 .hint { margin: 0 0 12px; color: var(--dim); font-size: 13px; line-height: 18px; }
 .hint--bad { color: var(--accent-text); }
+/* Срок под датами: блок кончается строкой, нижний отступ не нужен. */
+#days { margin: 10px 0 0; }
 
 /* Пропущенное обязательное поле. Рамкой, а не текстом под каждым полем:
    перечисление того, чего не хватает, и так стоит у кнопки. */

@@ -135,6 +135,7 @@
           whenField("Возврат", "to", "date", dates.to, "12-10-2026") +
           whenField("Время", "to-time", "time", dates.toTime, "18:00") +
         "</div>" +
+        '<p class="hint" id="days" hidden></p>' +
       "</div>" +
 
       '<div class="block">' +
@@ -196,7 +197,31 @@
     bind();
     restore(keep);
     updateGuardian();
+    paintDays();
     updatePreview();
+  }
+
+  // Сколько суток выходит по выбранным датам. Считаем оба календарных дня
+  // (решение владельца): выдача 10-го, возврат 12-го — трое суток. Время не
+  // учитывается. Через UTC, чтобы переход на летнее время не терял час.
+  // Только для экрана: в текст заявки строка не попадает, её не разбирает
+  // parseOrderMessage.
+  function countDays(from, to) {
+    var a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(from || "");
+    var b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(to || "");
+    if (!a || !b) return 0;
+    var d1 = Date.UTC(+a[1], +a[2] - 1, +a[3]);
+    var d2 = Date.UTC(+b[1], +b[2] - 1, +b[3]);
+    var n = Math.round(Math.abs(d2 - d1) / 86400000) + 1;
+    return n;
+  }
+
+  function paintDays() {
+    var el = $("days");
+    if (!el) return;
+    var n = countDays($("from").value, $("to").value);
+    el.hidden = !n;
+    el.textContent = n ? "Срок: " + n + " " + Site.plural(n, "сутки", "суток", "суток") : "";
   }
 
   // Список перерисовывается целиком при каждом изменении количества, а форма
@@ -402,6 +427,7 @@
         }
         Site.cartDates(from, to, $("from-time").value, $("to-time").value);
         markEmpty();
+        paintDays();
         loadFree();
       }
       clearBad(e.target);
