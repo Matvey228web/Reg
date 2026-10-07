@@ -24,6 +24,9 @@ var SHEETS = {
   // Объявления склада: их вставляет складмен в приложении, а сайт читает через
   // /public/announcements и показывает первой строкой.
   ANNOUNCEMENTS: "Announcements",
+  // «Моё в аренду»: объявления студентов, пришедшие через бота. Публикуются на
+  // сайте после одобрения в чате склада (решение владельца, 7 октября 2026).
+  MYRENT: "MyRent",
   // Как читать чужую таблицу при импорте. Раньше и названия колонок, и правила
   // раскладки по категориям были прибиты в коде: чужая выгрузка с колонкой
   // «Название» вместо «Наименование» импортировалась пустой, и починить это
@@ -169,6 +172,13 @@ var SCHEMA = {
   // удаляем, как и заказы: «мало ли что», и строка остаётся в таблице.
   Announcements: ["announcement_id", "title", "text", "until", "created_at",
                   "created_by", "created_by_name", "removed_at"],
+  // photo — ссылка на миниатюру Диска, как у Models.photo. tg_id наружу не
+  // выходит никогда: на сайте контакт — только @username.
+  // mod_chat_id / mod_message_id — где висит сообщение с кнопками: решение
+  // принимается только из того же чата (см. handleMyrentDecide).
+  MyRent: ["id", "created_at", "tg_id", "tg_username", "tg_name", "category", "title",
+           "description", "price", "price_text", "photo", "photo_file_id", "status",
+           "decided_at", "decided_by", "mod_chat_id", "mod_message_id"],
   Meta: ["key", "value"],
   // Журнал служебных событий (см. logEvent). context — JSON с подробностями,
   // обрезанный: ячейка не резиновая, а стек на пару экранов читать некому.
@@ -196,6 +206,8 @@ var TEXT_COLUMNS = {
   Defects: ["item_id"],
   // until — день показа строкой, а не датой со своим поясом (см. выше).
   Announcements: ["until"],
+  // id вида S-0001 и числа Telegram (id могут быть длиннее 15 цифр у групп).
+  MyRent: ["id", "tg_id", "tg_username", "photo_file_id", "mod_chat_id", "mod_message_id"],
   // Журнал сверок: без этого номер 010101 записывался числом 10101 — ведущий
   // ноль съедала таблица, и поиск по номеру в журнале ничего не находил.
   Inventory: ["item_id"],
@@ -2158,6 +2170,10 @@ function doPost(e) {
       case "/public/catalog": data = handlePublicCatalog(payload); break;
       case "/public/order": data = handlePublicOrder(payload); break;
       case "/public/announcements": data = handlePublicAnnouncements(payload); break;
+      case "/public/my": data = handlePublicMy(payload); break;
+      // Ручки бота: без сессии сотрудника, их защищает bot_key (см. myrentCheckBot).
+      case "/myrent/submit": data = handleMyrentSubmit(payload); break;
+      case "/myrent/decide": data = handleMyrentDecide(payload); break;
       case "/act/template": data = handleActTemplate(payload, token); break;
       case "/act/build": data = handleActBuild(payload, token); break;
       case "/item/lookup": data = handleItemLookup(payload, token); break;
@@ -5146,6 +5162,306 @@ function notifyRefusal(res) {
   // Строку в журнал уже написал tgSendLog — doPost второй раз её не пишет.
   err.logged = true;
   throw err;
+}
+
+// ---------------------------------------------------------------------
+// «Моё в аренду»: объявления студентов через бота
+// ---------------------------------------------------------------------
+//
+// Студент собирает карточку в личном чате с ботом (диалог живёт в Worker),
+// сюда она приходит готовой. Модерация — сообщение с двумя кнопками в чате
+// склада; нажатие снова идёт через Worker в /myrent/decide. Одобренное сразу
+// видно в /public/my — пересборки сайта нет.
+//
+// Категории — те же, что в site/my.json, в том же порядке: Worker рисует по ним
+// кнопки, у него своей копии списка нет.
+var MYRENT_CATEGORIES = [
+  { code: "CAM", label: "Камера" },
+  { code: "STB", label: "Стабилизация" },
+  { code: "LGT", label: "Свет" },
+  { code: "AUD", label: "Звук" },
+  { code: "MON", label: "Мониторы" },
+  { code: "RIG", label: "Обвес" },
+  { code: "GRP", label: "Грип" },
+  { code: "SET", label: "Площадка" },
+  { code: "STD", label: "Студийное" },
+  { code: "TRN", label: "Транспорт" },
+];
+var MYRENT_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+var MYRENT_PRICE_TEXT = "Договорная";
+
+// Токена сотрудника у бота нет, поэтому доверие — общий отпечаток токена бота:
+// его считают и Worker, и таблица (webhookSecret). Токен не настроен — отказ, а
+// не «пустой ключ совпал с пустым».
+function myrentCheckBot(payload) {
+  var botTok = botToken();
+  if (!botTok || String(payload.bot_key || "") !== webhookSecret(botTok)) {
+    throw apiError(403, "Нет доступа");
+  }
+  return botTok;
+}
+
+function myrentRub(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽/сутки";
+}
+
+function myrentPrice(row) {
+  var n = row.price === "" || row.price === null || row.price === undefined ? null : Number(row.price);
+  return n ? myrentRub(n) : MYRENT_PRICE_TEXT;
+}
+
+// verdict — строка итога вместо пометки «на модерацию»; пусто — карточка с кнопками.
+// Подпись фото в Telegram не длиннее 1024 знаков, а экранирование раздувает
+// текст, поэтому длинное описание укорачиваем, а не теряем всю подпись.
+function myrentCaption(row, verdict) {
+  var label = row.category;
+  MYRENT_CATEGORIES.forEach(function (c) { if (c.code === row.category) label = c.label; });
+  function build(desc) {
+    var lines = ["<b>My rent" + (verdict ? "" : " · на модерацию") + "</b>",
+      "Категория: " + tgEscape(label),
+      "<b>" + tgEscape(row.title) + "</b>"];
+    if (desc) lines.push(tgEscape(desc));
+    lines.push("Цена: " + tgEscape(myrentPrice(row)));
+    lines.push("@" + tgEscape(row.tg_username) + " · " + tgEscape(row.id));
+    if (verdict) lines.push("", verdict);
+    return lines.join("\n");
+  }
+  var desc = String(row.description || "");
+  var out = build(desc);
+  if (out.length > 1000) out = build(desc.substring(0, 200) + "…");
+  if (out.length > 1000) out = build("");
+  return out;
+}
+
+// В чат склада: та же тема форума, что у заявок, и тот же откат в General, если
+// тема не принимает. Сбой Telegram студенту не показываем — в журнал; строка
+// остаётся pending без mod_message_id, и повторная отправка из бота (идемпотентная)
+// пробует доставить карточку ещё раз.
+function myrentSendModeration(botTok, row) {
+  var chat = notifyChatId();
+  if (!chat) {
+    logEvent("telegram", "sendPhoto", "no-chat", "Не выбран чат склада: карточка " + row.id + " не ушла на модерацию");
+    return null;
+  }
+  var thread = notifyThreadId("orders");
+  function send(withThread) {
+    var msg = {
+      chat_id: chat, photo: row.photo_file_id, caption: myrentCaption(row, ""), parse_mode: "HTML",
+      reply_markup: { inline_keyboard: [[
+        { text: "✅ Одобрить", callback_data: "myr:a:" + row.id },
+        { text: "❌ Отклонить", callback_data: "myr:r:" + row.id },
+      ]] },
+    };
+    if (withThread) msg.message_thread_id = Number(thread);
+    return telegramPost(botTok, "sendPhoto", msg);
+  }
+  try {
+    var body = send(!!thread);
+    if (!body.ok && thread) body = send(false);
+    if (!body.ok) {
+      logEvent("telegram", "sendPhoto", "telegram", body.description || "", { id: row.id });
+      return null;
+    }
+    return { chat_id: String(body.result.chat.id), message_id: String(body.result.message_id) };
+  } catch (e) {
+    logEvent("telegram", "sendPhoto", "network", e && e.message ? e.message : String(e), { id: row.id });
+    return null;
+  }
+}
+
+// Фото студента лежит у Telegram; на сайт его не отдать (ссылка содержит токен
+// бота), поэтому копируем в ту же папку Диска, что и фото моделей.
+function myrentFetchPhoto(botTok, fileId) {
+  var info = telegramPost(botTok, "getFile", { file_id: fileId });
+  var path = info && info.ok && info.result ? String(info.result.file_path || "") : "";
+  if (!path) throw apiError(502, "Telegram не отдал файл фото");
+  var res;
+  try {
+    res = UrlFetchApp.fetch("https://api.telegram.org/file/bot" + botTok + "/" + path,
+      { muteHttpExceptions: true });
+  } catch (e) {
+    throw apiError(502, "Не получилось скачать фото из Telegram");
+  }
+  if (res.getResponseCode() !== 200) throw apiError(502, "Telegram не отдал файл фото");
+  var bytes = res.getContent();
+  if (!bytes || bytes.length > MYRENT_PHOTO_MAX_BYTES) throw apiError(413, "Фото больше 5 МБ");
+  var kind = sniffImage(bytes);
+  if (!kind) throw apiError(400, "Файл не похож на JPEG, PNG или WebP");
+  return { bytes: bytes, kind: kind };
+}
+
+function myrentFindDup(sheet, tgId, fileId) {
+  var found = null;
+  readRows(sheet).forEach(function (r) {
+    if (String(r.tg_id) === tgId && String(r.photo_file_id) === fileId) found = r;
+  });
+  return found;
+}
+
+function handleMyrentSubmit(payload) {
+  var botTok = myrentCheckBot(payload);
+  var tgId = String(payload.tg_id === undefined || payload.tg_id === null ? "" : payload.tg_id).trim();
+  var username = String(payload.tg_username || "").trim().replace(/^@/, "");
+  var category = String(payload.category || "").trim().toUpperCase();
+  var title = String(payload.title || "").trim();
+  var description = String(payload.description || "").trim();
+  var fileId = String(payload.photo_file_id || "").trim();
+  var price = null;
+  if (payload.price !== null && payload.price !== undefined && payload.price !== "") {
+    price = Number(payload.price);
+    if (!isFinite(price) || price !== Math.floor(price) || price < 0 || price > 1000000) {
+      throw apiError(400, "Цена — целое число от 0 до 1 000 000");
+    }
+    if (price === 0) price = null; // сайт печатает 0 как «по договорённости»
+  }
+  if (!tgId) throw apiError(400, "Нет id студента");
+  if (!/^[A-Za-z0-9_]{1,32}$/.test(username)) throw apiError(400, "Нужен @username в Telegram");
+  if (!MYRENT_CATEGORIES.some(function (c) { return c.code === category; })) {
+    throw apiError(400, "Неизвестная категория");
+  }
+  if (!title || title.length > 80) throw apiError(400, "Название — от 1 до 80 знаков");
+  if (description.length > 600) throw apiError(400, "Описание — не больше 600 знаков");
+  if (!fileId) throw apiError(400, "Нужно фото");
+
+  var sheet = getSheet(SHEETS.MYRENT);
+  // Worker повторяет запрос при обрыве: тот же студент с тем же фото — это одна
+  // и та же карточка, а не вторая.
+  var dup = myrentFindDup(sheet, tgId, fileId);
+  if (dup) return myrentSubmitAgain(botTok, sheet, dup);
+
+  // Диск медленный — до замка, как в handleModelsPhoto.
+  var photo = myrentFetchPhoto(botTok, fileId);
+  var folder = photoFolder();
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMddHHmmss");
+  var file = null, row = null, again = null;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    again = myrentFindDup(sheet, tgId, fileId);
+    if (!again) {
+      var n = readRows(sheet).reduce(function (max, r) {
+        var m = /^S-(\d+)$/.exec(String(r.id));
+        return m && Number(m[1]) > max ? Number(m[1]) : max;
+      }, 0) + 1;
+      var id = "S-" + ("000" + n).slice(-4);
+      file = folder.createFile(Utilities.newBlob(photo.bytes, photo.kind.mime, id + "-" + stamp + "." + photo.kind.ext));
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      row = {
+        id: id, created_at: new Date().toISOString(), tg_id: tgId, tg_username: username,
+        tg_name: String(payload.tg_name || "").trim().substring(0, 100),
+        category: category, title: title, description: description,
+        price: price === null ? "" : price, price_text: price === null ? MYRENT_PRICE_TEXT : "",
+        photo: "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w800",
+        photo_file_id: fileId, status: "pending",
+        decided_at: "", decided_by: "", mod_chat_id: "", mod_message_id: "",
+      };
+      try { appendRow(sheet, row); } catch (e) {
+        try { file.setTrashed(true); } catch (ignored) {}
+        throw e;
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  if (again) return myrentSubmitAgain(botTok, sheet, again);
+
+  myrentAttachModeration(botTok, sheet, row);
+  return { id: row.id, status: "pending" };
+}
+
+// Повторный запрос ничего не пишет; единственное исключение — карточка, которая
+// не добралась до чата склада: ей даём ещё одну попытку.
+function myrentSubmitAgain(botTok, sheet, row) {
+  if (row.status === "pending" && !String(row.mod_message_id || "")) myrentAttachModeration(botTok, sheet, row);
+  return { id: row.id, status: row.status };
+}
+
+function myrentAttachModeration(botTok, sheet, row) {
+  var sent = myrentSendModeration(botTok, row);
+  if (!sent) return;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    var fresh = findRowByValue(sheet, "id", row.id);
+    if (fresh) updateRow(sheet, fresh.__row, { mod_chat_id: sent.chat_id, mod_message_id: sent.message_id });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleMyrentDecide(payload) {
+  var botTok = myrentCheckBot(payload);
+  var id = String(payload.id || "").trim();
+  var decision = String(payload.decision || "");
+  var approve = decision === "approve";
+  if (!approve && decision !== "reject") throw apiError(400, "decision: approve или reject");
+  var by = String(payload.by || "").trim().substring(0, 100);
+
+  var sheet = getSheet(SHEETS.MYRENT);
+  var row = null, repeat = false;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(LOCK_TIMEOUT_MS);
+  try {
+    row = findRowByValue(sheet, "id", id);
+    if (!row) throw apiError(404, "Нет такого объявления: " + id);
+    // Кнопка из другого чата (бота могли добавить в чужую группу) решать не
+    // может: Worker не знает чат склада, поэтому сверка здесь, по строке.
+    if (!String(row.mod_chat_id) || String(payload.chat_id === undefined ? "" : payload.chat_id) !== String(row.mod_chat_id)) {
+      throw apiError(403, "Решать можно только из чата склада");
+    }
+    if (row.status !== "pending") {
+      repeat = true;
+    } else {
+      row.status = approve ? "approved" : "rejected";
+      updateRow(sheet, row.__row, { status: row.status, decided_at: new Date().toISOString(), decided_by: by });
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  if (repeat) return { id: id, status: row.status, repeat: true };
+
+  // Дальше — только оповещения: решение уже записано, и сбой Telegram его не откатывает.
+  try {
+    var mark = approve ? "✅ Одобрено" : "❌ Отклонено";
+    telegramPost(botTok, "editMessageCaption", {
+      chat_id: String(row.mod_chat_id), message_id: Number(row.mod_message_id),
+      caption: myrentCaption(row, mark + (by ? " — " + tgEscape(by) : "")),
+      parse_mode: "HTML", reply_markup: { inline_keyboard: [] },
+    });
+  } catch (e) {
+    logEvent("telegram", "editMessageCaption", "network", e && e.message ? e.message : String(e), { id: id });
+  }
+  try {
+    var site = String(getSettings().site_url || "").trim();
+    var text;
+    if (approve) {
+      text = "Ваше объявление «" + tgEscape(row.title) + "» опубликовано в разделе My rent";
+      if (site) text += ": " + tgEscape(site + (site.indexOf("?") === -1 ? "?" : "&") + "s=my");
+    } else {
+      text = "Объявление «" + tgEscape(row.title) + "» не прошло модерацию. Можно отправить заново: /myrent";
+    }
+    tgSend(text, String(row.tg_id));
+  } catch (e) {
+    logEvent("telegram", "sendMessage", "exception", e && e.message ? e.message : String(e), { id: id });
+  }
+  return { id: id, status: row.status, repeat: false };
+}
+
+// Публичное чтение, как /public/catalog: tg_id и служебные поля наружу не идут.
+function handlePublicMy(payload) {
+  var items = readRows(getSheet(SHEETS.MYRENT)).filter(function (r) {
+    return r.status === "approved";
+  }).reverse().map(function (r) {
+    var price = r.price === "" || r.price === null ? null : Number(r.price);
+    return {
+      key: String(r.id), category: String(r.category), name: String(r.title),
+      note: String(r.description || ""),
+      offers: [{ tg: String(r.tg_username), qty: 1, price: price || null,
+                 price_text: price ? "" : MYRENT_PRICE_TEXT, note: null }],
+      photo: false, photo_url: cleanPhotoUrl(r.photo), created_at: String(r.created_at),
+    };
+  });
+  return { categories: MYRENT_CATEGORIES, items: items };
 }
 
 // ---------------------------------------------------------------------

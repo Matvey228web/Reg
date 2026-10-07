@@ -496,6 +496,20 @@ global.UrlFetchApp = {
         getContentText: () => JSON.stringify(reply),
       };
     }
+    // Бот «Моё в аренду»: файл фото, карточка на модерацию, правка подписи.
+    if (/\/getFile$/.test(url)) {
+      return { getResponseCode: () => 200,
+        getContentText: () => JSON.stringify({ ok: true, result: { file_path: 'photos/p1.jpg' } }) };
+    }
+    if (/\/file\/bot[^/]+\/photos\//.test(url)) {
+      const bytes = [0xFF, 0xD8, 0xFF, 0xE0].concat(new Array(40).fill(7)).map(b => (b > 127 ? b - 256 : b));
+      return { getResponseCode: () => 200, getContent: () => bytes, getContentText: () => '' };
+    }
+    if (/\/sendPhoto$/.test(url)) {
+      const asked = JSON.parse(opts.payload);
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true,
+        result: { message_id: 500 + sent.length, chat: { id: Number(asked.chat_id) } } }) };
+    }
     if (/upload\/drive\/v3\/files/.test(url)) {
       const raw = Buffer.from(opts.payload).toString('utf8');
       const meta = JSON.parse(raw.match(/\{[\s\S]*?\}/)[0]);
@@ -636,7 +650,7 @@ function dumpSheet(name) {
 console.log('\n== setupSheets ==');
 const setupMsg = setupSheets();
 console.log('  ' + setupMsg);
-check('создано 16 вкладок (с журналом Logs и объявлениями)', spreadsheet.getSheets().length === 16 && !!spreadsheet.getSheetByName('Logs'), spreadsheet.getSheets().map(s => s.name));
+check('создано 17 вкладок (с журналом Logs, объявлениями и MyRent)', spreadsheet.getSheets().length === 17 && !!spreadsheet.getSheetByName('Logs'), spreadsheet.getSheets().map(s => s.name));
 check('Sheet1 удалён', !spreadsheet.getSheetByName('Sheet1'));
 check('заголовки Equipment верны',
   JSON.stringify(dumpSheet('Equipment')[0]) === JSON.stringify(SCHEMA.Equipment), dumpSheet('Equipment')[0]);
@@ -646,7 +660,7 @@ check('заголовки Meta верны',
 console.log('\n== setupSheets повторно (идемпотентность) ==');
 spreadsheet.getSheetByName('Clients').appendRow([1, 'Тест Клиент', 'Проект', '', '', '']);
 setupSheets();
-check('вкладок по-прежнему 16', spreadsheet.getSheets().length === 16);
+check('вкладок по-прежнему 17', spreadsheet.getSheets().length === 17);
 check('данные Clients не затёрты', dumpSheet('Clients').length === 2, dumpSheet('Clients'));
 check('заголовки Clients на месте', dumpSheet('Clients')[0][0] === 'client_id');
 
@@ -1319,7 +1333,7 @@ check('подрезка через эндпоинт так же требует �
   r.ok === true && /отменена/.test(r.data.message), r);
 r = call('/maintenance', { action: 'setup' }, token);
 check('создание недостающих вкладок через эндпоинт безопасно при повторе',
-  r.ok === true && /Готово/.test(r.data.message) && spreadsheet.getSheets().length === 16, r);
+  r.ok === true && /Готово/.test(r.data.message) && spreadsheet.getSheets().length === 17, r);
 check('сотрудник склада вкладки не заводит',
   call('/maintenance', { action: 'setup' }, ivanToken).status === 401);
 r = call('/maintenance', { action: 'archive' }, token);
@@ -4589,6 +4603,110 @@ check('немецкий отказ DocumentApp → что нажать',
 check('английский отказ DriveApp → тоже',
   /DriveApp/.test(missingScopeHint(new Error('You do not have permission to call DriveApp.getFileById. Required permissions: …'))));
 check('обычная ошибка не подменяется', missingScopeHint(new Error('Cannot read properties of undefined')) === '');
+
+console.log('\n== My rent: объявления студентов через бота ==');
+{
+  const botKey = webhookSecret('123:ABC');
+  const WH = -1001234567890;
+  scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+  metaSet('setting_notify_chat_id', String(WH));
+  metaSet('setting_notify_thread_orders', '');
+  metaSet('setting_site_url', 'https://example.test/');
+  const base = { bot_key: botKey, tg_id: 777, tg_username: '@student_a', tg_name: 'Аня',
+    category: 'CAM', title: 'Sony A7 <Kit>', description: 'Как новая', price: 3000, photo_file_id: 'FILE-1' };
+  const mySheet = () => readRows(getSheet(SHEETS.MYRENT));
+  const calls = (m) => sent.filter((x) => new RegExp('/' + m + '$').test(x.url)).map((x) => JSON.parse(x.opts.payload));
+
+  check('вкладка MyRent создана', !!spreadsheet.getSheetByName('MyRent'));
+  check('submit без bot_key — 403', call('/myrent/submit', Object.assign({}, base, { bot_key: '' })).status === 403);
+  check('submit с чужим bot_key — 403', call('/myrent/submit', Object.assign({}, base, { bot_key: 'x'.repeat(32) })).status === 403);
+  check('decide с чужим bot_key — 403', call('/myrent/decide', { bot_key: 'bad', id: 'S-0001', decision: 'approve', chat_id: WH }).status === 403);
+  scriptProps.TELEGRAM_BOT_TOKEN = '';
+  check('без токена бота ключ не проходит — 403', call('/myrent/submit', Object.assign({}, base, { bot_key: '' })).status === 403);
+  scriptProps.TELEGRAM_BOT_TOKEN = '123:ABC';
+  check('пустая таблица /public/my', JSON.stringify(call('/public/my').data.items) === '[]');
+  check('/public/my отдаёт 10 категорий', call('/public/my').data.categories.length === 10 &&
+    call('/public/my').data.categories[0].code === 'CAM');
+
+  check('чужая категория — 400', call('/myrent/submit', Object.assign({}, base, { category: 'XXX' })).status === 400);
+  check('пустое название — 400', call('/myrent/submit', Object.assign({}, base, { title: ' ' })).status === 400);
+  check('цена дробная — 400', call('/myrent/submit', Object.assign({}, base, { price: 10.5 })).status === 400);
+  check('нет фото — 400', call('/myrent/submit', Object.assign({}, base, { photo_file_id: '' })).status === 400);
+  check('нет username — 400', call('/myrent/submit', Object.assign({}, base, { tg_username: '' })).status === 400);
+  check('ничего не записано после отказов', mySheet().length === 0);
+
+  sent.length = 0;
+  let sub = call('/myrent/submit', base);
+  check('submit — S-0001 pending', sub.ok && sub.data.id === 'S-0001' && sub.data.status === 'pending', sub);
+  let row = mySheet()[0];
+  check('строка pending, username без @', row && row.status === 'pending' && row.tg_username === 'student_a', row);
+  check('фото в Диске, открыто по ссылке',
+    /^https:\/\/drive\.google\.com\/thumbnail\?id=file-\d+&sz=w800$/.test(row.photo) &&
+    drive.folders['Mifs Rent — фото'].files.some((f) => /^S-0001-.+\.jpg$/.test(f.name) && f.sharing && f.sharing[0] === 'ANYONE_WITH_LINK'));
+  const mod = calls('sendPhoto');
+  check('карточка ушла в чат склада одним sendPhoto', mod.length === 1 && String(mod[0].chat_id) === String(WH) && mod[0].photo === 'FILE-1', mod);
+  check('кнопки Одобрить/Отклонить',
+    JSON.stringify(mod[0].reply_markup.inline_keyboard[0].map((b) => b.callback_data)) === JSON.stringify(['myr:a:S-0001', 'myr:r:S-0001']));
+  check('подпись: экранирование, цена, @username',
+    /Sony A7 &lt;Kit&gt;/.test(mod[0].caption) && /3 000 ₽\/сутки/.test(mod[0].caption) && /@student_a/.test(mod[0].caption), mod[0].caption);
+  check('mod_chat_id и mod_message_id записаны', String(row.mod_chat_id) === String(WH) && String(row.mod_message_id) !== '', row);
+
+  sent.length = 0;
+  sub = call('/myrent/submit', base);
+  check('повторный submit — тот же id, строка одна, чат молчит',
+    sub.ok && sub.data.id === 'S-0001' && mySheet().length === 1 && calls('sendPhoto').length === 0 && calls('getFile').length === 0, sub);
+
+  check('pending не виден на сайте', call('/public/my').data.items.length === 0);
+
+  // decide: сначала отказы
+  check('decide из чужого чата — 403', call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve', chat_id: -555, by: '@x' }).status === 403);
+  check('decide без chat_id — 403', call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve' }).status === 403);
+  check('decide неизвестного id — 404', call('/myrent/decide', { bot_key: botKey, id: 'S-9999', decision: 'approve', chat_id: WH }).status === 404);
+  check('после отказов всё ещё pending', mySheet()[0].status === 'pending');
+
+  sent.length = 0;
+  let dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'approve', chat_id: WH, by: '@owner' });
+  check('approve — approved, repeat false', dec.ok && dec.data.status === 'approved' && dec.data.repeat === false, dec);
+  row = mySheet()[0];
+  check('решение записано', row.status === 'approved' && row.decided_by === '@owner' && !!row.decided_at, row);
+  const ed = calls('editMessageCaption');
+  check('подпись обновлена, кнопки сняты',
+    ed.length === 1 && /✅ Одобрено — @owner/.test(ed[0].caption) && ed[0].reply_markup.inline_keyboard.length === 0 &&
+    Number(ed[0].message_id) === Number(row.mod_message_id), ed);
+  const toStudent = calls('sendMessage').filter((m) => String(m.chat_id) === '777');
+  check('студенту ушло сообщение со ссылкой',
+    toStudent.length === 1 && /опубликовано в разделе My rent/.test(toStudent[0].text) && /example\.test\/\?s=my/.test(toStudent[0].text), toStudent);
+
+  const pub = call('/public/my').data;
+  check('одобренное видно на сайте в форме my.json',
+    pub.items.length === 1 && pub.items[0].key === 'S-0001' && pub.items[0].name === 'Sony A7 <Kit>' &&
+    pub.items[0].offers[0].tg === 'student_a' && pub.items[0].offers[0].price === 3000 &&
+    pub.items[0].offers[0].qty === 1 && pub.items[0].photo === false && /thumbnail/.test(pub.items[0].photo_url), pub.items);
+  check('tg_id наружу не уходит', JSON.stringify(call('/public/my')).indexOf('777') === -1);
+
+  sent.length = 0;
+  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0001', decision: 'reject', chat_id: WH, by: '@other' });
+  check('второе решение — repeat:true, статус прежний',
+    dec.ok && dec.data.repeat === true && dec.data.status === 'approved' && mySheet()[0].status === 'approved', dec);
+  check('при повторе ничего не отправлено', calls('editMessageCaption').length === 0 && calls('sendMessage').length === 0);
+
+  // отклонение, договорная цена
+  const second = call('/myrent/submit', Object.assign({}, base, { title: 'Штатив', price: null, photo_file_id: 'FILE-2', category: 'GRP' }));
+  check('второе объявление — S-0002', second.ok && second.data.id === 'S-0002', second);
+  check('цена пустая → «Договорная»', mySheet()[1].price === '' && mySheet()[1].price_text === 'Договорная');
+  check('в подписи «Договорная»', /Цена: Договорная/.test(calls('sendPhoto').pop().caption));
+  sent.length = 0;
+  dec = call('/myrent/decide', { bot_key: botKey, id: 'S-0002', decision: 'reject', chat_id: WH, by: '@owner' });
+  check('reject — rejected', dec.ok && dec.data.status === 'rejected' && dec.data.repeat === false, dec);
+  const rej = calls('sendMessage').filter((m) => String(m.chat_id) === '777');
+  check('студенту — про отклонение и /myrent', rej.length === 1 && /не прошло модерацию/.test(rej[0].text) && /\/myrent/.test(rej[0].text), rej);
+  check('/public/my без pending и rejected', call('/public/my').data.items.length === 1);
+  const third = call('/myrent/submit', Object.assign({}, base, { title: 'Третий', photo_file_id: 'FILE-3' }));
+  call('/myrent/decide', { bot_key: botKey, id: third.data.id, decision: 'approve', chat_id: WH, by: '@owner' });
+  check('новые сверху', call('/public/my').data.items.map((i) => i.key).join() === 'S-0003,S-0001');
+
+  metaSet('setting_site_url', '');
+}
 
 console.log('\n== замок ==');
 check('вложенных захватов замка не было', lockState.nested === 0, lockState);

@@ -88,6 +88,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | `Defects` | дефекты и их закрытие |
 | `Inventory` | журнал сверок: итог и расхождения, не все найденные позиции |
 | `Announcements` | объявления склада для сайта: заголовок, абзацы, «показывать до»; снятое получает `removed_at`, а не удаляется |
+| `MyRent` | «Моё в аренду»: объявления студентов из бота, статус `pending`/`approved`/`rejected`, где висит карточка модерации; `tg_id` наружу не выходит |
 | `ImportMap`, `ImportRules` | как читать чужую выгрузку: синонимы колонок и раскладка по категориям |
 | `Meta` | значения настроек |
 | `Logs` | журнал сбоев: время, род, ручка, причина, текст, подробности. Подрезается до 90 дней ночью |
@@ -105,9 +106,10 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Выдача и приём | `/transaction/checkout`, `/transaction/checkin`, `/transaction/checkin-batch` (приём всего заказа одним запросом) |
 | Дефекты | `/defect/report`, `/defect/resolve`, `/defects/list` |
 | Заказы | `/order/*`, `/orders/list`, `/students/list`, `/student/history` |
-| Сайт | `/public/catalog`, `/public/order`, `/public/announcements` |
+| Сайт | `/public/catalog`, `/public/order`, `/public/announcements`, `/public/my` (одобренное «Моё в аренду») |
 | Объявления | `/announcements/list`, `/announcement/save`, `/announcement/remove` (любой вошедший, не только Admin) |
 | Акт | `/act/template`, `/act/build` |
+| Моё в аренду (бот) | `/myrent/submit`, `/myrent/decide` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
 | Бот | `/notify/*`; `/labels/send` выведена из работы и отвечает `410` с подсказкой — ради старых версий приложения |
 | Сверка | `/inventory/save`, `/inventory/list` |
 | Админка | `/settings/*`, `/category/*`, `/maintenance` |
