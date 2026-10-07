@@ -154,8 +154,7 @@
     }
     // Открытие назначил владелец (15 октября, 12:00 по Москве).
     if (Site.myClosed()) {
-      $("groups").className = "soonwrap";
-      $("groups").innerHTML = '<p class="soon">soon…</p>';
+      Site.showSoon($("groups"));
       return;
     }
     var html = "";

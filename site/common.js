@@ -451,6 +451,22 @@ var Site = (function () {
     return !!myData && Date.now() < Date.parse(myData.opens_at);
   }
 
+  // «soon…» набран Oswald, а латиница шрифта приходит после первой отрисовки:
+  // без ожидания надпись при первом заходе перескакивает с запасного шрифта.
+  // Повторный вызов (живой каталог перерисовал раздел) надпись не трогает.
+  function showSoon(box) {
+    if (box.querySelector(".soon")) return;
+    box.className = "soonwrap";
+    box.innerHTML = '<p class="soon">soon…</p>';
+    var text = box.firstChild;
+    if (!document.fonts || !document.fonts.load) return;
+    text.style.visibility = "hidden";
+    var shown = false;
+    function show() { if (!shown) { shown = true; text.style.visibility = ""; } }
+    document.fonts.load('800 64px "Oswald"', "soon…").then(show, show);
+    setTimeout(show, 1500);
+  }
+
   // Единственный живой запрос сайта, и только когда даты выбраны.
   function availability(from, to) {
     return fetch(BACKEND, {
@@ -735,7 +751,7 @@ var Site = (function () {
     humanDate: humanDate, icon: icon, shotIcon: shotIcon, shotAttr: shotAttr, tick: tick,
     SECTIONS: SECTIONS, section: section, setSection: setSection, inSection: inSection,
     loadCatalog: loadCatalog, availability: availability,
-    loadMy: loadMy, myLiveDone: myLiveDone, myPhoto: myPhoto, myOffer: myOffer, myClosed: myClosed,
+    loadMy: loadMy, myLiveDone: myLiveDone, myPhoto: myPhoto, myOffer: myOffer, myClosed: myClosed, showSoon: showSoon,
     OPERATOR_URL: OPERATOR_URL,
     sendOrder: sendOrder, ordersOpen: ordersOpen, announcements: announcements,
     readCart: readCart, cartCount: cartCount, addToCart: addToCart,

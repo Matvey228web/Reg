@@ -171,8 +171,7 @@
     }
     document.title = m.name + " · My rent · MifsRent";
     if (Site.myClosed()) {
-      $("item").className = "soonwrap";
-      $("item").innerHTML = '<p class="soon">soon…</p>';
+      Site.showSoon($("item"));
       return;
     }
     var cat = data.categories.filter(function (c) { return c.code === m.category; })[0];
