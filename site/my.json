@@ -2,36 +2,60 @@
  "opens_at": "2026-10-15T12:00:00+03:00",
  "categories": [
   {
-   "code": "CAM",
-   "label": "Камера"
+   "code": "GRP",
+   "label": "Грип"
   },
   {
-   "code": "STB",
-   "label": "Стабилизация"
-  },
-  {
-   "code": "LGT",
-   "label": "Свет"
+   "code": "OTH",
+   "label": "Другое"
   },
   {
    "code": "AUD",
    "label": "Звук"
   },
   {
+   "code": "CBL",
+   "label": "Кабели"
+  },
+  {
+   "code": "CAM",
+   "label": "Камера"
+  },
+  {
+   "code": "MOD",
+   "label": "Модификаторы света"
+  },
+  {
    "code": "MON",
-   "label": "Мониторы"
+   "label": "Мониторы и трансляция"
   },
   {
    "code": "RIG",
    "label": "Обвес"
   },
   {
-   "code": "GRP",
-   "label": "Грип"
+   "code": "LEN",
+   "label": "Объектив"
   },
   {
-   "code": "SET",
-   "label": "Площадка"
+   "code": "MED",
+   "label": "Память"
+  },
+  {
+   "code": "PWR",
+   "label": "Питание"
+  },
+  {
+   "code": "UNL",
+   "label": "Разгрузка"
+  },
+  {
+   "code": "LGT",
+   "label": "Свет"
+  },
+  {
+   "code": "SUP",
+   "label": "Стабилизация"
   },
   {
    "code": "STD",
@@ -39,7 +63,11 @@
   },
   {
    "code": "TRN",
-   "label": "Транспорт"
+   "label": "Транспортировка"
+  },
+  {
+   "code": "FLT",
+   "label": "Фильтры"
   }
  ],
  "items": [
@@ -88,7 +116,7 @@
   },
   {
    "key": "MY-04",
-   "category": "RIG",
+   "category": "CBL",
    "name": "SDI",
    "offers": [
     {
@@ -116,7 +144,7 @@
   },
   {
    "key": "MY-06",
-   "category": "RIG",
+   "category": "PWR",
    "name": "D-tap Splitter ZDCine",
    "offers": [
     {
@@ -130,7 +158,7 @@
   },
   {
    "key": "MY-07",
-   "category": "RIG",
+   "category": "UNL",
    "name": "Рюкзак разгрузка V Pleyt",
    "offers": [
     {
@@ -189,7 +217,7 @@
   },
   {
    "key": "MY-11",
-   "category": "STB",
+   "category": "SUP",
    "name": "Ronin RSC 2",
    "offers": [
     {
@@ -252,7 +280,7 @@
   },
   {
    "key": "MY-15",
-   "category": "SET",
+   "category": "OTH",
    "name": "Рации",
    "offers": [
     {
@@ -302,7 +330,7 @@
   },
   {
    "key": "MY-18",
-   "category": "SET",
+   "category": "OTH",
    "name": "Интеркомы",
    "note": "Комплект: 7 ушей обычные, 1 pro, заряка на 8 аккумов, кабель питания на D-TAP и на сеть, лейблы на уши, сменые амбишуры",
    "offers": [
@@ -317,7 +345,7 @@
   },
   {
    "key": "MY-19",
-   "category": "STB",
+   "category": "SUP",
    "name": "Cinesaddle",
    "offers": [
     {
@@ -331,7 +359,7 @@
   },
   {
    "key": "MY-20",
-   "category": "RIG",
+   "category": "FLT",
    "name": "Фильтр ProMist 1 YoPyCine 5,65",
    "offers": [
     {
@@ -345,7 +373,7 @@
   },
   {
    "key": "MY-21",
-   "category": "STB",
+   "category": "SUP",
    "name": "DJI RS4 Pro",
    "offers": [
     {
@@ -404,7 +432,7 @@
   },
   {
    "key": "MY-25",
-   "category": "SET",
+   "category": "GRP",
    "name": "RoboCup",
    "offers": [
     {
@@ -446,7 +474,7 @@
   },
   {
    "key": "MY-28",
-   "category": "STB",
+   "category": "SUP",
    "name": "Карбоновый Manfrotto 190CX3",
    "note": "Для легких камер \nКомплект: ноги, голова, площадка с болтом\nНет резинки на одной ноге",
    "offers": [
@@ -461,7 +489,7 @@
   },
   {
    "key": "MY-29",
-   "category": "RIG",
+   "category": "PWR",
    "name": "D-tap сплиттер",
    "note": "Имеет дуалок",
    "offers": [
@@ -490,7 +518,7 @@
   },
   {
    "key": "MY-31",
-   "category": "SET",
+   "category": "GRP",
    "name": "Клинья для Dolly",
    "note": "Состояние: у некоторых немного отколот нос",
    "offers": [
@@ -519,7 +547,7 @@
   },
   {
    "key": "MY-33",
-   "category": "SET",
+   "category": "TRN",
    "name": "Рюкзак Kata",
    "offers": [
     {
@@ -563,7 +591,7 @@
   },
   {
    "key": "MY-36",
-   "category": "RIG",
+   "category": "FLT",
    "name": "CPL 77",
    "offers": [
     {
@@ -577,7 +605,7 @@
   },
   {
    "key": "MY-37",
-   "category": "RIG",
+   "category": "FLT",
    "name": "ND 77",
    "offers": [
     {
@@ -606,7 +634,7 @@
   },
   {
    "key": "MY-39",
-   "category": "SET",
+   "category": "STD",
    "name": "Ткань чёрная",
    "note": "!Позже уточню размеры!\nТолько ткань",
    "offers": [
@@ -621,7 +649,7 @@
   },
   {
    "key": "MY-40",
-   "category": "SET",
+   "category": "STD",
    "name": "Ткань зелёная",
    "note": "!Позже уточню размеры!\nТолько ткань",
    "offers": [

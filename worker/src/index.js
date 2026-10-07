@@ -556,8 +556,17 @@ async function startDialog(env, token, uid, chatId, username) {
   }
   await saveDialog(env, uid, { step: "category" });
   await say(token, chatId, "Что вы сдаёте? Выберите категорию.", {
-    reply_markup: { inline_keyboard: cats.map((c) => [{ text: c.label, callback_data: "myc:" + c.code }]) },
+    reply_markup: { inline_keyboard: categoryRows(cats) },
   });
+}
+
+// Категорий семнадцать: по одной в ряд список уходит за экран телефона.
+function categoryRows(cats) {
+  const rows = [];
+  for (let i = 0; i < cats.length; i += 2) {
+    rows.push(cats.slice(i, i + 2).map((c) => ({ text: c.label, callback_data: "myc:" + c.code })));
+  }
+  return rows;
 }
 
 // Правка пишется поверх исходных значений: так «что изменилось» считается
@@ -638,7 +647,7 @@ async function askStep(env, token, chatId, step, lead) {
       return false;
     }
     await say(token, chatId, "Что вы сдаёте? Выберите категорию.", {
-      reply_markup: { inline_keyboard: cats.map((c) => [{ text: c.label, callback_data: "myc:" + c.code }]) },
+      reply_markup: { inline_keyboard: categoryRows(cats) },
     });
     return true;
   }

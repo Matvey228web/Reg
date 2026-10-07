@@ -767,8 +767,9 @@ ok("личный чат студента не попал в список чат�
 
 tg = [];
 await hook(priv({ text: "My rent" }));
+// Кнопки по две в ряд: семнадцать столбиком уходят за экран телефона.
 ok("кнопки категорий берутся из /public/my",
-   lastTg("sendMessage").body.reply_markup.inline_keyboard.map((r) => r[0].callback_data).join() === "myc:CAM,myc:LGT", tg);
+   lastTg("sendMessage").body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data).join() === "myc:CAM,myc:LGT", tg);
 ok("шаг — категория", dlg().step === "category", dlg());
 
 await hook(press("myc:LGT"));
