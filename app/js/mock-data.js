@@ -298,6 +298,33 @@ const MockStore = (() => {
   ];
 
   // Справочник моделей: категория + двузначный код + название.
+  // Демо «My rent»: три объявления, одно снято. Фото — встроенные картинки:
+  // Диска здесь нет.
+  const mockPhoto = (color, text) => "data:image/svg+xml;utf8," + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#fff"/>` +
+    `<rect x="30" y="50" width="140" height="100" rx="12" fill="${color}"/>` +
+    `<text x="100" y="112" font-size="28" text-anchor="middle" fill="#fff" font-family="sans-serif">${text}</text></svg>`);
+  const myrentCategories = [
+    { code: "CAM", label: "Камера" }, { code: "STB", label: "Стабилизация" },
+    { code: "LGT", label: "Свет" }, { code: "AUD", label: "Звук" },
+    { code: "MON", label: "Мониторы" }, { code: "RIG", label: "Обвес" },
+    { code: "GRP", label: "Грип" }, { code: "SET", label: "Площадка" },
+    { code: "STD", label: "Студийное" }, { code: "TRN", label: "Транспортировка" },
+  ];
+  const myrent = [
+    { id: "S-0003", status: "approved", removed_by: "", category: "AUD", category_label: "Звук",
+      title: "Петлички Rode Wireless GO", description: "Комплект из двух передатчиков, кейс и ветрозащита.",
+      price: 800, price_text: "", photo: mockPhoto("#34c759", "AUD"), tg_username: "ivan_film",
+      tg_name: "Иван", created_at: "2026-10-06T12:10:00Z", updated_at: "2026-10-06T12:10:00Z" },
+    { id: "S-0002", status: "approved", removed_by: "", category: "LGT", category_label: "Свет",
+      title: "Aputure 120D II", description: "Свет с рефлектором и сумкой.",
+      price: null, price_text: "Договорная", photo: mockPhoto("#ff9500", "LGT"), tg_username: "masha_light",
+      tg_name: "Маша", created_at: "2026-10-05T09:30:00Z", updated_at: "2026-10-05T09:30:00Z" },
+    { id: "S-0001", status: "removed", removed_by: "author", category: "CAM", category_label: "Камера",
+      title: "Sony A7 III", description: "", price: 3000, price_text: "", photo: "",
+      tg_username: "oleg_cam", tg_name: "Олег", created_at: "2026-10-01T18:00:00Z", updated_at: "2026-10-03T10:00:00Z" },
+  ];
+
   const models = [
     { category: "CAM", model_code: "01", model_name: "Sony FX6" },
     { category: "LEN", model_code: "01", model_name: "Sigma 24-70mm f/2.8" },
@@ -490,6 +517,13 @@ const MockStore = (() => {
       return findStaffById(staff_id);
     },
     models,
+    myrent,
+    myrentCategories,
+    myrentFind(id) {
+      const row = myrent.find((r) => r.id === id);
+      if (!row) { const e = new Error("Объявление не найдено"); e.status = 404; throw e; }
+      return row;
+    },
     nextStudentId: () => nextStudentId++,
     nextOrderId: () => nextOrderId++,
     // Номер вида XXYYZZ: категория, модель, порядковый номер экземпляра.
@@ -1127,6 +1161,55 @@ const MockAPI = {
         if (!m) { const e = new Error("Такой модели нет: " + cat + "·" + code); e.status = 404; throw e; }
         m.photo = image;
         return { category: cat, model_code: code, photo: image };
+      }
+
+      // My rent — как handleMyrentAdmin* в Code.gs: студенты публикуют сами,
+      // админ правит, снимает и возвращает. Снятие пишет removed_by "admin".
+      case "/myrent/admin/list": {
+        MockStore.requireAdmin(token);
+        return { items: MockStore.myrent.slice(), categories: MockStore.myrentCategories };
+      }
+
+      case "/myrent/admin/save": {
+        MockStore.requireAdmin(token);
+        const row = MockStore.myrentFind(body.id);
+        const c = body.changes || {};
+        const err = (msg, status) => { const e = new Error(msg); e.status = status; return e; };
+        if (c.category !== undefined && !MockStore.myrentCategories.some((x) => x.code === c.category)) throw err("Неизвестная категория", 400);
+        if (c.title !== undefined && (!String(c.title).trim() || String(c.title).length > 80)) throw err("Название — от 1 до 80 знаков", 400);
+        if (c.description !== undefined && String(c.description).length > 600) throw err("Описание длиннее 600 знаков", 400);
+        if (c.price !== undefined && c.price !== null && (!Number.isInteger(c.price) || c.price < 0 || c.price > 1000000)) {
+          throw err("Цена — целое число от 0 до 1 000 000", 400);
+        }
+        Object.assign(row, c);
+        if (c.category) row.category_label = MockStore.myrentCategories.find((x) => x.code === c.category).label;
+        if ("price" in c) row.price_text = c.price === null ? "Договорная" : "";
+        row.updated_at = new Date().toISOString();
+        return { id: row.id, status: row.status };
+      }
+
+      case "/myrent/admin/photo": {
+        MockStore.requireAdmin(token);
+        const row = MockStore.myrentFind(body.id);
+        const image = String(body.image || "");
+        if (!/^data:image\/(jpeg|png|webp);base64,/.test(image)) { const e = new Error("Нужна картинка JPEG, PNG или WebP"); e.status = 400; throw e; }
+        if (image.length > 700 * 1024 * 4 / 3) { const e = new Error("Фото больше 700 КБ"); e.status = 413; throw e; }
+        row.photo = image;
+        return { id: row.id, photo: image };
+      }
+
+      case "/myrent/admin/remove": {
+        MockStore.requireAdmin(token);
+        const row = MockStore.myrentFind(body.id);
+        row.status = "removed"; row.removed_by = "admin";
+        return { id: row.id, status: "removed" };
+      }
+
+      case "/myrent/admin/restore": {
+        MockStore.requireAdmin(token);
+        const row = MockStore.myrentFind(body.id);
+        row.status = "approved"; row.removed_by = "";
+        return { id: row.id, status: "approved" };
       }
 
       // Выдача по заявке без сканирования — как handleOrderIssue в Code.gs:

@@ -52,6 +52,7 @@
   OrdersScreen.init();
   StaffScreen.init();
   ModelsScreen.init();
+  MyRentScreen.init();
   PinScreen.init();
   SettingsScreen.init();
   LabelsScreen.init();

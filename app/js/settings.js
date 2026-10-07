@@ -155,6 +155,8 @@ const SettingsScreen = (() => {
     if (pin) pin.addEventListener("click", () => Router.navigate("pin"));
     const staffBtn = document.getElementById("settings-go-staff");
     if (staffBtn) staffBtn.addEventListener("click", () => Router.navigate("staff"));
+    const myrentBtn = document.getElementById("settings-go-myrent");
+    if (myrentBtn) myrentBtn.addEventListener("click", () => Router.navigate("myrent"));
     const out = document.getElementById("settings-logout");
     // Раньше выход происходил молча с одного тапа, а кнопка стоит рядом со
     // «Сменить свой PIN» — промахнуться легко, а обратно только через логин
@@ -186,6 +188,7 @@ const SettingsScreen = (() => {
     links: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     login: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
     // Шестерёнка — как у «Основных» в настройках iOS: гаечный ключ уже у вкладки «Ремонт».
+    myrent: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
     maint: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
   };
 
@@ -197,6 +200,7 @@ const SettingsScreen = (() => {
     { key: "bot", label: "Бот в Telegram", hint: "чат, темы и проверка связи", color: "#2aabee" },
     { key: "links", label: "Адреса и связи", hint: "таблица, чат, сайт, приложение", color: "#5856d6" },
     { key: "login", label: "Вход и защита", hint: "срок сессии, попытки, блокировка", color: "#ff3b30" },
+    { key: "myrent", label: "My rent", hint: "объявления студентов: правка и снятие", color: "#ff2d55", go: "myrent" },
     { key: "maint", label: "Обслуживание", hint: "выгрузка и подрезка журналов", color: "#8e8e93" },
   ];
 

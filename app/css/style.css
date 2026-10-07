@@ -1911,3 +1911,22 @@ body.snackbar-on .fab.fab--on { transform: translateY(-60px); }
 .tile-tap { cursor: pointer; }
 .tile-tap:active { opacity: .7; }
 #settings-logs { margin-top: var(--s3); }
+
+/* Экран «My rent» (myrent.js). Фото квадратное и вписано целиком, как в
+   «Моделях»: кадр нормализован до 800×800 на белом. */
+.myrent-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.myrent-tab {
+  border: 1px solid var(--border, #ddd); background: var(--surface, #fff); color: inherit;
+  border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.myrent-tab--on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.myrent-row { display: flex; gap: 10px; align-items: center; }
+.myrent-main { min-width: 0; flex: 1; }
+.myrent-main .card-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.myrent-thumb {
+  flex: none; object-fit: contain; background: #fff; border-radius: 8px;
+  border: 1px solid var(--border, #ddd);
+}
+.myrent-thumb--empty { border-style: dashed; }
+.myrent-photo { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.myrent-small { width: auto; min-height: 36px; padding: 6px 12px; }

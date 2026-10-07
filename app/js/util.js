@@ -585,3 +585,118 @@ const Snackbar = (() => {
 
   return { show, hide };
 })();
+
+
+// Подготовка снимка (экраны «Модели» и «My rent») — как site/photos.py: срезать однотонные поля, вписать
+// предмет в 704×704 (поле 48), по центру белого 800×800, JPEG. На сайте
+// витрина рассчитана на такой кадр; без обработки фото с разным запасом по
+// краям выглядели бы разномасштабными. Размер держим меньше ~300 КБ: запрос
+// идёт через Worker и Apps Script, и толстое тело им в тягость.
+const PHOTO_SIZE = 800, PHOTO_PAD = 48, PHOTO_MAX_BYTES = 300 * 1024;
+
+async function loadBitmap(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: "from-image" }); }
+    catch (e) { /* старый WebView: падаем на <img> ниже */ }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Не удалось прочитать картинку"));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function newCanvas(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  return c;
+}
+
+// Рамка предмета: фон — цвет углов, если они сходятся, иначе белый; пятном
+// считается пиксель, у которого сумма отличий по каналам > 30; пыль и тонкие
+// рамки отсекаются сужением маски (5 подряд по обеим осям, как MinFilter(5)).
+function subjectBox(canvas) {
+  const scale = Math.min(1, 400 / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * scale));
+  const h = Math.max(1, Math.round(canvas.height * scale));
+  const small = newCanvas(w, h);
+  small.getContext("2d").drawImage(canvas, 0, 0, w, h);
+  const d = small.getContext("2d").getImageData(0, 0, w, h).data;
+  const px = (x, y) => { const i = (y * w + x) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+  const corners = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
+  const spread = [0, 1, 2].map((c) => Math.max(...corners.map((p) => p[c])) - Math.min(...corners.map((p) => p[c])));
+  const bg = Math.max(...spread) <= 24 ? corners[0] : [255, 255, 255];
+  const on = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = px(x, y);
+    if (Math.abs(p[0] - bg[0]) + Math.abs(p[1] - bg[1]) + Math.abs(p[2] - bg[2]) > 30) on[y * w + x] = 1;
+  }
+  const R = 5;
+  const run = (src, len, step, lines, lineStep) => {
+    const out = new Uint8Array(src.length);
+    for (let l = 0; l < lines; l++) {
+      let streak = 0;
+      for (let i = 0; i < len; i++) {
+        streak = src[l * lineStep + i * step] ? streak + 1 : 0;
+        if (streak >= R) for (let j = 0; j < R; j++) out[l * lineStep + (i - j) * step] = 1;
+      }
+    }
+    return out;
+  };
+  const eroded = run(run(on, w, 1, h, w), h, w, w, 1);
+  let l = w, t = h, r = -1, b = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!eroded[y * w + x]) continue;
+    if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y;
+  }
+  const full = { x: 0, y: 0, w: canvas.width, h: canvas.height };
+  if (r < 0) return full;
+  const pad = 3;
+  const x0 = Math.max(l - pad, 0), y0 = Math.max(t - pad, 0);
+  const x1 = Math.min(r + 1 + pad, w), y1 = Math.min(b + 1 + pad, h);
+  // Почти весь кадр — фон не однотонный, обрезать нечего.
+  if ((x1 - x0) * (y1 - y0) > 0.97 * w * h) return full;
+  return { x: Math.floor(x0 / scale), y: Math.floor(y0 / scale),
+           w: Math.min(canvas.width, Math.ceil((x1 - x0) / scale)),
+           h: Math.min(canvas.height, Math.ceil((y1 - y0) / scale)) };
+}
+
+async function preparePhoto(file) {
+  const bmp = await loadBitmap(file);
+  const sw = bmp.width, sh = bmp.height;
+  if (!sw || !sh) throw new Error("Не удалось прочитать картинку");
+  // Огромные снимки с камеры сжимаем сразу: на телефоне 12 Мп в getImageData
+  // не уложатся в память.
+  const cap = Math.min(1, 1600 / Math.max(sw, sh));
+  const src = newCanvas(Math.round(sw * cap), Math.round(sh * cap));
+  const sctx = src.getContext("2d");
+  // Белая подложка: прозрачность в JPEG иначе станет чёрной.
+  sctx.fillStyle = "#fff";
+  sctx.fillRect(0, 0, src.width, src.height);
+  sctx.drawImage(bmp, 0, 0, src.width, src.height);
+  if (bmp.close) bmp.close();
+
+  const box = subjectBox(src);
+  const fit = (PHOTO_SIZE - PHOTO_PAD * 2) / Math.max(box.w, box.h);
+  const dw = Math.max(1, Math.round(box.w * fit)), dh = Math.max(1, Math.round(box.h * fit));
+  const out = newCanvas(PHOTO_SIZE, PHOTO_SIZE);
+  const ctx = out.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, PHOTO_SIZE, PHOTO_SIZE);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, box.x, box.y, box.w, box.h,
+    Math.floor((PHOTO_SIZE - dw) / 2), Math.floor((PHOTO_SIZE - dh) / 2), dw, dh);
+
+  let quality = 0.85, url = out.toDataURL("image/jpeg", quality);
+  while (url.length * 3 / 4 > PHOTO_MAX_BYTES && quality > 0.4) {
+    quality -= 0.1;
+    url = out.toDataURL("image/jpeg", quality);
+  }
+  return url;
+}
