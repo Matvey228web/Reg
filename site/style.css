@@ -52,7 +52,7 @@
   --on-accent: #fff;        /* текст на заливке акцента */
   --ok: #1b7f45;            /* «отправлено»: заливка кнопки, белый на ней даёт 5.3 */
   --shot: #0f0f12;          /* фон пустой карточки без картинки категории */
-  --edge: #050506;          /* нижняя грань нейтральной клавиши */
+  --edge: #3b3b44;          /* нижняя грань нейтральной клавиши: светлее фона, иначе на тёмном её не видно */
   --edge-accent: #7d0f0a;   /* нижняя грань красной клавиши; ниже выводится из --accent */
   --edge-accent: color-mix(in srgb, var(--accent) 52%, #000);
   --lit: rgba(255, 255, 255, .1); /* блик на верхней кромке нейтральной клавиши */
@@ -1028,9 +1028,9 @@ footer a { color: var(--dim); }
 
 /* --- Клавиши --- */
 
-/* Решение владельца (7 октября 2026): кнопки должны быть «кнопочными». У красной
-   и нейтральной клавиши есть нижняя грань и блик на кромке; нажатие утапливает
-   её на 3 точки сразу, без перехода (слой «Палец» из docs/DESIGN.md). Грани
+/* Решение владельца: кнопки должны быть «кнопочными». У красной и нейтральной
+   клавиши есть нижняя грань и блик на кромке; нажатие утапливает её на 3 точки
+   в тот же кадр (слой «Палец» из docs/DESIGN.md), переход только на возврат. Грани
    считаются из --accent, поэтому сезонные темы получают их сами. Размеры не
    меняются: грань — это тень, а не рамка, вёрстку она не двигает. */
 .btn, .cart-link, .card-add .stepper--wide {
@@ -1041,13 +1041,14 @@ footer a { color: var(--dim); }
 }
 .btn, .cart-link, .card-add .stepper--wide, .add, .btn--secondary {
   box-shadow: var(--key-shadow);
-  transition: transform 60ms, box-shadow 60ms;
+  transition: transform 90ms, box-shadow 90ms;
 }
 .btn:active:not([disabled]), .cart-link:active, .add:active,
 .card-add .stepper--wide:has(button:active) {
   transform: translateY(3px);
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, .25), 0 0 0 transparent;
   filter: none;
+  transition: none;
 }
 .btn[disabled] { box-shadow: none; }
 .theme-btn:active::before { transform: translateY(2px); }
