@@ -52,10 +52,9 @@
   --on-accent: #fff;        /* текст на заливке акцента */
   --ok: #1b7f45;            /* «отправлено»: заливка кнопки, белый на ней даёт 5.3 */
   --shot: #0f0f12;          /* фон пустой карточки без картинки категории */
-  --edge: #3b3b44;          /* нижняя грань нейтральной клавиши: светлее фона, иначе на тёмном её не видно */
-  --edge-accent: #7d0f0a;   /* нижняя грань красной клавиши; ниже выводится из --accent */
-  --edge-accent: color-mix(in srgb, var(--accent) 52%, #000);
-  --lit: rgba(255, 255, 255, .1); /* блик на верхней кромке нейтральной клавиши */
+  --key: #f2f2f3;          /* клавиша: заливка и обводка (как --ink) */
+  --key-ink: #0d0d0f;       /* текст на клавише */
+  --key-sh2: #555;          /* тень нейтральной клавиши */
 
   /* Приглушение картинок (баннер, фон пустых карточек): завеса цвета страницы
      поверх снимка. В светлой теме она светлая — картинка там «выцветает», а
@@ -78,8 +77,9 @@
 html[data-theme="light"] {
   color-scheme: light;
 
-  --edge: #bdbab3;
-  --lit: rgba(255, 255, 255, .9);
+  --key: #15151a;
+  --key-ink: #f4f3f0;
+  --key-sh2: #a9a9a9;
   --bg: #f4f3f0;
   --panel: #ffffff;
   --line: #dcdad5;
@@ -726,8 +726,8 @@ a.add {
 .btn--send[disabled].is-sending, .btn--send[disabled].is-done { opacity: 1; }
 @keyframes send-sheen { from { transform: translateX(-120%); } to { transform: translateX(300%); } }
 @keyframes send-ring {
-  from { box-shadow: var(--key-shadow), 0 0 0 0 rgba(58, 165, 105, .55); }
-  to { box-shadow: var(--key-shadow), 0 0 0 12px rgba(58, 165, 105, 0); }
+  from { box-shadow: 4px 4px 0 var(--key), 0 0 0 0 rgba(58, 165, 105, .55); }
+  to { box-shadow: 4px 4px 0 var(--key), 0 0 0 12px rgba(58, 165, 105, 0); }
 }
 .btn-label { position: relative; display: inline-flex; align-items: center; gap: 8px; }
 .btn-label.is-swap { animation: send-label .3s ease-out; }
@@ -1026,29 +1026,75 @@ footer a { color: var(--dim); }
   font-variant-numeric: tabular-nums;
 }
 
+
 /* --- Клавиши --- */
 
-/* Решение владельца: кнопки должны быть «кнопочными». У красной и нейтральной
-   клавиши есть нижняя грань и блик на кромке; нажатие утапливает её на 3 точки
-   в тот же кадр (слой «Палец» из docs/DESIGN.md), переход только на возврат. Грани
-   считаются из --accent, поэтому сезонные темы получают их сами. Размеры не
-   меняются: грань — это тень, а не рамка, вёрстку она не двигает. */
-.btn, .cart-link, .card-add .stepper--wide {
-  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 3px 0 var(--edge-accent);
+/* Решение владельца: кнопки как в демо «Хлопушка» (плакатные клавиши с жёсткой
+   тенью). Три вида. Белая клавиша с красной тенью — действие (--key); тёмная с
+   серой тенью — вторичное и «−»/«+» (--bg с обводкой --ink); красная заливка с
+   тенью цвета клавиши — «Отправить» и позиция в корзине. Нажатие уводит клавишу
+   в тень на 4 точки в тот же кадр (слой «Палец» из docs/DESIGN.md), возврат —
+   50 мс. Тень не двигает вёрстку. Блок стоит в конце файла: он перебивает
+   прежний вид кнопок выше. */
+.btn, .cart-link, .add {
+  background: var(--key); color: var(--key-ink);
+  border: 3px solid var(--key); border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--accent);
 }
-.add, .btn--secondary {
-  --key-shadow: inset 0 1px 0 var(--lit), 0 3px 0 var(--edge);
+.add:hover { border-color: var(--key); color: var(--key-ink); }
+.cart-link .cart-count {
+  min-width: 22px; padding: 2px 6px; box-sizing: border-box;
+  background: var(--accent); color: var(--on-accent);
 }
-.btn, .cart-link, .card-add .stepper--wide, .add, .btn--secondary {
-  box-shadow: var(--key-shadow);
-  transition: transform 90ms, box-shadow 90ms;
+.btn--secondary, .stepper button {
+  background: var(--bg); color: var(--ink);
+  border: 3px solid var(--ink); border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--key-sh2);
 }
-.btn:active:not([disabled]), .cart-link:active, .add:active,
-.card-add .stepper--wide:has(button:active) {
-  transform: translateY(3px);
-  box-shadow: inset 0 1px 0 rgba(0, 0, 0, .25), 0 0 0 transparent;
-  filter: none;
-  transition: none;
+.btn--send {
+  background: var(--accent); color: var(--on-accent);
+  border: 3px solid var(--key); box-shadow: 4px 4px 0 var(--key);
 }
+.btn--send.is-sending, .btn--send.is-done { box-shadow: 4px 4px 0 var(--key); }
 .btn[disabled] { box-shadow: none; }
-.theme-btn:active::before { transform: translateY(2px); }
+.btn--operator { border-width: 0; box-shadow: none; }
+.btn--operator.is-shown { border-width: 3px; box-shadow: 4px 4px 0 var(--key-sh2); }
+.btn:not(.btn--operator), .cart-link, .add, .stepper button {
+  transition: transform 50ms, box-shadow 50ms;
+}
+.btn:active:not([disabled]):not(.btn--operator), .cart-link:active, .add:active, .stepper button:active {
+  transform: translate(4px, 4px); box-shadow: 0 0 0 transparent; transition: none;
+}
+.btn--operator.is-shown:active { transform: translate(4px, 4px); box-shadow: 0 0 0 transparent; }
+
+/* Переключатель темы: тот же приём, обводка и тень на видимом квадрате. */
+.theme-btn::before { border: 3px solid var(--ink); background: var(--bg); box-shadow: 3px 3px 0 var(--key-sh2); }
+.theme-btn:active::before { background: var(--bg); border-color: var(--ink); transform: translate(3px, 3px); box-shadow: none; }
+.theme-btn:active { color: var(--ink); }
+
+/* Счётчики: три отдельные клавиши, как в демо. Число стоит в красной клавише,
+   заливка поднимается снизу вверх (add-sweep выше) и остаётся. */
+.stepper { grid-template-columns: 44px 52px 44px; gap: 8px; border: 0; }
+.stepper button:focus-visible { outline-offset: 2px; }
+.card-add .stepper--wide {
+  grid-template-columns: 40px 1fr 40px; gap: 8px;
+  border: 0; overflow: visible; color: var(--ink);
+}
+.card-add .stepper--wide::before { display: none; }
+.card-add .stepper--wide button { color: var(--ink); height: 40px; }
+.card-add .stepper--wide .stepper-num {
+  position: relative; isolation: isolate; overflow: hidden;
+  display: grid; place-items: center; min-width: 0;
+  background: var(--key); color: var(--on-accent);
+  border: 3px solid var(--key); box-shadow: 4px 4px 0 var(--key);
+}
+.card-add .stepper--wide .stepper-num::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: var(--accent); transform-origin: bottom;
+}
+.card-add .stepper--wide.is-new .stepper-num::before {
+  animation: add-sweep .52s cubic-bezier(.16, .84, .24, 1) both;
+}
+.card-add .stepper--wide.is-off .stepper-num::before {
+  animation: add-sweep .26s cubic-bezier(.4, 0, 1, 1) reverse both;
+}
