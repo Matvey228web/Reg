@@ -771,13 +771,23 @@ const InventoryScreen = (() => {
 
   // ---- завершение ----
 
+  // Два быстрых тапа открывали два окна, а /inventory/save не отсекает повтор:
+  // в журнале появлялись две сверки.
+  let finishAsking = false;
+
   function finish() {
-    QR.stopScan();
+    if (finishAsking) return;
+    finishAsking = true;
     const s = summary();
     TG.confirmDestructive("Завершить сверку?",
       `Найдено ${s.found} из ${s.total}, не найдено ${s.missing.length}. ` +
       "Результат запишется в журнал.",
-      "Записать", (yes) => { if (yes) doFinish(s); });
+      "Записать", (yes) => {
+        finishAsking = false;
+        if (!yes) return;
+        QR.stopScan();
+        doFinish(s);
+      });
   }
 
   async function doFinish(s) {

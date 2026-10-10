@@ -264,8 +264,6 @@ const ItemState = (() => {
   return { blocksRental, byQty, afterCheckout, afterCheckin, afterDefect, afterResolve };
 })();
 
-// Строка возраста данных — общая, чтобы все экраны выглядели и вели себя одинаково.
-
 // Фоновое обновление не удалось, а на экране уже лежат данные из кэша: молча
 // оставить их нельзя — человек примет вчерашнее за свежее. Строка встаёт над
 // anchorId; since — когда данные получены (мс) или имя кэша; без него строка
@@ -280,6 +278,7 @@ function showStaleNote(anchorId, since) {
   showBoxError(box.id, "Не удалось обновить" + (t ? "; показано от " + t : ""));
 }
 
+// Строка возраста данных — общая, чтобы все экраны выглядели и вели себя одинаково.
 function renderRefreshRow(id, cacheName, onRefresh, busy) {
   const row = document.getElementById(id);
   if (!row) return;

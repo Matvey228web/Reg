@@ -147,14 +147,21 @@ const RepairScreen = (() => {
 
   // Решённый дефект возвращает вещь в выдачу — случайный тап по кнопке рядом с
   // полем комментария обходится дорого, поэтому спрашиваем (как confirmDelete в staff.js).
+  let resolveAsking = false;
+
   function confirmResolve(defectId, btn) {
+    if (resolveAsking) return;
+    resolveAsking = true;
     const d = (Cache.items(CACHE) || []).find((x) => String(x.defect_id) === String(defectId));
     const item = d ? itemsById[d.item_id] : null;
     const name = d ? (item ? item.name : d.item_id) : "дефект";
     const sev = d ? (STATUS_LABELS[d.severity] || d.severity) : "";
     TG.confirmDestructive("Отметить решённым?",
       `${name}${sev ? " · " + sev : ""}. Если дефект снимал вещь с выдачи, она вернётся в каталог.`,
-      "Решён", (yes) => { if (yes) resolveDefect(defectId, btn); });
+      "Решён", (yes) => {
+        resolveAsking = false;
+        if (yes) resolveDefect(defectId, btn);
+      });
   }
 
   // Оптимистично, как setSection в models.js: дефект уходит в «решённые»
