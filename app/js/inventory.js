@@ -771,9 +771,16 @@ const InventoryScreen = (() => {
 
   // ---- завершение ----
 
-  async function finish() {
+  function finish() {
     QR.stopScan();
     const s = summary();
+    TG.confirmDestructive("Завершить сверку?",
+      `Найдено ${s.found} из ${s.total}, не найдено ${s.missing.length}. ` +
+      "Результат запишется в журнал.",
+      "Записать", (yes) => { if (yes) doFinish(s); });
+  }
+
+  async function doFinish(s) {
     const btn = document.getElementById("inventory-finish");
     btn.disabled = true;
     // Кнопка обязана говорить, что происходит. В журнал уходит строка на каждую

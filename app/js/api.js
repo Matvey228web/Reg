@@ -74,6 +74,24 @@ async function apiPost(endpoint, body = {}, options = {}) {
   }
 }
 
+// Состояние очереди Worker (GET /health). Не через apiPost: это не ручка
+// Apps Script, токен не нужен, а отказ не ошибка — возвращаем null.
+// Предел короче, чем у apiPost: плитка не должна висеть минутами.
+async function apiHealth() {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 15000);
+  try {
+    const res = await fetch(CONFIG.WEBHOOK_BASE_URL.replace(/\/+$/, "") + "/health",
+      { signal: abort.signal });
+    const json = await res.json();
+    return json && typeof json.dead === "number" ? json : null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function apiRequest(endpoint, body, { fresh = false } = {}) {
   const session = getStoredSession();
   const token = session ? session.token : null;

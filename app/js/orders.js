@@ -332,10 +332,11 @@ const OrdersScreen = (() => {
         : await Cache.load(CACHE, "/orders/list", { status: "all" }, { fresh: force });
       // Пока шёл запрос, могли переключить сегмент — рисуем то, что выбрано.
       if (name === source()) render(orders);
+      showStaleNote("orders-refresh");
     } catch (err) {
       if (!cached || !cached.length) {
         list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-      }
+      } else showStaleNote("orders-refresh", name);
     } finally {
       busy = false;
       drawRefreshRow();

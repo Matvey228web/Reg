@@ -63,7 +63,9 @@ const Router = (() => {
     });
   }
 
-  function show(name, params = {}) {
+  // backY — позиция прокрутки, к которой вернуться; только для экранов,
+  // что сами это просят (restoreScroll): у остальных «назад» по-прежнему сверху.
+  function show(name, params = {}, backY) {
     document.querySelectorAll(".screen").forEach((el) => el.classList.remove("screen--active"));
     const el = document.getElementById("screen-" + name);
     if (!el) {
@@ -73,15 +75,17 @@ const Router = (() => {
     el.classList.add("screen--active");
     TG.mainButton.hide();
     if (screens[name] && typeof screens[name].onShow === "function") {
-      screens[name].onShow(params);
+      screens[name].onShow(params, { back: backY !== undefined });
     }
     var pushed = renderBackButton(name);
     renderTabbar(name, pushed);
-    window.scrollTo(0, 0);
+    window.scrollTo(0, backY || 0);
     if (typeof Fab !== "undefined") Fab.watch();
   }
 
   function navigate(name, params = {}) {
+    // Запоминаем, докуда прокручен уходящий экран, чтобы «назад» вернул туда же.
+    if (stack.length) stack[stack.length - 1].scrollY = window.scrollY;
     stack.push({ name, params });
     show(name, params);
   }
@@ -101,7 +105,8 @@ const Router = (() => {
     if (stack.length <= 1) return;
     stack.pop();
     const top = stack[stack.length - 1];
-    show(top.name, top.params);
+    const wants = screens[top.name] && screens[top.name].restoreScroll;
+    show(top.name, top.params, wants ? (top.scrollY || 0) : undefined);
   }
 
   function init() {

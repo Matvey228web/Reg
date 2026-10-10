@@ -265,8 +265,19 @@ const ItemState = (() => {
 })();
 
 // Строка возраста данных — общая, чтобы все экраны выглядели и вели себя одинаково.
-function refreshRowHtml(id) {
-  return `<div class="refresh-row" id="${id}"></div>`;
+
+// Фоновое обновление не удалось, а на экране уже лежат данные из кэша: молча
+// оставить их нельзя — человек примет вчерашнее за свежее. Строка встаёт над
+// anchorId; since — когда данные получены (мс) или имя кэша; без него строка
+// убирается (после удачного обновления).
+function showStaleNote(anchorId, since) {
+  const box = ensureSlot(anchorId + "-stale", anchorId);
+  if (!box) return;
+  if (since === undefined) { box.innerHTML = ""; return; }
+  const entry = typeof since === "string" ? Cache.get(since) : null;
+  const at = entry ? entry.saved_at : since;
+  const t = at ? new Date(at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+  showBoxError(box.id, "Не удалось обновить" + (t ? "; показано от " + t : ""));
 }
 
 function renderRefreshRow(id, cacheName, onRefresh, busy) {

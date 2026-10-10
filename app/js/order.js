@@ -7,6 +7,7 @@
 
 const OrderScreen = (() => {
   let currentOrderId = null;
+  let cardAt = 0;         // когда card получена с сервера
   let card = null;        // последняя загруженная карточка
   let itemsById = {};
   let receiving = false;  // раскрыт ли режим приёма
@@ -133,10 +134,13 @@ const OrderScreen = (() => {
       if (seq !== opSeq || !idle()) reloadPending = true;
       else {
         card = data;
+        cardAt = Date.now();
         renderUnlessTyping();
+        showStaleNote("order-content");
       }
     } catch (err) {
       if (!card) content.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
+      else showStaleNote("order-content", cardAt);
     } finally {
       busy = false;
     }
