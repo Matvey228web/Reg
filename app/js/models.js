@@ -118,9 +118,7 @@ const ModelsScreen = (() => {
         <div class="section-title">${escapeHtml(cat.label)} · ${escapeHtml(cat.num)} ·
           ${inCat.length} ${plural(inCat.length, "модель", "модели", "моделей")},
           ${total} ${plural(total, "позиция", "позиции", "позиций")}</div>
-        <div class="form-group">
-          ${inCat.map((m) => rowHtml(m, cats)).join("")}
-        </div>`;
+        ${inCat.map((m) => `<div class="form-group">${rowHtml(m, cats)}</div>`).join("")}`;
     });
 
     box.innerHTML = html;
