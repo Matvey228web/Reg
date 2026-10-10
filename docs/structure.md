@@ -112,7 +112,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Моё в аренду (бот) | `/myrent/submit`, `/myrent/takedown`, `/myrent/decide` (только для старых карточек), `/myrent/mine`, `/myrent/update`, `/myrent/remove`, `/myrent/restore` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
 | Моё в аренду (админ) | `/myrent/admin/list`, `/myrent/admin/save`, `/myrent/admin/photo`, `/myrent/admin/remove`, `/myrent/admin/restore` — по токену, только Admin |
 | Бот | `/notify/*`; `/labels/send` выведена из работы и отвечает `410` с подсказкой — ради старых версий приложения |
-| Сверка | `/inventory/save`, `/inventory/list` (экрана истории пока нет) |
+| Сверка | `/inventory/save`, `/inventory/list` (история сверок — кнопка на экране `js/inventory.js`, только итоги) |
 | Админка | `/settings/*`, `/category/*`, `/maintenance` |
 
 ## app — склад

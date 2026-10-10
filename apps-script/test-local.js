@@ -1065,8 +1065,12 @@ check('счётчик промахов обнулён удачным входо�
 
 console.log('\n== справочник категорий живёт в таблице ==');
 const catSheet = getSheet(SHEETS.CATEGORIES);
-check('лист категорий засеян умолчаниями', readRows(catSheet).length === 13,
+check('лист категорий засеян умолчаниями', readRows(catSheet).length === 15,
   readRows(catSheet).map(c => c.code));
+check('CBL и TRN засеяны: кабели количеством, транспортировка поштучно',
+  categoryNum('CBL') === '15' && categoryNum('TRN') === '16' &&
+  categoryByQty('CBL') === true && categoryByQty('TRN') === false,
+  readRows(catSheet).filter(c => c.code === 'CBL' || c.code === 'TRN'));
 check('номера категорий двузначные строки',
   readRows(catSheet).every(c => /^\d{2}$/.test(String(c.num))),
   readRows(catSheet).map(c => c.num));
@@ -1196,7 +1200,7 @@ let cfg = call('/settings/get', {}, token);
 check('настройки отдаются вошедшему', cfg.ok === true, cfg);
 check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
   cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
-check('категории приходят вместе с настройками', cfg.data.categories.length === 13);
+check('категории приходят вместе с настройками', cfg.data.categories.length === 15);
 // Кнопка «Создать недостающие вкладки»: видна, только пока таблица отстаёт
 // от схемы в коде.
 check('после setupSheets таблица не отстаёт — кнопку не показываем',
@@ -1239,7 +1243,7 @@ check('сотрудник склада настройки менять не мо
 console.log('\n== категории: добавление и защита номера ==');
 r = call('/category/create', { code: 'BAT', label: 'Аккумуляторы' }, token);
 check('категория добавлена', r.ok === true, r);
-check('номер выдан следующий свободный (15)', r.ok && r.data.num === '15', r.data);
+check('номер выдан следующий свободный (17)', r.ok && r.data.num === '17', r.data);
 check('дубль кода отклонён',
   call('/category/create', { code: 'BAT', label: 'Ещё раз' }, token).status === 409);
 check('кривой код отклонён',
@@ -1248,7 +1252,7 @@ r = call('/category/create', { code: 'GEL', label: 'Гели и скотч', by_
 check('новую категорию можно сразу завести количеством', r.ok === true && r.data.by_qty === true, r.data);
 r = call('/category/update', { code: 'BAT', label: 'Аккумуляторы и зарядки' }, token);
 check('название меняется свободно', r.ok === true, r);
-r = call('/category/update', { code: 'BAT', num: 15 }, token);
+r = call('/category/update', { code: 'BAT', num: 19 }, token);
 check('номер у пустой категории сменить можно', r.ok === true, r);
 
 // А вот у занятой — нельзя: номер вшит в item_id и напечатан на этикетках
@@ -2582,6 +2586,10 @@ console.log('\n== админская правка модели: название
 
   check('переименование: сотруднику 403',
     call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Икс' }, staff).status === 403);
+  check('/model/create: сотруднику 403',
+    call('/model/create', { category: 'CAM', model_name: 'Модель Складмена' }, staff).status === 403);
+  check('/model/create: администратору можно',
+    call('/model/create', { category: 'CAM', model_name: 'Модель Админа' }, adm).ok === true);
   check('фото: сотруднику 403',
     call('/models/photo', { category: 'CAM', model_code: cA, image: '' }, staff).status === 403);
   let rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: '  Zenit   60mm ' }, adm);

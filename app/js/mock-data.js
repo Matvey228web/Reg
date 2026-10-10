@@ -1395,7 +1395,7 @@ const MockAPI = {
       }
 
       case "/model/create": {
-        MockStore.requireToken(token);
+        MockStore.requireAdmin(token);
         return { ...MockStore.findOrCreateModel(body.category, body.model_name) };
       }
 
@@ -1713,14 +1713,20 @@ const MockAPI = {
       case "/inventory/save": {
         const staff_id = MockStore.requireToken(token);
         const found = Object.keys(body.found || {});
-        const rec = {
-          inventory_id: MockStore.inventories.length + 1,
+        const missing = (body.missing || []).length;
+        const unknown = (body.unknown || []).length;
+        const who = MockStore.findStaffById(staff_id) || {};
+        // Строка summary — в том же виде, что в листе Inventory: её же отдаёт
+        // /inventory/list, и экран «История сверок» читает именно эти поля.
+        MockStore.inventories.push({
+          inventory_id: MockStore.inventories.length + 1, kind: "summary",
+          item_id: "", item_name: "", expected_qty: found.length + missing,
+          found_qty: found.length,
           scope: body.scope, started_at: body.started_at, finished_at: body.finished_at,
-          found: found.length, missing: (body.missing || []).length,
-          unknown: (body.unknown || []).length, staff_id,
-        };
-        MockStore.inventories.push(rec);
-        return rec;
+          staff_id, staff_name: who.full_name || "",
+        });
+        return { inventory_id: MockStore.inventories.length, found: found.length,
+                 missing, unknown, written: 1 + missing + unknown };
       }
 
       case "/inventory/list": {
