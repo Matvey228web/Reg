@@ -859,9 +859,13 @@ const MockAPI = {
         }
         const sameModel = (r) => r.category === from && String(r.model_code) === code;
         const modelRow = MockStore.models.find(sameModel);
-        if (allModel && (has("name") || to)) {
-          if (!modelRow) fail(409, "У вещи нет строки в справочнике моделей — править всю модель нечем.");
-          if (has("name")) {
+        if (allModel && (has("name") || to) && !modelRow) {
+          fail(409, "У вещи нет строки в справочнике моделей — править всю модель нечем.");
+        }
+        // Название принадлежит модели: правка у вещи со строкой модели идёт на всю модель.
+        const nameForModel = has("name") && !!modelRow;
+        {
+          if (nameForModel) {
             const needle = MockStore.normalizeModelName(next.name);
             const clash = MockStore.models.find((m) => m !== modelRow && m.category === from &&
               MockStore.normalizeModelName(m.model_name) === needle);
@@ -871,7 +875,9 @@ const MockAPI = {
 
         const changed = {};
         let renamed = 0;
-        if (allModel && has("name")) {
+        let storedName = null;
+        if (nameForModel) {
+          storedName = next.name;
           const modelRenamed = modelRow.model_name !== next.name;
           modelRow.model_name = next.name;
           MockStore.equipment.filter(sameModel).forEach((r) => {
@@ -913,7 +919,7 @@ const MockAPI = {
           changed.category = { was: from, now: to };
         }
         return { item: mockListRow(item), old_item_id: id, item_id: item.item_id,
-                 all_model: allModel, renamed, moved, changed };
+                 all_model: allModel, renamed, stored_name: storedName, moved, changed };
       }
 
       case "/transaction/checkout": {

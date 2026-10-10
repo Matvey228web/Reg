@@ -2270,10 +2270,13 @@ check('админ правит название, номера и состоян�
 check('ответ — строка каталога (с qty_free и model_code)', upd.ok &&
   upd.data.item.qty_free === 1 && upd.data.item.item_id === numId && !!upd.data.item.model_code, upd.data);
 check('номер вещи не изменился', upd.ok && upd.data.item_id === numId && upd.data.moved === null, upd.data);
-check('без галочки соседняя вещь модели не переименована',
-  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Тест');
-check('без галочки справочник моделей не тронут',
-  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест'));
+// Решение владельца 10 октября 2026: название принадлежит модели, поэтому правка
+// названия одной вещи идёт на всю модель и без галочки.
+check('без галочки название всё равно уходит на соседнюю вещь модели',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Тест (Б)');
+check('без галочки справочник моделей переименован вместе с вещью',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест (Б)') &&
+  !readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест'));
 
 upd = call('/item/update', { item_id: numId, serial_number: 'SN-ЗАНЯТ' }, numToken);
 check('занятый номер — 409', upd.ok === false && upd.status === 409 && upd.error.indexOf(numOther) !== -1, upd);
@@ -2644,6 +2647,86 @@ console.log('\n== админская правка модели: название
   check('формула превью пережила запись фото',
     fcol > 0 && phSheet.getRange(phRow.__row, fcol, 1, 1).getFormulas()[0][0].indexOf('IMAGE(') > 0);
   call('/models/photo', { category: phRow.category, model_code: pad2(Number(phRow.model_code)), image: '' }, adm);
+}
+
+// Решение владельца 10 октября 2026: названия и разделы в приложении и на сайте
+// совпадают, Models.model_name — единственный источник. После любой правки
+// проверяем всё сразу, по всем моделям публичного каталога.
+console.log('\n== одни названия и разделы в приложении и на сайте ==');
+{
+  const adm = secToken;
+  const parity = (label) => {
+    const pub = call('/public/catalog', {}).data.models;
+    const eq = call('/equipment/list', {}, adm).data;
+    const ml = call('/models/list', {}, adm).data;
+    const bad = [];
+    pub.forEach(m => {
+      const units = eq.filter(e => e.category === m.category && e.model_code === m.model_code);
+      units.forEach(u => { if (u.name !== m.model_name) bad.push(['name', m.category, m.model_code, u.name, m.model_name]); });
+      const row = ml.filter(x => x.category === m.category && x.model_code === m.model_code)[0];
+      if (!row) bad.push(['no /models/list', m.category, m.model_code]);
+      else {
+        if (row.section !== m.section) bad.push(['section', m.category, m.model_code, row.section, m.section]);
+        if (row.model_name !== m.model_name) bad.push(['model_name', m.category, m.model_code, row.model_name, m.model_name]);
+      }
+    });
+    check('совпадение имён и разделов: ' + label, pub.length > 0 && bad.length === 0, bad.slice(0, 5));
+  };
+  const mk = (cat, n) => call('/item/create', { category: cat, model_name: n }, adm).data;
+  const unitNames = (cat, c) => readRows(getSheet(SHEETS.EQUIPMENT))
+    .filter(r => r.category === cat && pad2(Number(r.model_code)) === c).map(r => r.name);
+  const modelName = (cat, c) => readRows(getSheet(SHEETS.MODELS))
+    .filter(r => r.category === cat && pad2(Number(r.model_code)) === c)[0].model_name;
+
+  const p1 = mk('CAM', 'Паритет Один');
+  const pc = p1.item_id.slice(2, 4);
+  const second = mk('CAM', 'Паритет Один');
+  parity('после создания');
+
+  // Двойные пробелы в Models, записанные до правила, наружу не уходят.
+  const mrowP = readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'CAM' && pad2(Number(r.model_code)) === pc)[0];
+  updateRow(getSheet(SHEETS.MODELS), mrowP.__row, { model_name: 'Паритет   Один' });
+  check('пробелы схлопнуты в /public/catalog и /models/list',
+    call('/public/catalog', {}).data.models.some(m => m.category === 'CAM' && m.model_code === pc && m.model_name === 'Паритет Один') &&
+    call('/models/list', { category: 'CAM' }, adm).data.some(m => m.model_code === pc && m.model_name === 'Паритет Один'));
+  updateRow(getSheet(SHEETS.MODELS), mrowP.__row, { model_name: 'Паритет Один' });
+
+  call('/models/rename', { category: 'CAM', model_code: pc, model_name: 'Паритет Два' }, adm);
+  parity('после переименования модели');
+
+  // Правка названия одной вещи без галочки: Models и обе вещи остаются равными.
+  const one = call('/item/update', { item_id: p1.item_id, name: 'Паритет Три' }, adm);
+  check('имя одной вещи ушло на всю модель', one.ok && modelName('CAM', pc) === 'Паритет Три' &&
+    unitNames('CAM', pc).every(n => n === 'Паритет Три') && one.data.renamed >= 1, one);
+  parity('после правки имени одной вещи');
+
+  // Рассинхрон, оставшийся от прежних версий, лечится при правке.
+  const secondRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => r.item_id === second.item_id)[0];
+  updateRow(getSheet(SHEETS.EQUIPMENT), secondRow.__row, { name: 'Старое имя' });
+  check('/equipment/list берёт имя из Models, а не из вещи',
+    call('/equipment/list', {}, adm).data.filter(e => e.item_id === second.item_id)[0].name === 'Паритет Три');
+  call('/item/update', { item_id: p1.item_id, name: 'Паритет Три' }, adm);
+  check('повторная правка выравнивает вещи', unitNames('CAM', pc).every(n => n === 'Паритет Три'), unitNames('CAM', pc));
+
+  // Перенос одной вещи: имя новой модели берётся из строки Models.
+  const mvd = call('/item/update', { item_id: p1.item_id, category: 'LEN' }, adm);
+  check('перенос одной вещи', mvd.ok && mvd.data.item.name === 'Паритет Три' &&
+    mvd.data.item.category === 'LEN', mvd);
+  parity('после переноса вещи');
+  const mvdUnit = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => r.item_id === mvd.data.item_id)[0];
+  check('имя перенесённой вещи равно имени новой модели',
+    mvdUnit.name === modelName('LEN', pad2(Number(mvdUnit.model_code))), mvdUnit);
+
+  // Раздел: звук в обоих списках «Кино».
+  const aud = mk('AUD', 'Паритет Звук');
+  const audC = aud.item_id.slice(2, 4);
+  call('/models/sections', { models: [{ category: 'AUD', model_code: audC, section: 'PHOTO' }] }, adm);
+  const audList = call('/models/list', { category: 'AUD' }, adm).data.filter(m => m.model_code === audC)[0];
+  check('/models/list: звук в «Кино» при отметке «Фото»', audList && audList.section === 'CINE', audList);
+  parity('после смены раздела');
+
+  check('/models/list отдаёт список без служебных полей',
+    call('/models/list', {}, adm).data.every(m => !('category_label' in m)));
 }
 
 console.log('\n== заявка с сайта ==');

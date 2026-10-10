@@ -2608,15 +2608,31 @@ function handleItemUpdate(payload, token) {
 
     var modelsSheet = getSheet(SHEETS.MODELS);
     var modelRow = null;
-    if (allModel && (Object.prototype.hasOwnProperty.call(next, "name") || to)) {
+    var hasName = Object.prototype.hasOwnProperty.call(next, "name");
+    if (code !== "" && (hasName || to)) {
       readRows(modelsSheet).forEach(function (r) {
-        if (code !== "" && isModelRow(r, from, code)) modelRow = r;
+        if (isModelRow(r, from, code)) modelRow = r;
       });
-      if (!modelRow) {
-        throw apiError(409, "У вещи нет строки в справочнике моделей — править всю модель " +
-          "нечем. Снимите галочку и правьте эту вещь.");
-      }
-      if (Object.prototype.hasOwnProperty.call(next, "name")) {
+    }
+    if (allModel && (hasName || to) && !modelRow) {
+      throw apiError(409, "У вещи нет строки в справочнике моделей — править всю модель " +
+        "нечем. Снимите галочку и правьте эту вещь.");
+    }
+    // Название принадлежит модели (решение владельца 10 октября 2026: Models —
+    // единственный источник, приложение и сайт показывают одно имя). Поэтому
+    // правка названия одной вещи, у которой есть строка модели, всегда идёт на
+    // всю модель — галочка нужна только для категории. Вещь без строки модели
+    // правится по-старому, только у себя.
+    var nameForModel = hasName && !!modelRow;
+    if (nameForModel) {
+      next.name = cleanModelName(next.name);
+      if (!next.name) throw apiError(400, "Название не может быть пустым");
+      // Приложение шлёт название вместе с остальными полями формы. Если оно не
+      // менялось — не пересохраняем (иначе синоним, записанный до списка
+      // MODEL_ALIASES, молча стал бы каноническим).
+      if (next.name === String(modelRow.model_name)) {
+        // Без изменений.
+      } else {
         // Название — через MODEL_ALIASES, как при импорте (findOrCreateModel):
         // «Sony A7 IV» записывается каноническим «Sony ILCE-7M4». Иначе
         // переименованная модель не узнала бы себя при следующем импорте и
@@ -2646,13 +2662,14 @@ function handleItemUpdate(payload, token) {
     var changed = {};
     var renamed = 0;
     var storedName = null;
-    if (allModel && Object.prototype.hasOwnProperty.call(next, "name")) {
+    if (nameForModel) {
       storedName = next.name;
       var wrote = writeModelName(modelsSheet, modelRow, sheet, rows, from, code, next.name);
       var modelRenamed = wrote.model_renamed;
       renamed = wrote.units;
       if (modelRenamed || renamed) changed.name = { was: String(item.name || ""), now: next.name };
       item.name = next.name;
+      modelRow.model_name = next.name;
       delete next.name;
     }
 
@@ -2679,10 +2696,13 @@ function handleItemUpdate(payload, token) {
       // Одна вещь: своя модель в целевой категории (найдётся по названию или
       // заведётся), новый номер, ссылки журналов переписаны картой из одной
       // строки — как в moveModel.
-      var target = findOrCreateModel(to, item.name);
+      // Название — из строки модели, а не из вещи: у вещи оно могло разъехаться
+      // (10 октября 2026), и в новой категории завелась бы модель с чужим именем.
+      var target = findOrCreateModel(to, modelRow ? modelRow.model_name : item.name);
       var fresh = buildItemId(to, target.model_code, nextUnitNumber(to, target.model_code));
       updateRow(sheet, item.__row, {
         item_id: fresh, category: to, model_code: pad2(Number(target.model_code)),
+        name: target.model_name,
       });
       var map = {};
       map[itemId] = fresh;
@@ -3089,18 +3109,23 @@ function handleModelsList(payload, token) {
   if (payload.category && payload.category !== "all") {
     rows = rows.filter(function (r) { return r.category === payload.category; });
   }
-  return rows.map(function (r) {
+  var labels = {};
+  categories().forEach(function (c) { labels[c.code] = c.label; });
+  var list = rows.map(function (r) {
     // Наружу отдаём тот же вид, в котором код лежит в таблице и стоит внутри
     // номера предмета: "04". Иначе фронтенд и таблица говорят о модели
     // по-разному, и сравнение строкой однажды промахнётся.
     return { category: r.category, model_code: pad2(Number(r.model_code)),
-             model_name: r.model_name, section: normalizeSection(r.section),
+             category_label: labels[r.category] || r.category,
+             model_name: cleanModelName(r.model_name), section: modelSection(r.category, r.section),
              // Цена для акта. Пустая строка, а не ноль: «не задана» и «ничего
              // не стоит» — разные вещи, и в акте они выглядят по-разному.
              price: r.price === "" || r.price === null || r.price === undefined
                ? "" : Number(r.price),
              photo: cleanPhotoUrl(r.photo) };
-  }).sort(function (a, b) { return String(a.model_name).localeCompare(String(b.model_name)); });
+  }).sort(compareModels);
+  list.forEach(function (m) { delete m.category_label; });
+  return list;
 }
 
 // Перенос модели в другую категорию — С ПЕРЕНУМЕРАЦИЕЙ вещей: номер XXYYZZ
@@ -3869,17 +3894,60 @@ function handleEquipmentList(payload, token) {
   if (payload.status && payload.status !== "all") {
     rows = rows.filter(function (r) { return r.status === payload.status; });
   }
-  return rows.map(equipmentListRow);
+  var names = modelNameIndex();
+  return rows.map(function (r) { return equipmentListRow(r, names); });
+}
+
+// Название модели в одном виде для приложения и сайта: пробелы схлопнуты, переносы
+// строк убраны — то же правило, что clean() в site/build-catalog.js. Чистим при
+// чтении, а не только при записи: в таблице названия с двойным пробелом уже есть.
+function cleanModelName(value) {
+  return String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
+}
+
+// Models.model_name — единственный источник названий (решение владельца
+// 10 октября 2026): приложение и сайт показывают одно и то же. Ключ тот же, что
+// у публичного каталога: «CAT|NN».
+function modelKey(category, code) {
+  return String(category || "").trim().toUpperCase() + "|" + pad2(Number(code));
+}
+
+function modelNameIndex() {
+  var names = {};
+  readRows(getSheet(SHEETS.MODELS)).forEach(function (m) {
+    if (m.model_code === "") return;
+    names[modelKey(m.category, m.model_code)] = cleanModelName(m.model_name);
+  });
+  return names;
+}
+
+// Раздел модели: раздел по категории сильнее отметки в Models (см.
+// SECTION_BY_CATEGORY). Общий для /models/list и /public/catalog, иначе
+// приложение и сайт разойдутся в том, где лежит звук.
+function modelSection(category, rawSection) {
+  return SECTION_BY_CATEGORY[category] || normalizeSection(rawSection) || "";
+}
+
+// Порядок списков моделей: категория по подписи, внутри — по названию.
+// Подписи сравниваем кодовыми точками, как раньше в публичном каталоге, чтобы
+// порядок на сайте не поменялся.
+function compareModels(x, y) {
+  if (x.category_label !== y.category_label) return x.category_label < y.category_label ? -1 : 1;
+  return String(x.model_name).localeCompare(String(y.model_name), "ru");
 }
 
 // Строка каталога в том виде, в каком её отдаёт /equipment/list. Отдельно —
 // потому что ту же строку возвращает /item/update: приложение кладёт её в кэш
 // каталога, и разойдись формы — карточка из кэша рисовалась бы иначе.
-function equipmentListRow(r) {
+// names — справочник названий, собранный один раз на запрос; название вещи
+// берём из Models, а своё имя — только когда у вещи нет строки модели.
+function equipmentListRow(r, names) {
   var total = itemQty(r);
   var out = Number(r.qty_out || 0);
+  names = names || modelNameIndex();
+  var modelName = r.model_code === "" ? "" : names[modelKey(r.category, r.model_code)];
   return {
-    item_id: r.item_id, name: r.name, category: r.category, status: r.status,
+    item_id: r.item_id, name: modelName || r.name, category: r.category, status: r.status,
     serial_number: r.serial_number, inventory_number: r.inventory_number,
     model_code: r.model_code === "" ? "" : pad2(Number(r.model_code)),
     qty: total, qty_out: out, qty_free: total - out,
@@ -6277,8 +6345,8 @@ function handlePublicCatalog(payload) {
   var names = {}, sections = {}, photos = {};
   readRows(getSheet(SHEETS.MODELS)).forEach(function (m) {
     var key = m.category + "|" + pad2(Number(m.model_code));
-    names[key] = m.model_name;
-    sections[key] = normalizeSection(m.section);
+    names[key] = cleanModelName(m.model_name);
+    sections[key] = m.section;
     photos[key] = cleanPhotoUrl(m.photo);
   });
   var labels = {};
@@ -6293,17 +6361,14 @@ function handlePublicCatalog(payload) {
       category: parts[0],
       category_label: labels[parts[0]] || parts[0],
       model_code: parts[1],
-      model_name: names[key] || a.model_name || "",
-      section: SECTION_BY_CATEGORY[parts[0]] || sections[key] || "",
+      model_name: names[key] || cleanModelName(a.model_name),
+      section: modelSection(parts[0], sections[key]),
       photo: photos[key] || "",
       total: a.total,
       free: a.free,
     });
   }
-  models.sort(function (x, y) {
-    if (x.category_label !== y.category_label) return x.category_label < y.category_label ? -1 : 1;
-    return String(x.model_name).localeCompare(String(y.model_name), "ru");
-  });
+  models.sort(compareModels);
   // Все категории справочника, и пустые тоже (владелец, 6 октября 2026: в меню
   // сайта должны быть все). Из models их не вывести — там только то, что есть на складе.
   var cats = categories().map(function (c) { return { code: c.code, label: c.label }; });
