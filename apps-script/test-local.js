@@ -1065,8 +1065,12 @@ check('счётчик промахов обнулён удачным входо�
 
 console.log('\n== справочник категорий живёт в таблице ==');
 const catSheet = getSheet(SHEETS.CATEGORIES);
-check('лист категорий засеян умолчаниями', readRows(catSheet).length === 13,
+check('лист категорий засеян умолчаниями', readRows(catSheet).length === 15,
   readRows(catSheet).map(c => c.code));
+check('CBL и TRN засеяны: кабели количеством, транспортировка поштучно',
+  categoryNum('CBL') === '15' && categoryNum('TRN') === '16' &&
+  categoryByQty('CBL') === true && categoryByQty('TRN') === false,
+  readRows(catSheet).filter(c => c.code === 'CBL' || c.code === 'TRN'));
 check('номера категорий двузначные строки',
   readRows(catSheet).every(c => /^\d{2}$/.test(String(c.num))),
   readRows(catSheet).map(c => c.num));
@@ -1196,7 +1200,7 @@ let cfg = call('/settings/get', {}, token);
 check('настройки отдаются вошедшему', cfg.ok === true, cfg);
 check('умолчания на месте', cfg.data.settings.session_ttl_hours === 12 &&
   cfg.data.settings.max_login_attempts === 5, cfg.data.settings);
-check('категории приходят вместе с настройками', cfg.data.categories.length === 13);
+check('категории приходят вместе с настройками', cfg.data.categories.length === 15);
 // Кнопка «Создать недостающие вкладки»: видна, только пока таблица отстаёт
 // от схемы в коде.
 check('после setupSheets таблица не отстаёт — кнопку не показываем',
@@ -1239,7 +1243,7 @@ check('сотрудник склада настройки менять не мо
 console.log('\n== категории: добавление и защита номера ==');
 r = call('/category/create', { code: 'BAT', label: 'Аккумуляторы' }, token);
 check('категория добавлена', r.ok === true, r);
-check('номер выдан следующий свободный (15)', r.ok && r.data.num === '15', r.data);
+check('номер выдан следующий свободный (17)', r.ok && r.data.num === '17', r.data);
 check('дубль кода отклонён',
   call('/category/create', { code: 'BAT', label: 'Ещё раз' }, token).status === 409);
 check('кривой код отклонён',
@@ -1248,7 +1252,7 @@ r = call('/category/create', { code: 'GEL', label: 'Гели и скотч', by_
 check('новую категорию можно сразу завести количеством', r.ok === true && r.data.by_qty === true, r.data);
 r = call('/category/update', { code: 'BAT', label: 'Аккумуляторы и зарядки' }, token);
 check('название меняется свободно', r.ok === true, r);
-r = call('/category/update', { code: 'BAT', num: 15 }, token);
+r = call('/category/update', { code: 'BAT', num: 19 }, token);
 check('номер у пустой категории сменить можно', r.ok === true, r);
 
 // А вот у занятой — нельзя: номер вшит в item_id и напечатан на этикетках
@@ -2270,10 +2274,13 @@ check('админ правит название, номера и состоян�
 check('ответ — строка каталога (с qty_free и model_code)', upd.ok &&
   upd.data.item.qty_free === 1 && upd.data.item.item_id === numId && !!upd.data.item.model_code, upd.data);
 check('номер вещи не изменился', upd.ok && upd.data.item_id === numId && upd.data.moved === null, upd.data);
-check('без галочки соседняя вещь модели не переименована',
-  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Тест');
-check('без галочки справочник моделей не тронут',
-  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест'));
+// Решение владельца 10 октября 2026: название принадлежит модели, поэтому правка
+// названия одной вещи идёт на всю модель и без галочки.
+check('без галочки название всё равно уходит на соседнюю вещь модели',
+  readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => String(r.item_id) === numOther)[0].name === 'Номерная Тест (Б)');
+check('без галочки справочник моделей переименован вместе с вещью',
+  readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест (Б)') &&
+  !readRows(getSheet(SHEETS.MODELS)).some(r => r.category === 'CAM' && r.model_name === 'Номерная Тест'));
 
 upd = call('/item/update', { item_id: numId, serial_number: 'SN-ЗАНЯТ' }, numToken);
 check('занятый номер — 409', upd.ok === false && upd.status === 409 && upd.error.indexOf(numOther) !== -1, upd);
@@ -2579,12 +2586,16 @@ console.log('\n== админская правка модели: название
 
   check('переименование: сотруднику 403',
     call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Икс' }, staff).status === 403);
+  check('/model/create: сотруднику 403',
+    call('/model/create', { category: 'CAM', model_name: 'Модель Складмена' }, staff).status === 403);
+  check('/model/create: администратору можно',
+    call('/model/create', { category: 'CAM', model_name: 'Модель Админа' }, adm).ok === true);
   check('фото: сотруднику 403',
     call('/models/photo', { category: 'CAM', model_code: cA, image: '' }, staff).status === 403);
   let rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: '  Zenit   60mm ' }, adm);
-  check('имя хранится как набрано', rn.ok && rn.data.model_name === 'Zenit 60mm' && mrow(cA).model_name === 'Zenit 60mm', rn);
-  check('вещи модели переименованы', eqNames(cA).every(n => n === 'Zenit 60mm') && rn.data.renamed_units >= 1, eqNames(cA));
-  check('синоним даёт warning', /Zenit 60mm F2.8/.test(rn.data.warning || ''), rn.data);
+  check('синоним хранится каноническим', rn.ok && rn.data.model_name === 'Zenit 60mm F2.8' && mrow(cA).model_name === 'Zenit 60mm F2.8', rn);
+  check('вещи модели переименованы', eqNames(cA).every(n => n === 'Zenit 60mm F2.8') && rn.data.renamed_units >= 1, eqNames(cA));
+  check('warning больше не нужен', rn.data.warning === undefined, rn.data);
   rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Редакт Альфа 2' }, adm);
   check('обычное имя без warning', rn.ok && rn.data.warning === undefined, rn);
   rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'редакт-бета' }, adm);
@@ -2644,6 +2655,86 @@ console.log('\n== админская правка модели: название
   check('формула превью пережила запись фото',
     fcol > 0 && phSheet.getRange(phRow.__row, fcol, 1, 1).getFormulas()[0][0].indexOf('IMAGE(') > 0);
   call('/models/photo', { category: phRow.category, model_code: pad2(Number(phRow.model_code)), image: '' }, adm);
+}
+
+// Решение владельца 10 октября 2026: названия и разделы в приложении и на сайте
+// совпадают, Models.model_name — единственный источник. После любой правки
+// проверяем всё сразу, по всем моделям публичного каталога.
+console.log('\n== одни названия и разделы в приложении и на сайте ==');
+{
+  const adm = secToken;
+  const parity = (label) => {
+    const pub = call('/public/catalog', {}).data.models;
+    const eq = call('/equipment/list', {}, adm).data;
+    const ml = call('/models/list', {}, adm).data;
+    const bad = [];
+    pub.forEach(m => {
+      const units = eq.filter(e => e.category === m.category && e.model_code === m.model_code);
+      units.forEach(u => { if (u.name !== m.model_name) bad.push(['name', m.category, m.model_code, u.name, m.model_name]); });
+      const row = ml.filter(x => x.category === m.category && x.model_code === m.model_code)[0];
+      if (!row) bad.push(['no /models/list', m.category, m.model_code]);
+      else {
+        if (row.section !== m.section) bad.push(['section', m.category, m.model_code, row.section, m.section]);
+        if (row.model_name !== m.model_name) bad.push(['model_name', m.category, m.model_code, row.model_name, m.model_name]);
+      }
+    });
+    check('совпадение имён и разделов: ' + label, pub.length > 0 && bad.length === 0, bad.slice(0, 5));
+  };
+  const mk = (cat, n) => call('/item/create', { category: cat, model_name: n }, adm).data;
+  const unitNames = (cat, c) => readRows(getSheet(SHEETS.EQUIPMENT))
+    .filter(r => r.category === cat && pad2(Number(r.model_code)) === c).map(r => r.name);
+  const modelName = (cat, c) => readRows(getSheet(SHEETS.MODELS))
+    .filter(r => r.category === cat && pad2(Number(r.model_code)) === c)[0].model_name;
+
+  const p1 = mk('CAM', 'Паритет Один');
+  const pc = p1.item_id.slice(2, 4);
+  const second = mk('CAM', 'Паритет Один');
+  parity('после создания');
+
+  // Двойные пробелы в Models, записанные до правила, наружу не уходят.
+  const mrowP = readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === 'CAM' && pad2(Number(r.model_code)) === pc)[0];
+  updateRow(getSheet(SHEETS.MODELS), mrowP.__row, { model_name: 'Паритет   Один' });
+  check('пробелы схлопнуты в /public/catalog и /models/list',
+    call('/public/catalog', {}).data.models.some(m => m.category === 'CAM' && m.model_code === pc && m.model_name === 'Паритет Один') &&
+    call('/models/list', { category: 'CAM' }, adm).data.some(m => m.model_code === pc && m.model_name === 'Паритет Один'));
+  updateRow(getSheet(SHEETS.MODELS), mrowP.__row, { model_name: 'Паритет Один' });
+
+  call('/models/rename', { category: 'CAM', model_code: pc, model_name: 'Паритет Два' }, adm);
+  parity('после переименования модели');
+
+  // Правка названия одной вещи без галочки: Models и обе вещи остаются равными.
+  const one = call('/item/update', { item_id: p1.item_id, name: 'Паритет Три' }, adm);
+  check('имя одной вещи ушло на всю модель', one.ok && modelName('CAM', pc) === 'Паритет Три' &&
+    unitNames('CAM', pc).every(n => n === 'Паритет Три') && one.data.renamed >= 1, one);
+  parity('после правки имени одной вещи');
+
+  // Рассинхрон, оставшийся от прежних версий, лечится при правке.
+  const secondRow = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => r.item_id === second.item_id)[0];
+  updateRow(getSheet(SHEETS.EQUIPMENT), secondRow.__row, { name: 'Старое имя' });
+  check('/equipment/list берёт имя из Models, а не из вещи',
+    call('/equipment/list', {}, adm).data.filter(e => e.item_id === second.item_id)[0].name === 'Паритет Три');
+  call('/item/update', { item_id: p1.item_id, name: 'Паритет Три' }, adm);
+  check('повторная правка выравнивает вещи', unitNames('CAM', pc).every(n => n === 'Паритет Три'), unitNames('CAM', pc));
+
+  // Перенос одной вещи: имя новой модели берётся из строки Models.
+  const mvd = call('/item/update', { item_id: p1.item_id, category: 'LEN' }, adm);
+  check('перенос одной вещи', mvd.ok && mvd.data.item.name === 'Паритет Три' &&
+    mvd.data.item.category === 'LEN', mvd);
+  parity('после переноса вещи');
+  const mvdUnit = readRows(getSheet(SHEETS.EQUIPMENT)).filter(r => r.item_id === mvd.data.item_id)[0];
+  check('имя перенесённой вещи равно имени новой модели',
+    mvdUnit.name === modelName('LEN', pad2(Number(mvdUnit.model_code))), mvdUnit);
+
+  // Раздел: звук в обоих списках «Кино».
+  const aud = mk('AUD', 'Паритет Звук');
+  const audC = aud.item_id.slice(2, 4);
+  call('/models/sections', { models: [{ category: 'AUD', model_code: audC, section: 'PHOTO' }] }, adm);
+  const audList = call('/models/list', { category: 'AUD' }, adm).data.filter(m => m.model_code === audC)[0];
+  check('/models/list: звук в «Кино» при отметке «Фото»', audList && audList.section === 'CINE', audList);
+  parity('после смены раздела');
+
+  check('/models/list отдаёт список без служебных полей',
+    call('/models/list', {}, adm).data.every(m => !('category_label' in m)));
 }
 
 console.log('\n== заявка с сайта ==');
@@ -2720,6 +2811,53 @@ check('без ФИО отклонена',
   call('/public/order', { raw_text: siteText('260101-5555').replace(/^Full_name_minor.*\n/m, '') }).status === 400);
 check('слишком длинная отклонена',
   call('/public/order', { raw_text: siteText('260101-6666') + '\n' + 'я'.repeat(4000) }).status === 400);
+
+console.log('\n== заявка с сайта: сопоставление по ключу модели ==');
+{
+  const mk = (cat, n) => call('/item/create', { category: cat, model_name: n }, siteAdmin).data.item_id.slice(2, 4);
+  const mrow = (cat, c) => readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === cat && pad2(Number(r.model_code)) === c)[0];
+  const text = (no, name) => ['Заказ №' + no, '1. ' + name + ': 0 (1 x 0)', '',
+    'Are_you_an_adult: Да', 'Full_name_minor: Ключев Ключ Ключевич', 'Phone_minors: +79990001122'].join('\n');
+  const lineOf = (no) => {
+    const o = readRows(getSheet(SHEETS.ORDERS)).filter(r => r.order_no === no)[0];
+    const c = call('/order/card', { order_id: o.order_id }, siteAdmin);
+    return c.data.items[0];
+  };
+  const kA = mk('CAM', 'Ключ Камера Старая');
+  const kB = mk('LGT', 'Ключ Общее Имя');
+  const kC = mk('CAM', 'Ключ Общее Имя');
+
+  // Страницу загрузили под старым именем, потом модель переименовали.
+  call('/models/rename', { category: 'CAM', model_code: kA, model_name: 'Ключ Камера Новая' }, siteAdmin);
+  so = call('/public/order', { raw_text: text('280101-0001', 'Ключ Камера Старая'), items: [{ line: 1, key: 'CAM-' + kA }] });
+  let ln = so.ok && lineOf('280101-0001');
+  check('ключ после переименования: модель найдена', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kA, ln);
+  check('ключ: в строке текущее имя', ln && ln.raw_name === 'Ключ Камера Новая', ln);
+
+  // Одно имя в двух категориях: по имени достался бы первый, по ключу — свой.
+  so = call('/public/order', { raw_text: text('280101-0002', 'Ключ Общее Имя'), items: [{ line: 1, key: 'CAM-' + kC }] });
+  ln = so.ok && lineOf('280101-0002');
+  check('одинаковые имена: по ключу вторая категория', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kC, ln);
+  so = call('/public/order', { raw_text: text('280101-0003', 'Ключ Общее Имя') });
+  ln = so.ok && lineOf('280101-0003');
+  check('без ключа: по имени, как раньше (первая категория)', ln && ln.category === 'LGT' && pad2(Number(ln.model_code)) === kB, ln);
+
+  so = call('/public/order', { raw_text: text('280101-0004', 'Ключ Камера Новая'), items: [{ line: 1, key: 'CAM-99' }] });
+  ln = so.ok && lineOf('280101-0004');
+  check('неизвестный ключ: по имени', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kA, ln);
+
+  so = call('/public/order', { raw_text: text('280101-0005', 'Ключ Камера Новая'), items: 'мусор' });
+  ln = so.ok && lineOf('280101-0005');
+  check('items не массив: по имени', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kA, ln);
+
+  // Переименование через алиас хранит каноническое имя.
+  const alias = mk('CAM', 'Алиас Проба');
+  let rn = call('/models/rename', { category: 'CAM', model_code: alias, model_name: 'Zenit 60mm' }, siteAdmin);
+  check('/models/rename: синоним хранится каноническим',
+    rn.ok && rn.data.model_name === 'Zenit 60mm F2.8' && mrow('CAM', alias).model_name === 'Zenit 60mm F2.8', rn);
+  rn = call('/models/rename', { category: 'CAM', model_code: alias, model_name: 'Zenit 60mm F2.8' }, siteAdmin);
+  check('/models/rename: то же имя не трогается', rn.ok && rn.data.renamed_units === 0, rn);
+}
 
 console.log('\n== сообщение бота о заявке (HTML) ==');
 // Раскладка прежних сообщений Tilda, только в HTML. Данные выдуманные.

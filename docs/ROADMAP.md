@@ -202,7 +202,8 @@ Google-таблице, то есть **не в России**. С 1 июля 202
    `Transactions`; выдача по заказу перечитывает `Equipment` и `OrderItems` на
    каждую единицу; `maxIdIn` на каждой записи.
 6. Права на `/item/create` и `/model/create` — только `checkAuth`, правка —
-   `requireAdmin`. Решение владельца или недосмотр?
+   `requireAdmin`. `/model/create` — решено 10 октября 2026: оставить, только
+   для администратора (сделано, `requireAdmin`). `/item/create` — открыт.
 7. Мёртвое: `/client/*`, вкладка `Clients` для новых записей.
 
 **Worker**

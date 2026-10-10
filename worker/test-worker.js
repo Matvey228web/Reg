@@ -452,15 +452,24 @@ upstream.reply = (b) => b.endpoint === "/public/catalog"
 await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
 catName = "Новое";
 await call("/models/rename", { category: "CAM", model_code: "01", model_name: "Новое" }, "tok-1");
-// Свежей копии нет — первый посетитель получит долгую (старую), а фон её
-// обновит: так устроены все публичные чтения (наличие тоже).
+// Долгая копия каталога привязана к поколению: после записи первый же
+// посетитель получает новое имя, а не копию «до записи».
 r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
-ok("после /models/rename кэш сброшен: ответ не из свежей копии", r.cache !== "hit", r.cache);
-r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
-ok("следующий посетитель видит новое имя", r.data.data.models[0].model_name === "Новое", r.data);
+ok("после /models/rename первый посетитель не получает ни свежую, ни долгую старую копию",
+   r.cache !== "hit" && r.cache !== "stale", r.cache);
+ok("и сразу видит новое имя", r.data.data.models[0].model_name === "Новое", r.data);
 await call("/models/photo", { category: "CAM", model_code: "01", image: "" }, "tok-1");
 r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
-ok("после /models/photo каталог спрошен заново", r.cache !== "hit", r.cache);
+ok("после /models/photo каталог спрошен заново", r.cache !== "hit" && r.cache !== "stale", r.cache);
+for (const [ep, pl] of [["/item/update", { item_id: "010101" }], ["/model/move", { category: "CAM" }],
+                        ["/category/save", { category: "CAM" }]]) {
+  catName = "До " + ep;
+  await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
+  catName = "После " + ep;
+  await call(ep, pl, "tok-1");
+  r = await call("/public/catalog", { from: "2026-11-01", to: "2026-11-02" });
+  ok(ep + ": после записи нет старой копии", r.data.data.models[0].model_name === catName, r.data);
+}
 
 console.log("\n== нажатия, которые не должны выбрасывать кэш ==");
 // Поиск чата, проверка связи и пачка этикеток ничего в складе не меняют.
