@@ -494,18 +494,7 @@ const SettingsScreen = (() => {
   async function loadHealth() {
     health = undefined;
     if (CONFIG.MOCK_MODE) { health = { ok: true, queue: 0, dead: 0 }; drawHealth(); return; }
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 15000);
-    try {
-      const res = await fetch(CONFIG.WEBHOOK_BASE_URL.replace(/\/+$/, "") + "/health",
-        { signal: abort.signal });
-      const json = await res.json();
-      health = json && typeof json.dead === "number" ? json : null;
-    } catch (e) {
-      health = null;
-    } finally {
-      clearTimeout(timer);
-    }
+    health = await apiHealth();
     drawHealth();
   }
 
@@ -978,7 +967,9 @@ const SettingsScreen = (() => {
     document.getElementById("settings-archive")
       .addEventListener("click", () => maintenance("archive", "settings-archive"));
     document.getElementById("settings-trim")
-      .addEventListener("click", () => maintenance("trim", "settings-trim"));
+      .addEventListener("click", () => TG.confirmDestructive("Подрезать таблицу?",
+        "Закрытые записи журналов будут удалены из таблицы. Делайте это после выгрузки журнала.",
+        "Подрезать", (yes) => { if (yes) maintenance("trim", "settings-trim"); }));
     document.getElementById("settings-ids")
       .addEventListener("click", () => maintenance("ids", "settings-ids"));
     // Кнопки нет, когда таблица догнала схему (schema_outdated в /settings/get).

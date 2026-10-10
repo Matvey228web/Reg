@@ -1333,44 +1333,6 @@ select {
   .btn, .card { transition: none; }
 }
 
-/* Свайп влево по строке открывает действие под ней */
-.swipe {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--r-md);
-  margin-bottom: var(--s2);
-}
-.swipe-body {
-  position: relative;
-  z-index: 2;
-  background: var(--tg-bg-color);
-  transition: transform 0.18s ease;
-  will-change: transform;
-  /* Вертикальные жесты остаются браузеру и Telegram (прокрутка списка и
-     закрытие приложения свайпом вниз), горизонтальные забираем себе. */
-  touch-action: pan-y;
-}
-.swipe-body .card { margin-bottom: 0; }
-.swipe--dragging .swipe-body { transition: none; }
-.swipe-action {
-  position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 88px;
-  z-index: 1;
-  border: none;
-  background: var(--danger);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s1);
-  cursor: pointer;
-}
-.swipe-action-ico { font-size: 20px; line-height: 1; }
 .pin-reset-form { margin-top: var(--s2); }
 
 /* Строка над списком: возраст данных и кнопка обновления. Возраст показываем

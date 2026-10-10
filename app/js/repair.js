@@ -85,7 +85,7 @@ const RepairScreen = (() => {
       if (t) t.value = drafts[id];
     });
     list.querySelectorAll("[data-resolve]").forEach((btn) => {
-      btn.addEventListener("click", () => resolveDefect(btn.dataset.resolve, btn));
+      btn.addEventListener("click", () => confirmResolve(btn.dataset.resolve, btn));
     });
     // Карточка ведёт на предмет: из ремонта чаще всего нужно как раз это —
     // посмотреть историю вещи и решить, выдавать ли её дальше.
@@ -134,14 +134,34 @@ const RepairScreen = (() => {
       // Пока шёл запрос, человек мог начать комментарий к решению —
       // перерисовка стёрла бы его на середине слова.
       if (!isTyping("#repair-list")) render(Cache.items(CACHE) || defects);
+      showStaleNote("repair-refresh");
     } catch (err) {
       if (!cached || !cached.length) {
         list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
-      }
+      } else showStaleNote("repair-refresh", CACHE);
     } finally {
       busy = false;
       drawRefreshRow();
     }
+  }
+
+  // Решённый дефект возвращает вещь в выдачу — случайный тап по кнопке рядом с
+  // полем комментария обходится дорого, поэтому спрашиваем (как confirmDelete в staff.js).
+  let resolveAsking = false;
+
+  function confirmResolve(defectId, btn) {
+    if (resolveAsking) return;
+    resolveAsking = true;
+    const d = (Cache.items(CACHE) || []).find((x) => String(x.defect_id) === String(defectId));
+    const item = d ? itemsById[d.item_id] : null;
+    const name = d ? (item ? item.name : d.item_id) : "дефект";
+    const sev = d ? (STATUS_LABELS[d.severity] || d.severity) : "";
+    TG.confirmDestructive("Отметить решённым?",
+      `${name}${sev ? " · " + sev : ""}. Если дефект снимал вещь с выдачи, она вернётся в каталог.`,
+      "Решён", (yes) => {
+        resolveAsking = false;
+        if (yes) resolveDefect(defectId, btn);
+      });
   }
 
   // Оптимистично, как setSection в models.js: дефект уходит в «решённые»

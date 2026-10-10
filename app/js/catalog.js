@@ -31,6 +31,16 @@ const CatalogScreen = (() => {
       <option value="Retired">Списано</option>`;
 
     newItemCat.innerHTML = cats.map((c) => `<option value="${c.code}">${escapeHtml(c.label)}</option>`).join("");
+
+    // currentFilters переживает уход с экрана, а селекты пересозданы: без
+    // возврата значений список отфильтрован, а выглядит полным.
+    restoreSelect(catSel, currentFilters.category, "category");
+    restoreSelect(statusSel, currentFilters.status, "status");
+  }
+
+  function restoreSelect(sel, value, key) {
+    if (Array.from(sel.options).some((o) => o.value === value)) sel.value = value;
+    else currentFilters[key] = "all";   // категории больше нет — не фильтруем по призраку
   }
 
   // Справочник моделей выбранной категории: из него собирается номер XXYYZZ.
@@ -111,7 +121,9 @@ const CatalogScreen = (() => {
 
   // Рисуем порциями: 628 карточек разом создавать незачем, страница от этого
   // только тормозит.
-  function render(reset = true) {
+  // min — сколько карточек отрисовать минимум: при возврате назад нужна та же
+  // длина списка, иначе сохранённой позиции прокрутки просто нет.
+  function render(reset = true, min = 0) {
     const list = document.getElementById("catalog-list");
     const more = document.getElementById("catalog-more");
     const filtered = allItems.filter(matches);
@@ -126,7 +138,7 @@ const CatalogScreen = (() => {
       return;
     }
 
-    const next = filtered.slice(shown, shown + PAGE_SIZE);
+    const next = filtered.slice(shown, shown + Math.max(PAGE_SIZE, min - shown));
     list.insertAdjacentHTML("beforeend", next.map(cardHtml).join(""));
     shown += next.length;
     bindCards(list);
@@ -145,13 +157,13 @@ const CatalogScreen = (() => {
   // force — нажали «Обновить». Без него на сервер идём только при отсутствии
   // кэша или когда он устарел: иначе каждое переключение вкладки снова стоило
   // бы 5–8 секунд ожидания.
-  async function loadList({ force = false } = {}) {
+  async function loadList({ force = false, keep = 0 } = {}) {
     const list = document.getElementById("catalog-list");
     const cached = Cache.items(CACHE);
 
     if (cached && cached.length) {
       allItems = cached;
-      render();
+      render(true, keep);
     }
     drawRefreshRow();
 
@@ -170,14 +182,16 @@ const CatalogScreen = (() => {
       // «Ремонт», ждём тот же ответ, а не заводим второй запрос.
       const items = await Cache.load(CACHE, "/equipment/list", { category: "all", status: "all" }, { fresh: force });
       allItems = items;
-      render();
+      render(true, keep);
+      showStaleNote("catalog-refresh");
     } catch (err) {
       if (!allItems.length) {
         list.innerHTML = `<div class="error-box">${escapeHtml(err.message)}</div>`;
         document.getElementById("catalog-more").innerHTML = "";
       } else {
-        // кэш показан — не затираем его ошибкой, просто сообщаем
-        showBoxError("catalog-add-error", "Не удалось обновить список: " + err.message);
+        // кэш показан — не затираем его ошибкой, просто сообщаем (форма
+        // добавления скрыта, её блок ошибки для этого не годится)
+        showStaleNote("catalog-refresh", CACHE);
       }
     } finally {
       busy = false;
@@ -305,10 +319,11 @@ const CatalogScreen = (() => {
       LabelsScreen.labelFor(fresh), LabelsScreen.labelFileName(fresh), name, dl));
   }
 
-  function onShow() {
+  function onShow(params, opts) {
+    const keep = opts && opts.back ? shown : 0;
     populateSelects();
     resetAddForm();
-    loadList();
+    loadList({ keep });
   }
 
   function init() {
@@ -343,7 +358,7 @@ const CatalogScreen = (() => {
     document.getElementById("new-item-model").addEventListener("change", toggleNewModel);
     document.getElementById("new-item-submit").addEventListener("click", submitNewItem);
     Pull.register("catalog", () => loadList({ force: true }));
-    Router.register("catalog", { onShow });
+    Router.register("catalog", { onShow, restoreScroll: true });
   }
 
   return { init, loadList };

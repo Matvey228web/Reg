@@ -105,10 +105,5 @@ const Pull = (() => {
     }, { passive: true });
   }
 
-  // Наружу — чтобы проверить в тестах, поставлен ли жест вообще.
-  function isEnabled() {
-    return enabled === true;
-  }
-
-  return { register, isEnabled };
+  return { register };
 })();

@@ -835,9 +835,26 @@ const InventoryScreen = (() => {
 
   // ---- завершение ----
 
-  async function finish() {
-    QR.stopScan();
+  // Два быстрых тапа открывали два окна, а /inventory/save не отсекает повтор:
+  // в журнале появлялись две сверки.
+  let finishAsking = false;
+
+  function finish() {
+    if (finishAsking) return;
+    finishAsking = true;
     const s = summary();
+    TG.confirmDestructive("Завершить сверку?",
+      `Найдено ${s.found} из ${s.total}, не найдено ${s.missing.length}. ` +
+      "Результат запишется в журнал.",
+      "Записать", (yes) => {
+        finishAsking = false;
+        if (!yes) return;
+        QR.stopScan();
+        doFinish(s);
+      });
+  }
+
+  async function doFinish(s) {
     const btn = document.getElementById("inventory-finish");
     btn.disabled = true;
     // Кнопка обязана говорить, что происходит. В журнал уходит строка на каждую
