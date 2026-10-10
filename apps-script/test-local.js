@@ -2593,9 +2593,9 @@ console.log('\n== админская правка модели: название
   check('фото: сотруднику 403',
     call('/models/photo', { category: 'CAM', model_code: cA, image: '' }, staff).status === 403);
   let rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: '  Zenit   60mm ' }, adm);
-  check('имя хранится как набрано', rn.ok && rn.data.model_name === 'Zenit 60mm' && mrow(cA).model_name === 'Zenit 60mm', rn);
-  check('вещи модели переименованы', eqNames(cA).every(n => n === 'Zenit 60mm') && rn.data.renamed_units >= 1, eqNames(cA));
-  check('синоним даёт warning', /Zenit 60mm F2.8/.test(rn.data.warning || ''), rn.data);
+  check('синоним хранится каноническим', rn.ok && rn.data.model_name === 'Zenit 60mm F2.8' && mrow(cA).model_name === 'Zenit 60mm F2.8', rn);
+  check('вещи модели переименованы', eqNames(cA).every(n => n === 'Zenit 60mm F2.8') && rn.data.renamed_units >= 1, eqNames(cA));
+  check('warning больше не нужен', rn.data.warning === undefined, rn.data);
   rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'Редакт Альфа 2' }, adm);
   check('обычное имя без warning', rn.ok && rn.data.warning === undefined, rn);
   rn = call('/models/rename', { category: 'CAM', model_code: cA, model_name: 'редакт-бета' }, adm);
@@ -2811,6 +2811,53 @@ check('без ФИО отклонена',
   call('/public/order', { raw_text: siteText('260101-5555').replace(/^Full_name_minor.*\n/m, '') }).status === 400);
 check('слишком длинная отклонена',
   call('/public/order', { raw_text: siteText('260101-6666') + '\n' + 'я'.repeat(4000) }).status === 400);
+
+console.log('\n== заявка с сайта: сопоставление по ключу модели ==');
+{
+  const mk = (cat, n) => call('/item/create', { category: cat, model_name: n }, siteAdmin).data.item_id.slice(2, 4);
+  const mrow = (cat, c) => readRows(getSheet(SHEETS.MODELS)).filter(r => r.category === cat && pad2(Number(r.model_code)) === c)[0];
+  const text = (no, name) => ['Заказ №' + no, '1. ' + name + ': 0 (1 x 0)', '',
+    'Are_you_an_adult: Да', 'Full_name_minor: Ключев Ключ Ключевич', 'Phone_minors: +79990001122'].join('\n');
+  const lineOf = (no) => {
+    const o = readRows(getSheet(SHEETS.ORDERS)).filter(r => r.order_no === no)[0];
+    const c = call('/order/card', { order_id: o.order_id }, siteAdmin);
+    return c.data.items[0];
+  };
+  const kA = mk('CAM', 'Ключ Камера Старая');
+  const kB = mk('LGT', 'Ключ Общее Имя');
+  const kC = mk('CAM', 'Ключ Общее Имя');
+
+  // Страницу загрузили под старым именем, потом модель переименовали.
+  call('/models/rename', { category: 'CAM', model_code: kA, model_name: 'Ключ Камера Новая' }, siteAdmin);
+  so = call('/public/order', { raw_text: text('280101-0001', 'Ключ Камера Старая'), items: [{ line: 1, key: 'CAM-' + kA }] });
+  let ln = so.ok && lineOf('280101-0001');
+  check('ключ после переименования: модель найдена', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kA, ln);
+  check('ключ: в строке текущее имя', ln && ln.raw_name === 'Ключ Камера Новая', ln);
+
+  // Одно имя в двух категориях: по имени достался бы первый, по ключу — свой.
+  so = call('/public/order', { raw_text: text('280101-0002', 'Ключ Общее Имя'), items: [{ line: 1, key: 'CAM-' + kC }] });
+  ln = so.ok && lineOf('280101-0002');
+  check('одинаковые имена: по ключу вторая категория', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kC, ln);
+  so = call('/public/order', { raw_text: text('280101-0003', 'Ключ Общее Имя') });
+  ln = so.ok && lineOf('280101-0003');
+  check('без ключа: по имени, как раньше (первая категория)', ln && ln.category === 'LGT' && pad2(Number(ln.model_code)) === kB, ln);
+
+  so = call('/public/order', { raw_text: text('280101-0004', 'Ключ Камера Новая'), items: [{ line: 1, key: 'CAM-99' }] });
+  ln = so.ok && lineOf('280101-0004');
+  check('неизвестный ключ: по имени', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kA, ln);
+
+  so = call('/public/order', { raw_text: text('280101-0005', 'Ключ Камера Новая'), items: 'мусор' });
+  ln = so.ok && lineOf('280101-0005');
+  check('items не массив: по имени', ln && ln.category === 'CAM' && pad2(Number(ln.model_code)) === kA, ln);
+
+  // Переименование через алиас хранит каноническое имя.
+  const alias = mk('CAM', 'Алиас Проба');
+  let rn = call('/models/rename', { category: 'CAM', model_code: alias, model_name: 'Zenit 60mm' }, siteAdmin);
+  check('/models/rename: синоним хранится каноническим',
+    rn.ok && rn.data.model_name === 'Zenit 60mm F2.8' && mrow('CAM', alias).model_name === 'Zenit 60mm F2.8', rn);
+  rn = call('/models/rename', { category: 'CAM', model_code: alias, model_name: 'Zenit 60mm F2.8' }, siteAdmin);
+  check('/models/rename: то же имя не трогается', rn.ok && rn.data.renamed_units === 0, rn);
+}
 
 console.log('\n== сообщение бота о заявке (HTML) ==');
 // Раскладка прежних сообщений Tilda, только в HTML. Данные выдуманные.

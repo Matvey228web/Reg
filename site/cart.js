@@ -566,7 +566,11 @@
     note.classList.remove("hint--bad");
     note.hidden = true;
 
-    Site.sendOrder(orderText())
+    // Ключи моделей едут рядом с текстом: имя в тексте — снимок, и после
+    // переименования на складе по нему строку уже не найти. Номера строк те же,
+    // что в orderText (по порядку lines()).
+    var keys = lines().map(function (l, i) { return { line: i + 1, key: l.key }; });
+    Site.sendOrder(orderText(), keys)
       .then(function (res) {
         // Заявка принята — номер израсходован. Иначе вторая заявка из той же
         // вкладки ушла бы под прежним номером и столкнулась с первой.

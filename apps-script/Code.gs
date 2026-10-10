@@ -2776,11 +2776,10 @@ function writeModelName(modelsSheet, modelRow, equipSheet, rows, category, code,
   return { model_renamed: modelRenamed, units: units };
 }
 
-// Переименование модели администратором. Название хранится ровно так, как
-// набрано («Sony A7 IV» остаётся таким — решение владельца 6 октября 2026), в
-// отличие от handleItemUpdate, где оно идёт через MODEL_ALIASES. Цена такого
-// решения: следующий импорт назовёт модель каноническим именем, поэтому
-// отвечаем warning и приложение говорит об этом админу.
+// Переименование модели администратором. Название идёт через MODEL_ALIASES,
+// как в handleItemUpdate («Sony A7 IV» записывается «Sony ILCE-7M4»); решение
+// 6 октября о «как набрано» отменено 10 октября требованием одного имени на
+// сайте и в приложении. В ответе model_name — то, что реально записано.
 // «:» и перенос строки нельзя: строка заказа «N. название: 0 (qty x 0)»
 // разбирается parseOrderMessage по двоеточию.
 function handleModelsRename(payload, token) {
@@ -2806,7 +2805,12 @@ function handleModelsRename(payload, token) {
       if (isModelRow(r, category, code)) modelRow = r;
     });
     if (!modelRow) throw apiError(404, "Такой модели нет: " + category + "·" + code);
-    var needle = normalizeModelName(canonicalModelName(name));
+    // Как в handleItemUpdate: название через MODEL_ALIASES, иначе следующий
+    // импорт назовёт модель иначе (решение владельца 10 октября 2026: имя одно
+    // на сайт и приложение). Неизменённое имя не трогаем — синоним, записанный
+    // до списка, молча не станет каноническим.
+    if (name !== String(modelRow.model_name)) name = canonicalModelName(name);
+    var needle = normalizeModelName(name);
     var clash = models.filter(function (r) {
       return r.category === category && r.__row !== modelRow.__row &&
              normalizeModelName(canonicalModelName(r.model_name)) === needle;
@@ -2818,11 +2822,6 @@ function handleModelsRename(payload, token) {
     var equipSheet = getSheet(SHEETS.EQUIPMENT);
     var wrote = writeModelName(modelsSheet, modelRow, equipSheet, readRows(equipSheet), category, code, name);
     var out = { category: category, model_code: code, model_name: name, renamed_units: wrote.units };
-    var canon = canonicalModelName(name);
-    if (canon !== name) {
-      out.warning = "Следующий импорт назовёт эту модель «" + canon + "» — так она записана " +
-        "в списке синонимов. Чтобы название не вернулось, скажите разработчику.";
-    }
     return out;
   } finally {
     lock.releaseLock();
@@ -4166,7 +4165,28 @@ function mapOrderFields(fields) {
 // Сопоставление строки заказа с каталогом. Точное совпадение берём сразу,
 // иначе отдаём похожие и решает человек: ошибка здесь означает, что выдача
 // спишется не с той строки заказа.
-function matchOrderLine(rawName, modelRows) {
+//
+// modelKey — ключ «CAT-код», который сайт шлёт рядом с текстом (payload.items).
+// Имя в тексте — снимок на момент загрузки страницы: после переименования оно
+// не найдётся, а одинаковые имена в разных категориях совпали бы не с той
+// строкой. Поэтому ключ главнее; имя берём текущее из Models. Нет ключа или
+// модели с таким ключом больше нет (удалена, слита) — ищем по имени, как раньше.
+function matchOrderLine(rawName, modelRows, modelKey) {
+  var wanted = String(modelKey || "").trim();
+  var cut = wanted.lastIndexOf("-");
+  if (cut > 0 && /^\d+$/.test(wanted.substring(cut + 1))) {
+    var category = wanted.substring(0, cut);
+    var code = wanted.substring(cut + 1);
+    for (var k = 0; k < modelRows.length; k++) {
+      if (!isModelRow(modelRows[k], category, code)) continue;
+      return {
+        model_code: pad2(Number(modelRows[k].model_code)),
+        category: modelRows[k].category,
+        model_name: String(modelRows[k].model_name || ""),
+        suggestions: [],
+      };
+    }
+  }
   var needle = normalizeModelName(rawName);
   if (!needle) return { model_code: "", category: "", suggestions: [] };
   var suggestions = [];
@@ -6443,10 +6463,16 @@ function handlePublicOrder(payload) {
   // звёздочка в акте на каждой вещи и «Выдано N из M», который не растёт.
   // Не нашлось — строка остаётся как есть, её выдают количеством.
   var modelRows = readRows(getSheet(SHEETS.MODELS));
+  // payload.items = [{line, key}] — ключи моделей от сайта по номерам строк
+  // текста. Старые клиенты (закэшированная страница) поля не шлют — тогда по имени.
+  var keyByLine = {};
+  (Array.isArray(payload.items) ? payload.items : []).forEach(function (it) {
+    if (it && typeof it === "object") keyByLine[Number(it.line)] = String(it.key || "");
+  });
   var items = parsed.items.map(function (line) {
-    var match = matchOrderLine(line.raw_name, modelRows);
+    var match = matchOrderLine(line.raw_name, modelRows, keyByLine[line.line_no]);
     return {
-      line_no: line.line_no, raw_name: line.raw_name, qty: line.qty,
+      line_no: line.line_no, raw_name: match.model_name || line.raw_name, qty: line.qty,
       price: line.price, total: line.total,
       model_code: match.model_code, category: match.category,
     };
