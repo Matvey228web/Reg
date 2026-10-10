@@ -12,7 +12,7 @@
 // «Нашёл» стоит выше «завести новую» намеренно: вещь без наклейки выглядит
 // новой, хотя обычно уже заведена. Заводить второй раз — это ровно то, как в
 // каталоге появились 64 строки Sony A7 IV на 29 заводских номеров
-// (DUPLICATES.md).
+// (docs/archive/DUPLICATES.md).
 
 const InventoryScreen = (() => {
   const STORE_KEY = "mifs_inventory_session";
@@ -223,8 +223,69 @@ const InventoryScreen = (() => {
     created = null;
   }
 
+  // ---- история сверок ----
+  //
+  // Только чтение и в этом же экране: отдельного экрана ради одного списка не
+  // заводим. /inventory/list отдаёт итоги сверок (строки summary), а не
+  // расхождения — подробности по каждой остаются в листе Inventory, поэтому
+  // по нажатию карточка ничего не раскрывает. Журнал читают редко, потому
+  // кэш (Cache) нужен лишь затем, чтобы список показался до ответа сервера.
+  let historyOpen = false;
+  let historyError = "";
+
+  function openHistory() {
+    historyOpen = true;
+    historyError = "";
+    render();
+    Cache.load("inventory_history", "/inventory/list", {}, { fresh: true })
+      .then(() => { historyError = ""; if (historyOpen) render(); })
+      .catch((err) => { historyError = err.message; if (historyOpen) render(); });
+  }
+
+  function historyRowHtml(r) {
+    const expectedN = Number(r.expected_qty) || 0;
+    const foundN = Number(r.found_qty) || 0;
+    const missingN = Math.max(0, expectedN - foundN);
+    return `
+      <div class="card">
+        <div class="card-title">${escapeHtml(r.scope === "all" ? "Весь каталог" : categoryLabel(r.scope))}</div>
+        <div class="card-sub">${escapeHtml(formatDate(r.finished_at || r.started_at))} ·
+          ${escapeHtml(r.staff_name || "—")}</div>
+        <div class="progress-line">Ожидали ${expectedN}, нашли ${foundN}${
+          missingN ? `, не найдено ${missingN}` : ""}</div>
+      </div>`;
+  }
+
+  function renderHistory(box) {
+    const rows = Cache.items("inventory_history");
+    let body;
+    if (rows) {
+      body = rows.length
+        ? rows.map(historyRowHtml).join("")
+        : `<p class="empty">Сверок пока не было.</p>`;
+    } else if (historyError) {
+      body = "";
+    } else {
+      body = skeleton(3);
+    }
+    box.innerHTML = `
+      <button class="btn btn--secondary" id="inventory-history-back">Назад</button>
+      <div class="section">
+        <div class="section-title">История сверок</div>
+        <p class="hint">Последние сверху. Список расхождений по каждой сверке
+        лежит в листе Inventory таблицы.</p>
+        ${historyError ? `<div class="error-box">${escapeHtml(historyError)}</div>` : ""}
+        ${body}
+      </div>`;
+    document.getElementById("inventory-history-back").addEventListener("click", () => {
+      historyOpen = false;
+      render();
+    });
+  }
+
   function render() {
     const box = document.getElementById("inventory-content");
+    if (!session && historyOpen) { renderHistory(box); return; }
     if (!session) { renderStart(box); return; }
     renderSession(box);
   }
@@ -268,7 +329,10 @@ const InventoryScreen = (() => {
         чтобы поймать системное расхождение, — полный обход это вечер.</p>
       </div>
       </div>
-      <button class="btn" id="inventory-start">Начать сверку</button>`;
+      <button class="btn" id="inventory-start">Начать сверку</button>
+      <button class="btn btn--secondary" id="inventory-history-open" style="margin-top:12px;">История сверок</button>`;
+
+    document.getElementById("inventory-history-open").addEventListener("click", openHistory);
 
     document.getElementById("inventory-start").addEventListener("click", () => {
       const scope = document.getElementById("inventory-scope").value;
@@ -831,6 +895,7 @@ const InventoryScreen = (() => {
   // каталога в кэше нет, тянем его один раз здесь же (Cache.ensure, как
   // ensureItemsMap в order.js), а не отправляем человека в «Каталог».
   function onShow() {
+    historyOpen = false;
     load();
     refreshExpected();
     catalogError = "";

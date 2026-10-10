@@ -555,13 +555,13 @@ var Site = (function () {
   // Ручка может быть выключена на стороне склада: тогда приходит отказ, и
   // остаются копирование и письмо. Поэтому кнопка «Отправить» не заменяет их,
   // а стоит рядом.
-  function sendOrder(text) {
+  function sendOrder(text, items) {
     return fetch(BACKEND, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         endpoint: "/public/order",
-        payload: { raw_text: text, trap: "", source_url: location.href },
+        payload: { raw_text: text, items: items || [], trap: "", source_url: location.href },
       }),
     })
       .then(function (res) { return res.json(); })

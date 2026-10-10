@@ -281,7 +281,8 @@ const ItemScreen = (() => {
         // Перенос одной вещи — та же строка под новым номером: patch по
         // старому номеру кладёт поверх неё строку из ответа вместе с item_id.
         Cache.patch("equipment", "item_id", res.old_item_id, res.item);
-        if (res.all_model && body.name) {
+        // stored_name есть, когда название ушло на всю модель — теперь это и без галочки.
+        if (res.stored_name) {
           (Cache.items("equipment") || [])
             .filter((r) => r.category === item.category && String(r.model_code) === String(item.model_code))
             .forEach((r) => Cache.patch("equipment", "item_id", r.item_id, { name: res.item.name }));
@@ -289,7 +290,7 @@ const ItemScreen = (() => {
       }
       // Справочник моделей: название модели сменилось, или вещь переехала в
       // другую категорию (там завелась модель, здесь могла опустеть).
-      if ((res.all_model && body.name) || body.category) Cache.stale("models");
+      if (res.stored_name || body.category) Cache.stale("models");
 
       if (moved) {
         // Карточку открываем под новым номером: старого больше нет. Назад —

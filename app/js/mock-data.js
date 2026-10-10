@@ -859,9 +859,13 @@ const MockAPI = {
         }
         const sameModel = (r) => r.category === from && String(r.model_code) === code;
         const modelRow = MockStore.models.find(sameModel);
-        if (allModel && (has("name") || to)) {
-          if (!modelRow) fail(409, "У вещи нет строки в справочнике моделей — править всю модель нечем.");
-          if (has("name")) {
+        if (allModel && (has("name") || to) && !modelRow) {
+          fail(409, "У вещи нет строки в справочнике моделей — править всю модель нечем.");
+        }
+        // Название принадлежит модели: правка у вещи со строкой модели идёт на всю модель.
+        const nameForModel = has("name") && !!modelRow;
+        {
+          if (nameForModel) {
             const needle = MockStore.normalizeModelName(next.name);
             const clash = MockStore.models.find((m) => m !== modelRow && m.category === from &&
               MockStore.normalizeModelName(m.model_name) === needle);
@@ -871,7 +875,9 @@ const MockAPI = {
 
         const changed = {};
         let renamed = 0;
-        if (allModel && has("name")) {
+        let storedName = null;
+        if (nameForModel) {
+          storedName = next.name;
           const modelRenamed = modelRow.model_name !== next.name;
           modelRow.model_name = next.name;
           MockStore.equipment.filter(sameModel).forEach((r) => {
@@ -913,7 +919,7 @@ const MockAPI = {
           changed.category = { was: from, now: to };
         }
         return { item: mockListRow(item), old_item_id: id, item_id: item.item_id,
-                 all_model: allModel, renamed, moved, changed };
+                 all_model: allModel, renamed, stored_name: storedName, moved, changed };
       }
 
       case "/transaction/checkout": {
@@ -1389,7 +1395,7 @@ const MockAPI = {
       }
 
       case "/model/create": {
-        MockStore.requireToken(token);
+        MockStore.requireAdmin(token);
         return { ...MockStore.findOrCreateModel(body.category, body.model_name) };
       }
 
@@ -1707,14 +1713,20 @@ const MockAPI = {
       case "/inventory/save": {
         const staff_id = MockStore.requireToken(token);
         const found = Object.keys(body.found || {});
-        const rec = {
-          inventory_id: MockStore.inventories.length + 1,
+        const missing = (body.missing || []).length;
+        const unknown = (body.unknown || []).length;
+        const who = MockStore.findStaffById(staff_id) || {};
+        // Строка summary — в том же виде, что в листе Inventory: её же отдаёт
+        // /inventory/list, и экран «История сверок» читает именно эти поля.
+        MockStore.inventories.push({
+          inventory_id: MockStore.inventories.length + 1, kind: "summary",
+          item_id: "", item_name: "", expected_qty: found.length + missing,
+          found_qty: found.length,
           scope: body.scope, started_at: body.started_at, finished_at: body.finished_at,
-          found: found.length, missing: (body.missing || []).length,
-          unknown: (body.unknown || []).length, staff_id,
-        };
-        MockStore.inventories.push(rec);
-        return rec;
+          staff_id, staff_name: who.full_name || "",
+        });
+        return { inventory_id: MockStore.inventories.length, found: found.length,
+                 missing, unknown, written: 1 + missing + unknown };
       }
 
       case "/inventory/list": {

@@ -126,12 +126,13 @@ export default {
     // Ключ берётся до похода в таблицу, по поколению на момент запроса. Иначе
     // чтение, начатое до чужой записи, легло бы под новое поколение уже
     // устаревшим ответом и прожило бы под ним пять минут.
+    const gen = cacheable && endpoint === "/public/catalog" ? await generation(env) : "";
     const key = cacheable ? await cacheKey(env, endpoint, body.payload, who) : "";
 
     if (cacheable && PUBLIC_READS.has(endpoint)) {
       const hit = await env.CACHE.get(key);
       if (hit) return cors(json(JSON.parse(hit), { "X-Mifs-Cache": "hit" }));
-      const old = await env.CACHE.get(staleKey(endpoint, await hash(JSON.stringify(body.payload || {}))));
+      const old = await env.CACHE.get(await publicStaleKey(endpoint, body.payload, gen));
       if (old) {
         ctx.waitUntil(refreshPublic(env, endpoint, body.payload));
         return cors(json(JSON.parse(old), { "X-Mifs-Cache": "stale" }));
@@ -211,7 +212,7 @@ export default {
     if (cacheable && answer.ok && (token || PUBLIC_READS.has(endpoint))) {
       ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answer), { expirationTtl: TTL.cache }));
       if (PUBLIC_READS.has(endpoint)) {
-        ctx.waitUntil(env.CACHE.put(staleKey(endpoint, await hash(JSON.stringify(body.payload || {}))),
+        ctx.waitUntil(env.CACHE.put(await publicStaleKey(endpoint, body.payload, gen),
           JSON.stringify(answer), { expirationTtl: STALE_TTL }));
       }
     }
@@ -1255,8 +1256,18 @@ async function refreshPublic(env, endpoint, payload) {
   if (!upstream.ok || !upstream.envelope.ok) return;
   const value = JSON.stringify(upstream.envelope);
   await env.CACHE.put(await cacheKey(env, endpoint, payload, ""), value, { expirationTtl: TTL.cache });
-  await env.CACHE.put(staleKey(endpoint, await hash(JSON.stringify(payload || {}))), value,
+  await env.CACHE.put(await publicStaleKey(endpoint, payload, await generation(env)), value,
     { expirationTtl: STALE_TTL });
+}
+
+// Долгая копия каталога привязана к поколению: любая запись его меняет, и
+// копия «до записи» перестаёт находиться. Удалять её нельзя — ключ зависит от
+// дат в запросе, и перебрать их нечем. Цена: первый посетитель после записи
+// ждёт таблицу, а не видит старые названия (решение владельца: сайт и склад
+// не расходятся). Остальные публичные чтения живут по-старому.
+async function publicStaleKey(endpoint, payload, gen) {
+  const h = await hash(JSON.stringify(payload || {}));
+  return staleKey(endpoint, endpoint === "/public/catalog" ? h + ":g" + gen : h);
 }
 
 async function bumpGeneration(env) {
