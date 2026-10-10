@@ -12,7 +12,7 @@
 // «Нашёл» стоит выше «завести новую» намеренно: вещь без наклейки выглядит
 // новой, хотя обычно уже заведена. Заводить второй раз — это ровно то, как в
 // каталоге появились 64 строки Sony A7 IV на 29 заводских номеров
-// (DUPLICATES.md).
+// (docs/archive/DUPLICATES.md).
 
 const InventoryScreen = (() => {
   const STORE_KEY = "mifs_inventory_session";

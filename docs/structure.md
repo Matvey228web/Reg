@@ -102,7 +102,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Группа | Ручки |
 |---|---|
 | Вход и сотрудники | `/auth/login`, `/staff/*` |
-| Каталог и вещи | `/item/*` (правка карточки — `/item/update`, номера — `/item/numbers`), `/equipment/list`, `/model*` |
+| Каталог и вещи | `/item/*` (правка карточки — `/item/update`, номера — `/item/numbers`; экран его не зовёт, он нужен тестам и пробе `verify` в `deploy.js`), `/equipment/list`, `/model*` |
 | Выдача и приём | `/transaction/checkout`, `/transaction/checkin`, `/transaction/checkin-batch` (приём всего заказа одним запросом) |
 | Дефекты | `/defect/report`, `/defect/resolve`, `/defects/list` |
 | Заказы | `/order/*`, `/orders/list`, `/students/list`, `/student/history` |
@@ -112,7 +112,7 @@ Properties (таблица) и Worker Secrets (вебхук). В репозит�
 | Моё в аренду (бот) | `/myrent/submit`, `/myrent/takedown`, `/myrent/decide` (только для старых карточек), `/myrent/mine`, `/myrent/update`, `/myrent/remove`, `/myrent/restore` — без сессии, по `bot_key` (отпечаток токена бота, как у вебхука) |
 | Моё в аренду (админ) | `/myrent/admin/list`, `/myrent/admin/save`, `/myrent/admin/photo`, `/myrent/admin/remove`, `/myrent/admin/restore` — по токену, только Admin |
 | Бот | `/notify/*`; `/labels/send` выведена из работы и отвечает `410` с подсказкой — ради старых версий приложения |
-| Сверка | `/inventory/save`, `/inventory/list` |
+| Сверка | `/inventory/save`, `/inventory/list` (экрана истории пока нет) |
 | Админка | `/settings/*`, `/category/*`, `/maintenance` |
 
 ## app — склад
